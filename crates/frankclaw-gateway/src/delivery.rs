@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use frankclaw_core::channel::{ChannelPlugin, OutboundMessage, SendResult};
 use frankclaw_core::error::Result;
+use serde::{Deserialize, Serialize};
 
 use crate::audit::{log_event, log_failure};
 
@@ -26,6 +27,34 @@ pub(crate) struct DeliveryRecord {
     pub(crate) retry_after_secs: Option<u64>,
     pub(crate) error: Option<String>,
     pub(crate) chunks: Vec<DeliveryChunkRecord>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct StoredReplyChunk {
+    pub content: String,
+    pub platform_message_id: Option<String>,
+    pub status: String,
+    pub attempts: usize,
+    pub retry_after_secs: Option<u64>,
+    pub error: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct StoredReplyMetadata {
+    pub channel: String,
+    pub account_id: String,
+    pub recipient_id: String,
+    pub thread_id: Option<String>,
+    pub reply_to: Option<String>,
+    pub content: String,
+    pub platform_message_id: Option<String>,
+    pub status: String,
+    pub attempts: usize,
+    pub retry_after_secs: Option<u64>,
+    pub error: Option<String>,
+    #[serde(default)]
+    pub chunks: Vec<StoredReplyChunk>,
+    pub recorded_at: chrono::DateTime<chrono::Utc>,
 }
 
 pub(crate) async fn deliver_outbound_message(
@@ -186,6 +215,40 @@ async fn send_outbound_chunk(
             }
         }
     }
+}
+
+pub fn last_reply_from_metadata(metadata: &serde_json::Value) -> Option<StoredReplyMetadata> {
+    serde_json::from_value(metadata.get("delivery")?.get("last_reply")?.clone()).ok()
+}
+
+pub fn set_last_reply_in_metadata(
+    metadata: &mut serde_json::Value,
+    reply: &StoredReplyMetadata,
+) -> serde_json::Result<()> {
+    let reply_value = serde_json::to_value(reply)?;
+    match metadata {
+        serde_json::Value::Object(object) => {
+            let delivery = object
+                .entry("delivery".to_string())
+                .or_insert_with(|| serde_json::json!({}));
+            match delivery {
+                serde_json::Value::Object(delivery_object) => {
+                    delivery_object.insert("last_reply".to_string(), reply_value);
+                }
+                _ => {
+                    *delivery = serde_json::json!({ "last_reply": reply_value });
+                }
+            }
+        }
+        _ => {
+            *metadata = serde_json::json!({
+                "delivery": {
+                    "last_reply": reply_value,
+                }
+            });
+        }
+    }
+    Ok(())
 }
 
 fn split_outbound_message(outbound: &OutboundMessage) -> Vec<OutboundMessage> {

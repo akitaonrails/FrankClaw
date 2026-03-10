@@ -100,6 +100,15 @@ pub enum SendResult {
     },
 }
 
+/// Context required to edit an already-sent platform message.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EditMessageTarget {
+    pub account_id: String,
+    pub to: String,
+    pub thread_id: Option<String>,
+    pub platform_message_id: String,
+}
+
 /// Streaming handle for incremental message delivery.
 pub struct StreamHandle {
     pub channel: ChannelId,
@@ -143,7 +152,7 @@ pub trait ChannelPlugin: Send + Sync + 'static {
     /// Edit a previously sent message (if supported).
     async fn edit_message(
         &self,
-        _platform_message_id: &str,
+        _target: &EditMessageTarget,
         _new_text: &str,
     ) -> Result<()> {
         Err(crate::error::FrankClawError::Channel {

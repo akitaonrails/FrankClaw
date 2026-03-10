@@ -247,13 +247,36 @@ impl ChannelPlugin for TelegramChannel {
         }
     }
 
-    async fn edit_message(&self, _platform_message_id: &str, _new_text: &str) -> Result<()> {
-        // Telegram editMessageText requires chat_id — we'd need to store it.
-        // For now, return unsupported. Full implementation needs message context.
-        Err(FrankClawError::Channel {
+    async fn edit_message(&self, target: &EditMessageTarget, new_text: &str) -> Result<()> {
+        let body = build_edit_body(target, new_text)?;
+
+        let resp = self
+            .client
+            .post(self.api_url("editMessageText"))
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| FrankClawError::Channel {
+                channel: self.id(),
+                msg: format!("edit failed: {e}"),
+            })?;
+
+        let data: serde_json::Value = resp.json().await.map_err(|e| FrankClawError::Channel {
             channel: self.id(),
-            msg: "edit requires chat context (not yet implemented)".into(),
-        })
+            msg: format!("invalid response: {e}"),
+        })?;
+
+        if data["ok"].as_bool() == Some(true) {
+            Ok(())
+        } else {
+            Err(FrankClawError::Channel {
+                channel: self.id(),
+                msg: data["description"]
+                    .as_str()
+                    .unwrap_or("unknown telegram edit error")
+                    .to_string(),
+            })
+        }
     }
 }
 
@@ -277,6 +300,24 @@ fn build_send_body(msg: &OutboundMessage) -> serde_json::Value {
     }
 
     body
+}
+
+fn build_edit_body(target: &EditMessageTarget, new_text: &str) -> Result<serde_json::Value> {
+    let (chat_id, _) = parse_target_thread(target.thread_id.as_deref(), &target.to);
+    let message_id = target
+        .platform_message_id
+        .parse::<i64>()
+        .map_err(|_| FrankClawError::Channel {
+            channel: ChannelId::new("telegram"),
+            msg: "telegram edit requires a numeric platform message id".into(),
+        })?;
+
+    Ok(serde_json::json!({
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "text": new_text,
+        "parse_mode": "Markdown",
+    }))
 }
 
 fn parse_target_thread(thread_id: Option<&str>, fallback_to: &str) -> (String, Option<i64>) {
@@ -350,5 +391,23 @@ mod tests {
 
         assert_eq!(body["chat_id"], serde_json::json!("42"));
         assert!(body.get("message_thread_id").is_none());
+    }
+
+    #[test]
+    fn build_edit_body_uses_thread_target_chat_id() {
+        let body = build_edit_body(
+            &EditMessageTarget {
+                account_id: "default".into(),
+                to: "42".into(),
+                thread_id: Some("-100123:topic:7".into()),
+                platform_message_id: "99".into(),
+            },
+            "updated",
+        )
+        .expect("edit body should build");
+
+        assert_eq!(body["chat_id"], serde_json::json!("-100123"));
+        assert_eq!(body["message_id"], serde_json::json!(99));
+        assert_eq!(body["text"], serde_json::json!("updated"));
     }
 }

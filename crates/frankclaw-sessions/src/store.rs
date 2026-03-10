@@ -123,6 +123,54 @@ impl SqliteSessionStore {
             msg: format!("pool error: {e}"),
         })
     }
+
+    pub async fn rewrite_last_assistant_message(
+        &self,
+        key: &SessionKey,
+        content: &str,
+    ) -> Result<bool> {
+        let conn = self.get_conn()?;
+        let key_str = key.as_str().to_string();
+        let encrypted_content = self.encrypt_content(content)?;
+        let role = serde_json::to_string(&frankclaw_core::types::Role::Assistant)
+            .unwrap_or_else(|_| "\"assistant\"".to_string());
+
+        tokio::task::spawn_blocking(move || {
+            let seq = conn
+                .query_row(
+                    "SELECT seq FROM transcript
+                     WHERE session_key = ?1 AND role = ?2
+                     ORDER BY seq DESC
+                     LIMIT 1",
+                    params![key_str, role],
+                    |row| row.get::<_, i64>(0),
+                )
+                .optional()
+                .map_err(|e| FrankClawError::SessionStorage { msg: e.to_string() })?;
+
+            let Some(seq) = seq else {
+                return Ok(false);
+            };
+
+            conn.execute(
+                "UPDATE transcript SET content = ?1, timestamp = ?2
+                 WHERE session_key = ?3 AND seq = ?4",
+                params![
+                    encrypted_content,
+                    Utc::now().to_rfc3339(),
+                    key_str,
+                    seq,
+                ],
+            )
+            .map_err(|e| FrankClawError::SessionStorage { msg: e.to_string() })?;
+
+            Ok(true)
+        })
+        .await
+        .map_err(|e| FrankClawError::SessionStorage {
+            msg: format!("task join error: {e}"),
+        })?
+    }
 }
 
 #[async_trait]
@@ -481,6 +529,82 @@ impl SessionStore for SqliteSessionStore {
         .map_err(|e| FrankClawError::SessionStorage {
             msg: format!("task join error: {e}"),
         })?
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use frankclaw_core::session::{SessionEntry, SessionScoping, SessionStore, TranscriptEntry};
+    use frankclaw_core::types::{AgentId, ChannelId, Role, SessionKey};
+
+    #[tokio::test]
+    async fn rewrite_last_assistant_message_updates_latest_assistant_turn() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "frankclaw-sessions-test-{}",
+            Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        std::fs::create_dir_all(&temp_dir).expect("temp dir should exist");
+        let path = temp_dir.join("sessions.db");
+        let store = SqliteSessionStore::open(&path, None).expect("store should open");
+        let key = SessionKey::from_raw("agent:main:test");
+
+        store
+            .upsert(&SessionEntry {
+                key: key.clone(),
+                agent_id: AgentId::default_agent(),
+                channel: ChannelId::new("web"),
+                account_id: "default".into(),
+                scoping: SessionScoping::PerChannelPeer,
+                created_at: Utc::now(),
+                last_message_at: Some(Utc::now()),
+                thread_id: None,
+                metadata: serde_json::json!({}),
+            })
+            .await
+            .expect("session should upsert");
+        store
+            .append_transcript(
+                &key,
+                &TranscriptEntry {
+                    seq: 1,
+                    role: Role::User,
+                    content: "hello".into(),
+                    timestamp: Utc::now(),
+                    metadata: None,
+                },
+            )
+            .await
+            .expect("user transcript should append");
+        store
+            .append_transcript(
+                &key,
+                &TranscriptEntry {
+                    seq: 2,
+                    role: Role::Assistant,
+                    content: "old".into(),
+                    timestamp: Utc::now(),
+                    metadata: None,
+                },
+            )
+            .await
+            .expect("assistant transcript should append");
+
+        let updated = store
+            .rewrite_last_assistant_message(&key, "new")
+            .await
+            .expect("assistant rewrite should succeed");
+        assert!(updated);
+
+        let transcript = store
+            .get_transcript(&key, 10, None)
+            .await
+            .expect("transcript should load");
+        assert_eq!(transcript.len(), 2);
+        assert_eq!(transcript[1].content, "new");
+
+        let _ = std::fs::remove_file(path);
+        let _ = std::fs::remove_dir_all(temp_dir);
     }
 }
 

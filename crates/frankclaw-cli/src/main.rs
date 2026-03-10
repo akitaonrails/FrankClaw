@@ -74,6 +74,17 @@ enum Command {
         model: Option<String>,
     },
 
+    /// Edit the last tracked assistant reply for a session.
+    MessageEditLast {
+        /// Session key whose last assistant reply should be edited.
+        #[arg(long)]
+        session: String,
+
+        /// Replacement text.
+        #[arg(long)]
+        text: String,
+    },
+
     /// List available models from configured providers.
     ModelsList,
 
@@ -275,6 +286,68 @@ async fn main() -> anyhow::Result<()> {
             println!("Model:   {}", response.model_id);
             println!();
             println!("{}", response.content);
+        }
+
+        Command::MessageEditLast { session, text } => {
+            use frankclaw_core::channel::EditMessageTarget;
+            use frankclaw_core::session::SessionStore;
+
+            let config = load_config(cli.config.as_deref(), &state_dir)?;
+            config.validate()?;
+            let sessions = open_sessions(&state_dir)?;
+            let session_key = frankclaw_core::types::SessionKey::from_raw(session);
+            let mut entry = sessions
+                .get(&session_key)
+                .await?
+                .context("session not found")?;
+            let mut last_reply = frankclaw_gateway::delivery::last_reply_from_metadata(&entry.metadata)
+                .context("session has no tracked delivery metadata")?;
+
+            if last_reply.chunks.len() > 1 {
+                anyhow::bail!("editing chunked replies is not supported yet");
+            }
+
+            let platform_message_id = last_reply
+                .platform_message_id
+                .clone()
+                .context("tracked reply is missing platform_message_id")?;
+
+            let channels = frankclaw_channels::load_from_config(&config)
+                .context("failed to load configured channels")?;
+            let channel = channels
+                .get(&entry.channel)
+                .cloned()
+                .with_context(|| format!("channel '{}' is not configured", entry.channel))?;
+
+            channel
+                .edit_message(
+                    &EditMessageTarget {
+                        account_id: last_reply.account_id.clone(),
+                        to: last_reply.recipient_id.clone(),
+                        thread_id: last_reply.thread_id.clone(),
+                        platform_message_id,
+                    },
+                    &text,
+                )
+                .await?;
+
+            let rewritten = sessions
+                .rewrite_last_assistant_message(&session_key, &text)
+                .await?;
+            if !rewritten {
+                anyhow::bail!("session has no assistant turn to rewrite");
+            }
+
+            last_reply.content = text.clone();
+            if let Some(first_chunk) = last_reply.chunks.first_mut() {
+                first_chunk.content = text.clone();
+            }
+
+            frankclaw_gateway::delivery::set_last_reply_in_metadata(&mut entry.metadata, &last_reply)
+                .context("failed to update delivery metadata")?;
+            sessions.upsert(&entry).await?;
+
+            println!("Edited last reply for session {}.", session_key);
         }
 
         Command::ModelsList => {

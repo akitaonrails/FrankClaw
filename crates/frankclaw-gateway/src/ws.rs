@@ -164,6 +164,12 @@ async fn dispatch_method(
         Method::SessionsList => {
             crate::methods::sessions_list(state, request).await
         }
+        Method::SessionsGet => {
+            crate::methods::sessions_get(state, request).await
+        }
+        Method::SessionsReset => {
+            crate::methods::sessions_reset(state, request).await
+        }
         Method::ChatHistory => {
             crate::methods::chat_history(state, request).await
         }

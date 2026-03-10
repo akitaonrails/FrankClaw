@@ -27,7 +27,7 @@ use frankclaw_sessions::SqliteSessionStore;
 
 use crate::auth::{authenticate, validate_bind_auth, AuthCredential};
 use crate::audit::{log_event, log_failure};
-use crate::delivery::{DeliveryRecord, deliver_outbound_message};
+use crate::delivery::{DeliveryRecord, StoredReplyChunk, StoredReplyMetadata, deliver_outbound_message, set_last_reply_in_metadata};
 use crate::pairing::PairingStore;
 use crate::rate_limit::AuthRateLimiter;
 use crate::state::GatewayState;
@@ -564,41 +564,36 @@ async fn persist_delivery_metadata(
         return Ok(());
     };
 
-    let delivery_metadata = serde_json::json!({
-        "last_reply": {
-            "channel": inbound.channel.as_str(),
-            "account_id": inbound.account_id.clone(),
-            "recipient_id": inbound.sender_id.clone(),
-            "thread_id": inbound.thread_id.clone(),
-            "reply_to": inbound.platform_message_id.clone(),
-            "content": content,
-            "platform_message_id": delivery.platform_message_id.clone(),
-            "status": delivery.status,
-            "attempts": delivery.attempts,
-            "retry_after_secs": delivery.retry_after_secs,
-            "error": delivery.error.clone(),
-            "chunks": delivery.chunks.iter().map(|chunk| serde_json::json!({
-                "content": chunk.text,
-                "platform_message_id": chunk.platform_message_id,
-                "status": chunk.status,
-                "attempts": chunk.attempts,
-                "retry_after_secs": chunk.retry_after_secs,
-                "error": chunk.error,
-            })).collect::<Vec<_>>(),
-            "recorded_at": chrono::Utc::now(),
-        }
-    });
-
-    match &mut entry.metadata {
-        serde_json::Value::Object(object) => {
-            object.insert("delivery".to_string(), delivery_metadata);
-        }
-        _ => {
-            entry.metadata = serde_json::json!({
-                "delivery": delivery_metadata,
-            });
-        }
-    }
+    let delivery_metadata = StoredReplyMetadata {
+        channel: inbound.channel.as_str().to_string(),
+        account_id: inbound.account_id.clone(),
+        recipient_id: inbound.sender_id.clone(),
+        thread_id: inbound.thread_id.clone(),
+        reply_to: inbound.platform_message_id.clone(),
+        content: content.to_string(),
+        platform_message_id: delivery.platform_message_id.clone(),
+        status: delivery.status.to_string(),
+        attempts: delivery.attempts,
+        retry_after_secs: delivery.retry_after_secs,
+        error: delivery.error.clone(),
+        chunks: delivery
+            .chunks
+            .iter()
+            .map(|chunk| StoredReplyChunk {
+                content: chunk.text.clone(),
+                platform_message_id: chunk.platform_message_id.clone(),
+                status: chunk.status.to_string(),
+                attempts: chunk.attempts,
+                retry_after_secs: chunk.retry_after_secs,
+                error: chunk.error.clone(),
+            })
+            .collect::<Vec<_>>(),
+        recorded_at: chrono::Utc::now(),
+    };
+    set_last_reply_in_metadata(&mut entry.metadata, &delivery_metadata)
+        .map_err(|e| frankclaw_core::error::FrankClawError::SessionStorage {
+            msg: format!("failed to serialize delivery metadata: {e}"),
+        })?;
 
     entry.thread_id = inbound.thread_id.clone();
     entry.last_message_at = Some(chrono::Utc::now());
