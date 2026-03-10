@@ -225,6 +225,16 @@ impl Runtime {
         explicit: Option<SessionKey>,
     ) -> Result<SessionKey> {
         if let Some(session_key) = explicit {
+            if let Some((session_agent_id, _, _)) = session_key.parse() {
+                if &session_agent_id != agent_id {
+                    return Err(FrankClawError::InvalidRequest {
+                        msg: format!(
+                            "session '{}' does not belong to agent '{}'",
+                            session_key, agent_id
+                        ),
+                    });
+                }
+            }
             return Ok(session_key);
         }
 

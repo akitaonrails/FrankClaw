@@ -180,6 +180,7 @@ async fn main() -> anyhow::Result<()> {
                 .context("failed to initialize runtime")?,
             );
             let pairing = open_pairing_store(&state_dir)?;
+            let cron = open_cron_service(&state_dir)?;
 
             info!(
                 port = config.gateway.port,
@@ -187,7 +188,7 @@ async fn main() -> anyhow::Result<()> {
                 "starting frankclaw gateway"
             );
 
-            frankclaw_gateway::server::run(config, sessions, runtime, pairing).await?;
+            frankclaw_gateway::server::run(config, sessions, runtime, pairing, cron).await?;
         }
 
         Command::GenToken => {
@@ -453,6 +454,16 @@ fn open_pairing_store(
     Ok(std::sync::Arc::new(
         frankclaw_gateway::pairing::PairingStore::open(&path)
             .context("failed to open pairing store")?,
+    ))
+}
+
+fn open_cron_service(
+    state_dir: &std::path::Path,
+) -> anyhow::Result<std::sync::Arc<frankclaw_cron::CronService>> {
+    let path = state_dir.join("cron-jobs.json");
+    Ok(std::sync::Arc::new(
+        frankclaw_cron::CronService::open(&path)
+            .context("failed to open cron store")?,
     ))
 }
 

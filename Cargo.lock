@@ -786,6 +786,7 @@ dependencies = [
  "dashmap",
  "frankclaw-channels",
  "frankclaw-core",
+ "frankclaw-cron",
  "frankclaw-crypto",
  "frankclaw-runtime",
  "frankclaw-sessions",

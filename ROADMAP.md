@@ -69,7 +69,7 @@ Acceptance:
 - [x] Start `web` as a first-party local channel
 - [x] Start `telegram` with runtime-backed inbound processing
 - [x] Route inbound channel messages through the same turn executor
-- [ ] Persist reply metadata needed for retries and edits
+- [x] Persist reply metadata needed for retries and edits
 
 Acceptance:
 
@@ -82,7 +82,7 @@ Acceptance:
 - [x] Group mention gating by default
 - [x] Per-channel-peer session policy wired into runtime
 - [x] Inbound message size limits and normalization
-- [ ] Outbound retry / rate-limit behavior
+- [x] Outbound retry / rate-limit behavior
 
 Acceptance:
 
@@ -93,8 +93,8 @@ Acceptance:
 
 - [x] Load a master key from CLI / environment
 - [x] Enable transcript encryption in real startup
-- [ ] Wire session maintenance / pruning
-- [ ] Add structured security audit logs
+- [x] Wire session maintenance / pruning
+- [x] Add structured security audit logs
 
 Acceptance:
 
@@ -103,9 +103,9 @@ Acceptance:
 
 ### M5: Cron Reuse
 
-- [ ] Persist cron jobs
-- [ ] Execute cron through the shared turn executor
-- [ ] Add strict session targeting rules
+- [x] Persist cron jobs
+- [x] Execute cron through the shared turn executor
+- [x] Add strict session targeting rules
 
 Acceptance:
 
@@ -132,4 +132,4 @@ FrankClaw is ready for a v1 parity claim only when all of the following are true
 - session history survives restart
 - pairing works
 - unsupported OpenClaw surfaces are explicitly out of scope, not half-exposed
-- unit, integration, and e2e tests cover the supported flow
+- unit tests cover the supported flow today; integration and e2e coverage are still the next release gate

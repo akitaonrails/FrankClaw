@@ -1,4 +1,5 @@
 use std::net::SocketAddr;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use axum::{
@@ -17,15 +18,22 @@ use tower_http::{
 };
 use tracing::info;
 
-use frankclaw_core::channel::InboundMessage;
+use frankclaw_core::channel::{InboundMessage, OutboundMessage, SendResult};
 use frankclaw_core::config::{BindMode, FrankClawConfig};
+use frankclaw_core::session::SessionStore;
+use frankclaw_cron::{CronJob, CronService};
 use frankclaw_runtime::Runtime;
 use frankclaw_sessions::SqliteSessionStore;
 
 use crate::auth::{authenticate, validate_bind_auth, AuthCredential};
+use crate::audit::{log_event, log_failure};
 use crate::pairing::PairingStore;
 use crate::rate_limit::AuthRateLimiter;
 use crate::state::GatewayState;
+
+const MAX_OUTBOUND_ATTEMPTS: usize = 3;
+const MAX_RETRY_DELAY_SECS: u64 = 30;
+const SESSION_MAINTENANCE_INTERVAL_SECS: u64 = 15 * 60;
 
 /// Build and start the gateway server.
 pub async fn run(
@@ -33,6 +41,7 @@ pub async fn run(
     sessions: Arc<SqliteSessionStore>,
     runtime: Arc<Runtime>,
     pairing: Arc<PairingStore>,
+    cron: Arc<CronService>,
 ) -> anyhow::Result<()> {
     // Validate that bind + auth combination is safe.
     validate_bind_auth(&config.gateway.bind, &config.gateway.auth)?;
@@ -42,6 +51,8 @@ pub async fn run(
     let channels = Arc::new(frankclaw_channels::load_from_config(&config)?);
     let state = GatewayState::new(config, sessions, runtime, channels, pairing);
     start_channel_runtime(state.clone());
+    start_session_maintenance(state.clone());
+    start_cron_runtime(state.clone(), cron).await?;
 
     let app = build_router(state.clone(), rate_limiter);
 
@@ -122,6 +133,14 @@ async fn ws_handler(
             .into_response()
         }
         Err(e) => {
+            log_failure(
+                "gateway.ws_auth",
+                serde_json::json!({
+                    "remote_addr": addr.to_string(),
+                    "status_code": e.status_code(),
+                    "reason": e.to_string(),
+                }),
+            );
             let status = StatusCode::from_u16(e.status_code()).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
             (status, e.to_string()).into_response()
         }
@@ -316,12 +335,22 @@ fn require_http_auth(
         &state.rate_limiter,
     ) {
         Ok(_) => Ok(()),
-        Err(err) => Err((
-            StatusCode::from_u16(err.status_code())
-                .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
-            err.to_string(),
-        )
-            .into_response()),
+        Err(err) => {
+            log_failure(
+                "gateway.http_auth",
+                serde_json::json!({
+                    "remote_addr": addr.to_string(),
+                    "status_code": err.status_code(),
+                    "reason": err.to_string(),
+                }),
+            );
+            Err((
+                StatusCode::from_u16(err.status_code())
+                    .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
+                err.to_string(),
+            )
+                .into_response())
+        }
     }
 }
 
@@ -342,6 +371,47 @@ fn start_channel_runtime(state: Arc<GatewayState>) {
         while let Some(inbound) = inbound_rx.recv().await {
             if let Err(err) = process_inbound_message(state.clone(), inbound).await {
                 tracing::warn!(error = %err, "inbound message processing failed");
+            }
+        }
+    });
+}
+
+fn start_session_maintenance(state: Arc<GatewayState>) {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(
+            SESSION_MAINTENANCE_INTERVAL_SECS,
+        ));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+        loop {
+            tokio::select! {
+                _ = interval.tick() => {
+                    let pruning = state.current_config().session.pruning.clone();
+                    match state.sessions.maintenance(&pruning).await {
+                        Ok(pruned) => {
+                            if pruned > 0 {
+                                log_event(
+                                    "session.maintenance",
+                                    "success",
+                                    serde_json::json!({
+                                        "pruned_sessions": pruned,
+                                        "max_age_days": pruning.max_age_days,
+                                        "max_sessions_per_agent": pruning.max_sessions_per_agent,
+                                    }),
+                                );
+                            }
+                        }
+                        Err(err) => {
+                            log_failure(
+                                "session.maintenance",
+                                serde_json::json!({
+                                    "reason": err.to_string(),
+                                }),
+                            );
+                        }
+                    }
+                }
+                _ = state.shutdown.cancelled() => break,
             }
         }
     });
@@ -389,7 +459,7 @@ async fn process_inbound_message(
                     )?;
                     if let Some(channel) = state.channel(&inbound.channel) {
                         let _ = channel
-                            .send(frankclaw_core::channel::OutboundMessage {
+                            .send(OutboundMessage {
                                 channel: inbound.channel.clone(),
                                 account_id: inbound.account_id.clone(),
                                 to: inbound.sender_id.clone(),
@@ -403,6 +473,15 @@ async fn process_inbound_message(
                             })
                             .await;
                     }
+                    log_event(
+                        "pairing.pending",
+                        "created",
+                        serde_json::json!({
+                            "channel": inbound.channel.as_str(),
+                            "account_id": inbound.account_id.clone(),
+                            "sender_id": inbound.sender_id.clone(),
+                        }),
+                    );
                     return Ok(());
                 }
             }
@@ -424,17 +503,24 @@ async fn process_inbound_message(
         .await?;
 
     if let Some(channel) = state.channel(&inbound.channel) {
-        let _ = channel
-            .send(frankclaw_core::channel::OutboundMessage {
-                channel: inbound.channel.clone(),
-                account_id: inbound.account_id.clone(),
-                to: inbound.sender_id.clone(),
-                thread_id: inbound.thread_id.clone(),
-                text: response.content.clone(),
-                attachments: Vec::new(),
-                reply_to: inbound.platform_message_id.clone(),
-            })
-            .await?;
+        let outbound = OutboundMessage {
+            channel: inbound.channel.clone(),
+            account_id: inbound.account_id.clone(),
+            to: inbound.sender_id.clone(),
+            thread_id: inbound.thread_id.clone(),
+            text: response.content.clone(),
+            attachments: Vec::new(),
+            reply_to: inbound.platform_message_id.clone(),
+        };
+        let delivery = deliver_outbound_message(channel, outbound).await?;
+        persist_delivery_metadata(
+            state.sessions.as_ref(),
+            &session_key,
+            &inbound,
+            &response.content,
+            &delivery,
+        )
+        .await?;
     }
 
     let event = frankclaw_core::protocol::Frame::Event(
@@ -452,6 +538,301 @@ async fn process_inbound_message(
         let _ = state.broadcast.send(json);
     }
 
+    Ok(())
+}
+
+#[derive(Clone)]
+struct DeliveryRecord {
+    status: &'static str,
+    platform_message_id: Option<String>,
+    attempts: usize,
+    retry_after_secs: Option<u64>,
+    error: Option<String>,
+}
+
+async fn deliver_outbound_message(
+    channel: Arc<dyn frankclaw_core::channel::ChannelPlugin>,
+    outbound: OutboundMessage,
+) -> frankclaw_core::error::Result<DeliveryRecord> {
+    let mut attempts = 0usize;
+    let mut last_retry_after = None;
+
+    loop {
+        attempts += 1;
+        match channel.send(outbound.clone()).await {
+            Ok(SendResult::Sent { platform_message_id }) => {
+                log_event(
+                    "channel.send",
+                    "success",
+                    serde_json::json!({
+                        "channel": outbound.channel.as_str(),
+                        "account_id": outbound.account_id,
+                        "recipient": outbound.to,
+                        "attempts": attempts,
+                        "platform_message_id": platform_message_id,
+                    }),
+                );
+                return Ok(DeliveryRecord {
+                    status: "sent",
+                    platform_message_id: Some(platform_message_id),
+                    attempts,
+                    retry_after_secs: last_retry_after,
+                    error: None,
+                });
+            }
+            Ok(SendResult::RateLimited { retry_after_secs }) => {
+                last_retry_after = retry_after_secs;
+                if attempts >= MAX_OUTBOUND_ATTEMPTS {
+                    log_failure(
+                        "channel.send",
+                        serde_json::json!({
+                            "channel": outbound.channel.as_str(),
+                            "account_id": outbound.account_id,
+                            "recipient": outbound.to,
+                            "attempts": attempts,
+                            "reason": "rate_limited",
+                            "retry_after_secs": retry_after_secs,
+                        }),
+                    );
+                    return Ok(DeliveryRecord {
+                        status: "rate_limited",
+                        platform_message_id: None,
+                        attempts,
+                        retry_after_secs,
+                        error: Some("rate limited".to_string()),
+                    });
+                }
+
+                let delay_secs = retry_after_secs
+                    .unwrap_or(attempts as u64)
+                    .clamp(1, MAX_RETRY_DELAY_SECS);
+                tokio::time::sleep(std::time::Duration::from_secs(delay_secs)).await;
+            }
+            Ok(SendResult::Failed { reason }) => {
+                if attempts >= MAX_OUTBOUND_ATTEMPTS {
+                    log_failure(
+                        "channel.send",
+                        serde_json::json!({
+                            "channel": outbound.channel.as_str(),
+                            "account_id": outbound.account_id,
+                            "recipient": outbound.to,
+                            "attempts": attempts,
+                            "reason": reason,
+                        }),
+                    );
+                    return Ok(DeliveryRecord {
+                        status: "failed",
+                        platform_message_id: None,
+                        attempts,
+                        retry_after_secs: None,
+                        error: Some(reason),
+                    });
+                }
+
+                tokio::time::sleep(std::time::Duration::from_secs(attempts as u64)).await;
+            }
+            Err(err) => {
+                if attempts >= MAX_OUTBOUND_ATTEMPTS {
+                    let error_text = err.to_string();
+                    log_failure(
+                        "channel.send",
+                        serde_json::json!({
+                            "channel": outbound.channel.as_str(),
+                            "account_id": outbound.account_id,
+                            "recipient": outbound.to,
+                            "attempts": attempts,
+                            "reason": error_text,
+                        }),
+                    );
+                    return Err(err);
+                }
+
+                tokio::time::sleep(std::time::Duration::from_secs(attempts as u64)).await;
+            }
+        }
+    }
+}
+
+async fn persist_delivery_metadata(
+    sessions: &SqliteSessionStore,
+    session_key: &frankclaw_core::types::SessionKey,
+    inbound: &InboundMessage,
+    content: &str,
+    delivery: &DeliveryRecord,
+) -> frankclaw_core::error::Result<()> {
+    let Some(mut entry) = sessions.get(session_key).await? else {
+        return Ok(());
+    };
+
+    let delivery_metadata = serde_json::json!({
+        "last_reply": {
+            "channel": inbound.channel.as_str(),
+            "account_id": inbound.account_id.clone(),
+            "recipient_id": inbound.sender_id.clone(),
+            "thread_id": inbound.thread_id.clone(),
+            "reply_to": inbound.platform_message_id.clone(),
+            "content": content,
+            "platform_message_id": delivery.platform_message_id.clone(),
+            "status": delivery.status,
+            "attempts": delivery.attempts,
+            "retry_after_secs": delivery.retry_after_secs,
+            "error": delivery.error.clone(),
+            "recorded_at": chrono::Utc::now(),
+        }
+    });
+
+    match &mut entry.metadata {
+        serde_json::Value::Object(object) => {
+            object.insert("delivery".to_string(), delivery_metadata);
+        }
+        _ => {
+            entry.metadata = serde_json::json!({
+                "delivery": delivery_metadata,
+            });
+        }
+    }
+
+    entry.thread_id = inbound.thread_id.clone();
+    entry.last_message_at = Some(chrono::Utc::now());
+    sessions.upsert(&entry).await?;
+    Ok(())
+}
+
+async fn start_cron_runtime(
+    state: Arc<GatewayState>,
+    cron: Arc<CronService>,
+) -> anyhow::Result<()> {
+    let config = state.current_config();
+    let jobs = parse_cron_jobs(&config)?;
+    cron.sync_jobs(jobs).await?;
+    if !config.cron.enabled {
+        return Ok(());
+    }
+
+    let runner = {
+        let state = state.clone();
+        Arc::new(move |job: CronJob| {
+            let state = state.clone();
+            Box::pin(async move {
+                log_event(
+                    "cron.run",
+                    "started",
+                    serde_json::json!({
+                        "job_id": job.id,
+                        "agent_id": job.agent_id.as_str(),
+                        "session_key": job.session_key.as_str(),
+                    }),
+                );
+
+                match state
+                    .runtime
+                    .chat(frankclaw_runtime::ChatRequest {
+                        agent_id: Some(job.agent_id.clone()),
+                        session_key: Some(job.session_key.clone()),
+                        message: job.prompt.clone(),
+                        model_id: None,
+                        max_tokens: None,
+                        temperature: None,
+                    })
+                    .await
+                {
+                    Ok(response) => {
+                        let event = frankclaw_core::protocol::Frame::Event(
+                            frankclaw_core::protocol::EventFrame {
+                                event: frankclaw_core::protocol::EventType::CronRun,
+                                payload: serde_json::json!({
+                                    "job_id": job.id,
+                                    "agent_id": job.agent_id.as_str(),
+                                    "session_key": response.session_key.as_str(),
+                                    "model_id": response.model_id,
+                                }),
+                            },
+                        );
+                        if let Ok(json) = serde_json::to_string(&event) {
+                            let _ = state.broadcast.send(json);
+                        }
+                        log_event(
+                            "cron.run",
+                            "success",
+                            serde_json::json!({
+                                "job_id": job.id,
+                                "agent_id": job.agent_id.as_str(),
+                                "session_key": response.session_key.as_str(),
+                                "model_id": response.model_id,
+                            }),
+                        );
+                        Ok(())
+                    }
+                    Err(err) => {
+                        log_failure(
+                            "cron.run",
+                            serde_json::json!({
+                                "job_id": job.id,
+                                "agent_id": job.agent_id.as_str(),
+                                "session_key": job.session_key.as_str(),
+                                "reason": err.to_string(),
+                            }),
+                        );
+                        Err(err)
+                    }
+                }
+            }) as Pin<Box<dyn Future<Output = frankclaw_core::error::Result<()>> + Send>>
+        })
+    };
+    cron.start(runner).await;
+
+    tokio::spawn(async move {
+        state.shutdown.cancelled().await;
+        cron.stop();
+    });
+
+    Ok(())
+}
+
+fn parse_cron_jobs(config: &FrankClawConfig) -> frankclaw_core::error::Result<Vec<CronJob>> {
+    config
+        .cron
+        .jobs
+        .iter()
+        .cloned()
+        .map(|value| {
+            let parsed = serde_json::from_value::<CronJob>(value).map_err(|err| {
+                frankclaw_core::error::FrankClawError::ConfigValidation {
+                    msg: format!("invalid cron job configuration: {err}"),
+                }
+            })?;
+            validate_cron_job(&parsed)?;
+            Ok(parsed)
+        })
+        .collect()
+}
+
+fn validate_cron_job(job: &CronJob) -> frankclaw_core::error::Result<()> {
+    if job.id.trim().is_empty() {
+        return Err(frankclaw_core::error::FrankClawError::ConfigValidation {
+            msg: "cron job id cannot be empty".into(),
+        });
+    }
+    if job.prompt.trim().is_empty() {
+        return Err(frankclaw_core::error::FrankClawError::ConfigValidation {
+            msg: format!("cron job '{}' prompt cannot be empty", job.id),
+        });
+    }
+    let Some((session_agent_id, _, _)) = job.session_key.parse() else {
+        return Err(frankclaw_core::error::FrankClawError::ConfigValidation {
+            msg: format!("cron job '{}' has an invalid session key", job.id),
+        });
+    };
+    if session_agent_id.as_str() != job.agent_id.as_str() {
+        return Err(frankclaw_core::error::FrankClawError::ConfigValidation {
+            msg: format!(
+                "cron job '{}' session key agent '{}' does not match '{}'",
+                job.id,
+                session_agent_id,
+                job.agent_id
+            ),
+        });
+    }
     Ok(())
 }
 
