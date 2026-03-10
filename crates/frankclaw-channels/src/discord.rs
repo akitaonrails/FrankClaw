@@ -203,7 +203,7 @@ impl ChannelPlugin for DiscordChannel {
         ChannelCapabilities {
             threads: true,
             groups: true,
-            attachments: false,
+            attachments: true,
             edit: false,
             delete: false,
             reactions: false,
@@ -362,6 +362,24 @@ fn parse_message_create(
     let sender_name = payload["author"]["username"].as_str().map(str::to_string);
     let content = payload["content"].as_str().map(str::to_string);
     let is_group = payload.get("guild_id").is_some();
+    let attachments = payload["attachments"]
+        .as_array()
+        .map(|attachments| {
+            attachments
+                .iter()
+                .map(|attachment| InboundAttachment {
+                    media_id: None,
+                    mime_type: attachment["content_type"]
+                        .as_str()
+                        .unwrap_or("application/octet-stream")
+                        .to_string(),
+                    filename: attachment["filename"].as_str().map(str::to_string),
+                    size_bytes: attachment["size"].as_u64(),
+                    url: attachment["url"].as_str().map(str::to_string),
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
     let timestamp = payload["timestamp"]
         .as_str()
         .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
@@ -385,16 +403,26 @@ fn parse_message_create(
         is_group,
         is_mention,
         text: content,
-        attachments: Vec::new(),
+        attachments,
         platform_message_id: payload["id"].as_str().map(str::to_string),
         timestamp,
     })
 }
 
 fn build_send_body(msg: &OutboundMessage) -> serde_json::Value {
-    serde_json::json!({
+    let mut body = serde_json::json!({
         "content": msg.text,
+        "allowed_mentions": {
+            "parse": []
+        }
     })
+    ;
+    if let Some(reply_to) = &msg.reply_to {
+        body["message_reference"] = serde_json::json!({
+            "message_id": reply_to
+        });
+    }
+    body
 }
 
 #[cfg(test)]
@@ -460,5 +488,56 @@ mod tests {
         });
 
         assert_eq!(body["content"], serde_json::json!("hello"));
+    }
+
+    #[test]
+    fn build_send_body_includes_reply_reference_when_present() {
+        let body = build_send_body(&OutboundMessage {
+            channel: ChannelId::new("discord"),
+            account_id: "default".into(),
+            to: "chan-1".into(),
+            thread_id: None,
+            text: "hello".into(),
+            attachments: Vec::new(),
+            reply_to: Some("msg-99".into()),
+        });
+
+        assert_eq!(
+            body["message_reference"]["message_id"],
+            serde_json::json!("msg-99")
+        );
+        assert_eq!(body["allowed_mentions"]["parse"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn parse_message_create_collects_attachment_metadata() {
+        let inbound = parse_message_create(
+            &serde_json::json!({
+                "id": "msg-1",
+                "channel_id": "chan-1",
+                "content": "",
+                "timestamp": "2026-03-10T12:00:00Z",
+                "author": {
+                    "id": "user-1",
+                    "username": "alice",
+                    "bot": false
+                },
+                "attachments": [
+                    {
+                        "filename": "image.png",
+                        "content_type": "image/png",
+                        "size": 1234,
+                        "url": "https://cdn.discordapp.com/file.png"
+                    }
+                ]
+            }),
+            Some("999"),
+        )
+        .expect("message should parse");
+
+        assert_eq!(inbound.attachments.len(), 1);
+        assert_eq!(inbound.attachments[0].filename.as_deref(), Some("image.png"));
+        assert_eq!(inbound.attachments[0].mime_type, "image/png");
+        assert_eq!(inbound.attachments[0].size_bytes, Some(1234));
     }
 }

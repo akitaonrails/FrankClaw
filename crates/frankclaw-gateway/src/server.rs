@@ -867,11 +867,14 @@ fn sender_allowed(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+    use std::path::PathBuf;
     use super::*;
     use std::sync::Arc;
 
     use async_trait::async_trait;
     use axum::http::{HeaderMap, HeaderValue};
+    use frankclaw_channels::ChannelSet;
     use frankclaw_core::config::{ChannelConfig, ProviderConfig};
     use frankclaw_core::model::{
         CompletionRequest, CompletionResponse, FinishReason, InputModality, ModelApi,
@@ -883,6 +886,26 @@ mod tests {
     use secrecy::ExposeSecret;
 
     struct MockProvider;
+    struct CaptureChannel {
+        id: frankclaw_core::types::ChannelId,
+        label: &'static str,
+        sent: tokio::sync::Mutex<Vec<OutboundMessage>>,
+    }
+
+    impl CaptureChannel {
+        fn new(id: &'static str, label: &'static str) -> Self {
+            Self {
+                id: frankclaw_core::types::ChannelId::new(id),
+                label,
+                sent: tokio::sync::Mutex::new(Vec::new()),
+            }
+        }
+
+        async fn drain(&self) -> Vec<OutboundMessage> {
+            let mut sent = self.sent.lock().await;
+            std::mem::take(&mut *sent)
+        }
+    }
 
     #[async_trait]
     impl ModelProvider for MockProvider {
@@ -927,6 +950,89 @@ mod tests {
         }
     }
 
+    #[async_trait]
+    impl frankclaw_core::channel::ChannelPlugin for CaptureChannel {
+        fn id(&self) -> frankclaw_core::types::ChannelId {
+            self.id.clone()
+        }
+
+        fn capabilities(&self) -> frankclaw_core::channel::ChannelCapabilities {
+            frankclaw_core::channel::ChannelCapabilities {
+                threads: true,
+                groups: true,
+                ..Default::default()
+            }
+        }
+
+        fn label(&self) -> &str {
+            self.label
+        }
+
+        async fn start(
+            &self,
+            _inbound_tx: tokio::sync::mpsc::Sender<InboundMessage>,
+        ) -> frankclaw_core::error::Result<()> {
+            Ok(())
+        }
+
+        async fn stop(&self) -> frankclaw_core::error::Result<()> {
+            Ok(())
+        }
+
+        async fn health(&self) -> frankclaw_core::channel::HealthStatus {
+            frankclaw_core::channel::HealthStatus::Connected
+        }
+
+        async fn send(
+            &self,
+            msg: OutboundMessage,
+        ) -> frankclaw_core::error::Result<SendResult> {
+            self.sent.lock().await.push(msg);
+            Ok(SendResult::Sent {
+                platform_message_id: "captured-message".into(),
+            })
+        }
+    }
+
+    async fn build_test_state(
+        temp_dir: &PathBuf,
+        mut config: FrankClawConfig,
+        channels: Arc<ChannelSet>,
+    ) -> (Arc<GatewayState>, Arc<SqliteSessionStore>) {
+        std::fs::create_dir_all(temp_dir).expect("temp dir should exist");
+
+        let sessions = Arc::new(
+            SqliteSessionStore::open(&temp_dir.join("sessions.db"), None)
+                .expect("sessions should open"),
+        );
+        let pairing = Arc::new(
+            PairingStore::open(&temp_dir.join("pairings.json"))
+                .expect("pairings should open"),
+        );
+        config.models.providers = vec![ProviderConfig {
+            id: "mock".into(),
+            api: "ollama".into(),
+            base_url: None,
+            api_key_ref: None,
+            models: vec!["mock-model".into()],
+            cooldown_secs: 1,
+        }];
+
+        let runtime = Arc::new(
+            Runtime::from_providers(
+                &config,
+                sessions.clone() as Arc<dyn SessionStore>,
+                vec![Arc::new(MockProvider)],
+            )
+            .await
+            .expect("runtime should build"),
+        );
+        (
+            GatewayState::new(config, sessions.clone(), runtime, channels, pairing),
+            sessions,
+        )
+    }
+
     #[test]
     fn extracts_password_header_for_password_mode() {
         let mut headers = HeaderMap::new();
@@ -969,17 +1075,6 @@ mod tests {
             "frankclaw-gateway-test-{}",
             uuid::Uuid::new_v4()
         ));
-        std::fs::create_dir_all(&temp_dir).expect("temp dir should exist");
-
-        let sessions = Arc::new(
-            SqliteSessionStore::open(&temp_dir.join("sessions.db"), None)
-                .expect("sessions should open"),
-        );
-        let pairing = Arc::new(
-            PairingStore::open(&temp_dir.join("pairings.json"))
-                .expect("pairings should open"),
-        );
-
         let mut config = FrankClawConfig::default();
         config.channels.insert(
             frankclaw_core::types::ChannelId::new("web"),
@@ -991,28 +1086,10 @@ mod tests {
                 }),
             },
         );
-        config.models.providers = vec![ProviderConfig {
-            id: "mock".into(),
-            api: "ollama".into(),
-            base_url: None,
-            api_key_ref: None,
-            models: vec!["mock-model".into()],
-            cooldown_secs: 1,
-        }];
-
-        let runtime = Arc::new(
-            Runtime::from_providers(
-                &config,
-                sessions.clone() as Arc<dyn SessionStore>,
-                vec![Arc::new(MockProvider)],
-            )
-            .await
-            .expect("runtime should build"),
-        );
         let channels = Arc::new(
             frankclaw_channels::load_from_config(&config).expect("channels should load"),
         );
-        let state = GatewayState::new(config, sessions.clone(), runtime, channels, pairing);
+        let (state, sessions) = build_test_state(&temp_dir, config, channels).await;
 
         let inbound = InboundMessage {
             channel: frankclaw_core::types::ChannelId::new("web"),
@@ -1063,6 +1140,90 @@ mod tests {
             session.metadata["delivery"]["last_reply"]["platform_message_id"]
                 .as_str()
                 .is_some()
+        );
+        assert_eq!(
+            session.metadata["delivery"]["last_reply"]["content"],
+            serde_json::json!("mock reply")
+        );
+
+        let _ = std::fs::remove_file(temp_dir.join("sessions.db"));
+        let _ = std::fs::remove_file(temp_dir.join("pairings.json"));
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[tokio::test]
+    async fn discord_inbound_roundtrip_targets_thread_and_persists_metadata() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "frankclaw-gateway-discord-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let mut config = FrankClawConfig::default();
+        config.channels.insert(
+            frankclaw_core::types::ChannelId::new("discord"),
+            ChannelConfig {
+                enabled: true,
+                accounts: vec![serde_json::json!({
+                    "bot_token": "test-token"
+                })],
+                extra: serde_json::json!({
+                    "dm_policy": "open",
+                    "require_mention_for_groups": true
+                }),
+            },
+        );
+
+        let capture = Arc::new(CaptureChannel::new("discord", "Discord"));
+        let mut map: HashMap<
+            frankclaw_core::types::ChannelId,
+            Arc<dyn frankclaw_core::channel::ChannelPlugin>,
+        > = HashMap::new();
+        map.insert(
+            frankclaw_core::types::ChannelId::new("discord"),
+            capture.clone() as Arc<dyn frankclaw_core::channel::ChannelPlugin>,
+        );
+        let channels = Arc::new(ChannelSet::from_parts(map, None));
+        let (state, sessions) = build_test_state(&temp_dir, config, channels).await;
+
+        let inbound = InboundMessage {
+            channel: frankclaw_core::types::ChannelId::new("discord"),
+            account_id: "default".into(),
+            sender_id: "user-1".into(),
+            sender_name: Some("User".into()),
+            thread_id: Some("channel-42".into()),
+            is_group: true,
+            is_mention: true,
+            text: Some("<@bot> hello".into()),
+            attachments: Vec::new(),
+            platform_message_id: Some("discord-msg-1".into()),
+            timestamp: chrono::Utc::now(),
+        };
+        let session_key = state.runtime.session_key_for_inbound(&inbound);
+
+        process_inbound_message(state.clone(), inbound)
+            .await
+            .expect("inbound processing should succeed");
+
+        let outbound = capture.drain().await;
+        assert_eq!(outbound.len(), 1);
+        assert_eq!(outbound[0].thread_id.as_deref(), Some("channel-42"));
+        assert_eq!(outbound[0].text, "mock reply");
+
+        let transcript = sessions
+            .get_transcript(&session_key, 10, None)
+            .await
+            .expect("transcript should load");
+        assert_eq!(transcript.len(), 2);
+        assert_eq!(transcript[0].role, Role::User);
+        assert_eq!(transcript[1].role, Role::Assistant);
+
+        let session = sessions
+            .get(&session_key)
+            .await
+            .expect("session lookup should work")
+            .expect("session should exist");
+        assert_eq!(
+            session.metadata["delivery"]["last_reply"]["thread_id"],
+            serde_json::json!("channel-42")
         );
         assert_eq!(
             session.metadata["delivery"]["last_reply"]["content"],

@@ -20,6 +20,13 @@ pub struct ChannelSet {
 }
 
 impl ChannelSet {
+    pub fn from_parts(
+        channels: HashMap<ChannelId, Arc<dyn ChannelPlugin>>,
+        web: Option<Arc<web::WebChannel>>,
+    ) -> Self {
+        Self { channels, web }
+    }
+
     pub fn channels(&self) -> &HashMap<ChannelId, Arc<dyn ChannelPlugin>> {
         &self.channels
     }
@@ -53,10 +60,10 @@ pub fn load_from_config(config: &FrankClawConfig) -> Result<ChannelSet> {
         };
     }
 
-    Ok(ChannelSet {
+    Ok(ChannelSet::from_parts(
         channels,
-        web: web_handle,
-    })
+        web_handle,
+    ))
 }
 
 enum LoadedChannel {
