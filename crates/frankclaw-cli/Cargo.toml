@@ -1,0 +1,30 @@
+[package]
+name = "frankclaw"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "frankclaw"
+path = "src/main.rs"
+
+[dependencies]
+frankclaw-core = { workspace = true }
+frankclaw-crypto = { workspace = true }
+frankclaw-gateway = { workspace = true }
+frankclaw-sessions = { workspace = true }
+frankclaw-models = { workspace = true }
+frankclaw-channels = { workspace = true }
+frankclaw-memory = { workspace = true }
+frankclaw-cron = { workspace = true }
+frankclaw-media = { workspace = true }
+frankclaw-plugin-sdk = { workspace = true }
+clap = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+dirs = { workspace = true }
+secrecy = { workspace = true }
+anyhow = { workspace = true }

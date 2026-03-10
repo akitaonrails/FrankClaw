@@ -1,0 +1,16 @@
+[package]
+name = "frankclaw-media"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+frankclaw-core = { workspace = true }
+frankclaw-crypto = { workspace = true }
+reqwest = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+url = { workspace = true }

@@ -1,0 +1,4 @@
+openclaw/
+target/
+.env
+*.swp

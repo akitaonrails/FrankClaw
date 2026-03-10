@@ -1,0 +1,17 @@
+[package]
+name = "frankclaw-cron"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+frankclaw-core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+chrono = { workspace = true }
+cron = { workspace = true }
+uuid = { workspace = true }
+tokio-util = { workspace = true }

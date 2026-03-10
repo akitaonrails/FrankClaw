@@ -1,0 +1,125 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/frankclaw-core",
+    "crates/frankclaw-crypto",
+    "crates/frankclaw-gateway",
+    "crates/frankclaw-sessions",
+    "crates/frankclaw-models",
+    "crates/frankclaw-channels",
+    "crates/frankclaw-memory",
+    "crates/frankclaw-cron",
+    "crates/frankclaw-media",
+    "crates/frankclaw-plugin-sdk",
+    "crates/frankclaw-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/frankclaw/frankclaw"
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Web framework
+axum = { version = "0.8", features = ["ws", "macros"] }
+axum-extra = { version = "0.10", features = ["typed-header"] }
+tower = { version = "0.5", features = ["util", "timeout", "limit"] }
+tower-http = { version = "0.6", features = ["cors", "compression-gzip", "trace", "timeout", "limit"] }
+
+# WebSocket
+tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
+futures-util = "0.3"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+json5 = "0.4"
+toml = "0.8"
+
+# Validation
+validator = { version = "0.20", features = ["derive"] }
+schemars = "0.8"
+jsonschema = "0.28"
+
+# Crypto
+ring = "0.17"
+chacha20poly1305 = "0.10"
+hmac = "0.12"
+sha2 = "0.10"
+argon2 = "0.5"
+rand = "0.8"
+base64 = "0.22"
+
+# Secrets
+secrecy = { version = "0.10", features = ["serde"] }
+zeroize = { version = "1", features = ["derive"] }
+
+# Database
+rusqlite = { version = "0.32", features = ["bundled", "backup"] }
+r2d2 = "0.8"
+r2d2_sqlite = "0.25"
+
+# HTTP client
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream", "gzip"] }
+
+# CLI
+clap = { version = "4", features = ["derive", "env", "wrap_help"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+# Concurrent data structures
+dashmap = "6"
+arc-swap = "1"
+
+# Cancellation
+tokio-util = { version = "0.7", features = ["rt"] }
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# Config
+dirs = "6"
+
+# UUID
+uuid = { version = "1", features = ["v4", "serde"] }
+
+# URL
+url = { version = "2", features = ["serde"] }
+
+# Byte sizes
+bytesize = { version = "2", features = ["serde"] }
+
+# Cron expressions
+cron = "0.15"
+
+# Async trait
+async-trait = "0.1"
+
+# Internal crates
+frankclaw-core = { path = "crates/frankclaw-core" }
+frankclaw-crypto = { path = "crates/frankclaw-crypto" }
+frankclaw-gateway = { path = "crates/frankclaw-gateway" }
+frankclaw-sessions = { path = "crates/frankclaw-sessions" }
+frankclaw-models = { path = "crates/frankclaw-models" }
+frankclaw-channels = { path = "crates/frankclaw-channels" }
+frankclaw-memory = { path = "crates/frankclaw-memory" }
+frankclaw-cron = { path = "crates/frankclaw-cron" }
+frankclaw-media = { path = "crates/frankclaw-media" }
+frankclaw-plugin-sdk = { path = "crates/frankclaw-plugin-sdk" }
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
