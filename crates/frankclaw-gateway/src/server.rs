@@ -1322,4 +1322,89 @@ mod tests {
         let _ = std::fs::remove_file(temp_dir.join("pairings.json"));
         let _ = std::fs::remove_dir_all(temp_dir);
     }
+
+    #[tokio::test]
+    async fn signal_inbound_roundtrip_targets_group_and_persists_metadata() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "frankclaw-gateway-signal-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let mut config = FrankClawConfig::default();
+        config.channels.insert(
+            frankclaw_core::types::ChannelId::new("signal"),
+            ChannelConfig {
+                enabled: true,
+                accounts: vec![serde_json::json!({
+                    "base_url": "http://127.0.0.1:8080",
+                    "account": "+15551234567"
+                })],
+                extra: serde_json::json!({
+                    "dm_policy": "open",
+                    "require_mention_for_groups": true
+                }),
+            },
+        );
+
+        let capture = Arc::new(CaptureChannel::new("signal", "Signal"));
+        let mut map: HashMap<
+            frankclaw_core::types::ChannelId,
+            Arc<dyn frankclaw_core::channel::ChannelPlugin>,
+        > = HashMap::new();
+        map.insert(
+            frankclaw_core::types::ChannelId::new("signal"),
+            capture.clone() as Arc<dyn frankclaw_core::channel::ChannelPlugin>,
+        );
+        let channels = Arc::new(ChannelSet::from_parts(map, None));
+        let (state, sessions) = build_test_state(&temp_dir, config, channels).await;
+
+        let inbound = InboundMessage {
+            channel: frankclaw_core::types::ChannelId::new("signal"),
+            account_id: "default".into(),
+            sender_id: "+15550001111".into(),
+            sender_name: Some("User".into()),
+            thread_id: Some("group:group-42".into()),
+            is_group: true,
+            is_mention: true,
+            text: Some("hello".into()),
+            attachments: Vec::new(),
+            platform_message_id: Some("1710000000123".into()),
+            timestamp: chrono::Utc::now(),
+        };
+        let session_key = state.runtime.session_key_for_inbound(&inbound);
+
+        process_inbound_message(state.clone(), inbound)
+            .await
+            .expect("inbound processing should succeed");
+
+        let outbound = capture.drain().await;
+        assert_eq!(outbound.len(), 1);
+        assert_eq!(outbound[0].thread_id.as_deref(), Some("group:group-42"));
+        assert_eq!(outbound[0].text, "mock reply");
+
+        let transcript = sessions
+            .get_transcript(&session_key, 10, None)
+            .await
+            .expect("transcript should load");
+        assert_eq!(transcript.len(), 2);
+        assert_eq!(transcript[0].role, Role::User);
+        assert_eq!(transcript[1].role, Role::Assistant);
+
+        let session = sessions
+            .get(&session_key)
+            .await
+            .expect("session lookup should work")
+            .expect("session should exist");
+        assert_eq!(
+            session.metadata["delivery"]["last_reply"]["thread_id"],
+            serde_json::json!("group:group-42")
+        );
+        assert_eq!(
+            session.metadata["delivery"]["last_reply"]["reply_to"],
+            serde_json::json!("1710000000123")
+        );
+
+        let _ = std::fs::remove_file(temp_dir.join("sessions.db"));
+        let _ = std::fs::remove_file(temp_dir.join("pairings.json"));
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
 }

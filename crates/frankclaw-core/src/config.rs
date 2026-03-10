@@ -374,46 +374,58 @@ fn validate_channel_config(channel_id: &ChannelId, channel: &ChannelConfig) -> R
 
     match channel_id.as_str() {
         "web" => Ok(()),
-        "telegram" => validate_channel_secret_source(
+        "telegram" => validate_channel_account_value_source(
             channel,
             "telegram",
             &["bot_token", "token"],
             &["bot_token_env", "token_env"],
+            "bot token",
         ),
-        "discord" => validate_channel_secret_source(
+        "discord" => validate_channel_account_value_source(
             channel,
             "discord",
             &["bot_token", "token"],
             &["bot_token_env", "token_env"],
+            "bot token",
+        ),
+        "signal" => validate_channel_account_value_source(
+            channel,
+            "signal",
+            &["base_url", "http_url"],
+            &["base_url_env", "http_url_env"],
+            "base URL",
         ),
         "slack" => {
-            validate_channel_secret_source(
+            validate_channel_account_value_source(
                 channel,
                 "slack",
                 &["app_token"],
                 &["app_token_env"],
+                "app token",
             )?;
-            validate_channel_secret_source(
+            validate_channel_account_value_source(
                 channel,
                 "slack",
                 &["bot_token", "token"],
                 &["bot_token_env", "token_env"],
+                "bot token",
             )
         }
         other => Err(FrankClawError::ConfigValidation {
             msg: format!(
-                "unsupported enabled channel '{}'; currently supported: web, telegram, discord, slack",
+                "unsupported enabled channel '{}'; currently supported: web, telegram, discord, signal, slack",
                 other
             ),
         }),
     }
 }
 
-fn validate_channel_secret_source(
+fn validate_channel_account_value_source(
     channel: &ChannelConfig,
     channel_name: &str,
     inline_keys: &[&str],
     env_keys: &[&str],
+    label: &str,
 ) -> Result<()> {
     let account = channel.accounts.first().ok_or_else(|| FrankClawError::ConfigValidation {
         msg: format!("{channel_name} channel requires at least one account"),
@@ -443,7 +455,7 @@ fn validate_channel_secret_source(
 
     Err(FrankClawError::ConfigValidation {
         msg: format!(
-            "{channel_name} channel requires a non-empty bot token or bot token env reference"
+            "{channel_name} channel requires a non-empty {label} or {label} env reference"
         ),
     })
 }
@@ -692,6 +704,23 @@ mod tests {
             ChannelConfig {
                 enabled: true,
                 accounts: vec![serde_json::json!({})],
+                extra: serde_json::json!({}),
+            },
+        );
+
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn signal_channel_requires_base_url_source() {
+        let mut config = FrankClawConfig::default();
+        config.channels.insert(
+            ChannelId::new("signal"),
+            ChannelConfig {
+                enabled: true,
+                accounts: vec![serde_json::json!({
+                    "account": "+15551234567"
+                })],
                 extra: serde_json::json!({}),
             },
         );
