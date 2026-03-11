@@ -340,6 +340,9 @@ pub async fn index() -> Html<&'static str> {
             <label>Title
               <input id="canvas-title" placeholder="Optional canvas title">
             </label>
+            <label>Canvas ID
+              <input id="canvas-id" placeholder="main">
+            </label>
             <label>Session key
               <input id="canvas-session" placeholder="Optional linked session">
             </label>
@@ -348,6 +351,22 @@ pub async fn index() -> Html<&'static str> {
             </label>
             <div class="chat-row">
               <button id="canvas-push-btn">Push Canvas</button>
+              <button id="canvas-append-btn" class="secondary">Append Block</button>
+            </div>
+            <div class="auth-row">
+              <label>Block kind
+                <select id="canvas-block-kind">
+                  <option value="markdown">Markdown</option>
+                  <option value="note">Note</option>
+                  <option value="code">Code</option>
+                  <option value="checklist">Checklist</option>
+                </select>
+              </label>
+              <label>Block text
+                <input id="canvas-block-text" placeholder="Optional append-only block">
+              </label>
+            </div>
+            <div class="chat-row single">
               <button id="canvas-clear-btn" class="secondary">Clear Canvas</button>
             </div>
             <div id="canvas-stage" class="canvas-stage">
@@ -370,6 +389,7 @@ pub async fn index() -> Html<&'static str> {
       nextId: 1,
       pending: new Map(),
       selectedSession: "",
+      currentCanvas: null,
     };
 
     const els = {
@@ -389,12 +409,23 @@ pub async fn index() -> Html<&'static str> {
       models: document.getElementById("models-view"),
       channels: document.getElementById("channels-view"),
       canvasTitle: document.getElementById("canvas-title"),
+      canvasId: document.getElementById("canvas-id"),
       canvasSession: document.getElementById("canvas-session"),
       canvasBodyInput: document.getElementById("canvas-body-input"),
+      canvasBlockKind: document.getElementById("canvas-block-kind"),
+      canvasBlockText: document.getElementById("canvas-block-text"),
       canvasPushBtn: document.getElementById("canvas-push-btn"),
+      canvasAppendBtn: document.getElementById("canvas-append-btn"),
       canvasClearBtn: document.getElementById("canvas-clear-btn"),
       canvasStage: document.getElementById("canvas-stage"),
     };
+
+    function canvasParams() {
+      const params = {};
+      if (els.canvasId.value.trim()) params.canvas_id = els.canvasId.value.trim();
+      if (els.canvasSession.value.trim()) params.session_key = els.canvasSession.value.trim();
+      return params;
+    }
 
     function setStatus(text, isConnected) {
       els.status.textContent = text;
@@ -462,7 +493,7 @@ pub async fn index() -> Html<&'static str> {
         apiFetch("/api/pairing/pending"),
         rpc("models_list"),
         rpc("channels_status"),
-        rpc("canvas_get"),
+        rpc("canvas_get", canvasParams()),
       ]);
       renderSessions(sessions.sessions || []);
       renderPairings(pairings.pending || []);
@@ -485,11 +516,14 @@ pub async fn index() -> Html<&'static str> {
         button.addEventListener("click", async () => {
           state.selectedSession = item.key;
           els.session.value = item.key;
+          els.canvasSession.value = item.key;
           const history = await rpc("chat_history", { session_key: item.key, limit: 50 });
           els.feed.innerHTML = "";
           for (const entry of history.entries || []) {
             appendBubble(entry.role, entry.content);
           }
+          const canvas = await rpc("canvas_get", canvasParams());
+          renderCanvas(canvas.canvas || null);
         });
         els.sessions.appendChild(button);
       }
@@ -523,14 +557,18 @@ pub async fn index() -> Html<&'static str> {
     }
 
     function renderCanvas(canvas) {
+      state.currentCanvas = canvas;
       if (!canvas) {
         els.canvasStage.innerHTML = `<div class="muted">No canvas content yet.</div>`;
+        els.canvasId.value = "main";
         els.canvasTitle.value = "";
         els.canvasSession.value = "";
         els.canvasBodyInput.value = "";
+        els.canvasBlockText.value = "";
         return;
       }
 
+      els.canvasId.value = canvas.id || "";
       els.canvasTitle.value = canvas.title || "";
       els.canvasSession.value = canvas.session_key || "";
       els.canvasBodyInput.value = canvas.body || "";
@@ -540,14 +578,27 @@ pub async fn index() -> Html<&'static str> {
 
       const meta = document.createElement("div");
       meta.className = "canvas-meta";
-      meta.textContent = [canvas.session_key || "no session", canvas.updated_at || "pending"].join(" · ");
+      meta.textContent = [canvas.id || "main", canvas.session_key || "no session", `rev ${canvas.revision || 0}`, canvas.updated_at || "pending"].join(" · ");
 
       const body = document.createElement("div");
       body.className = "canvas-body";
       body.textContent = canvas.body || "";
 
+      const blockItems = document.createElement("div");
+      blockItems.className = "grid";
+      for (const block of (canvas.blocks || [])) {
+        const item = document.createElement("div");
+        item.className = "bubble";
+        item.innerHTML = `<small>${block.kind || "block"}</small><div></div>`;
+        item.querySelector("div").textContent = block.text || "";
+        blockItems.appendChild(item);
+      }
+
       els.canvasStage.innerHTML = "";
       els.canvasStage.append(title, meta, body);
+      if ((canvas.blocks || []).length) {
+        els.canvasStage.append(blockItems);
+      }
     }
 
     function handleMessage(event) {
@@ -570,7 +621,11 @@ pub async fn index() -> Html<&'static str> {
         }
       }
       if (frame.type === "event" && frame.event === "canvas_updated") {
-        renderCanvas(frame.payload?.canvas || null);
+        if (frame.payload?.canvas) {
+          renderCanvas(frame.payload.canvas);
+        } else if ((frame.payload?.canvas_id || "main") === (els.canvasId.value.trim() || "main")) {
+          renderCanvas(null);
+        }
       }
       if (frame.type === "event" && frame.event === "session_updated" && state.selectedSession) {
         rpc("chat_history", { session_key: state.selectedSession, limit: 50 })
@@ -638,18 +693,30 @@ pub async fn index() -> Html<&'static str> {
 
     els.canvasPushBtn.addEventListener("click", async () => {
       const params = {
+        ...canvasParams(),
         title: els.canvasTitle.value.trim(),
         body: els.canvasBodyInput.value.trim(),
+        blocks: state.currentCanvas?.blocks || [],
       };
-      if (els.canvasSession.value.trim()) {
-        params.session_key = els.canvasSession.value.trim();
-      }
       const response = await rpc("canvas_set", params);
       renderCanvas(response.canvas || null);
     });
 
+    els.canvasAppendBtn.addEventListener("click", async () => {
+      if (!els.canvasBlockText.value.trim()) return;
+      const response = await rpc("canvas_patch", {
+        ...canvasParams(),
+        append_blocks: [{
+          kind: els.canvasBlockKind.value,
+          text: els.canvasBlockText.value.trim(),
+        }],
+      });
+      els.canvasBlockText.value = "";
+      renderCanvas(response.canvas || null);
+    });
+
     els.canvasClearBtn.addEventListener("click", async () => {
-      await rpc("canvas_clear");
+      await rpc("canvas_clear", canvasParams());
       renderCanvas(null);
     });
   </script>

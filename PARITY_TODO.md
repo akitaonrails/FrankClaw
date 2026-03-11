@@ -59,10 +59,10 @@ The main remaining gap is feature surface, not the core message-to-model flow.
 
 ### Canvas Depth
 
-- [ ] Structured Canvas document model beyond title/body text
-- [ ] Session-linked Canvas workflows
-- [ ] Incremental Canvas patches instead of full-document replace
-- [ ] Multiple canvases or per-session canvases
+- [x] Structured Canvas document model beyond title/body text
+- [x] Session-linked Canvas workflows
+- [x] Incremental Canvas patches instead of full-document replace
+- [x] Multiple canvases or per-session canvases
 - [ ] Safer agent-driven UI blocks/components
 - [ ] Snapshot/export flows
 - [ ] A2UI-style richer host capabilities

@@ -80,6 +80,7 @@ pub enum Method {
     // Canvas
     CanvasGet,
     CanvasSet,
+    CanvasPatch,
     CanvasClear,
 
     // Webhooks
@@ -120,6 +121,7 @@ impl Method {
             | Self::CronRemove
             | Self::CronRun
             | Self::CanvasSet
+            | Self::CanvasPatch
             | Self::CanvasClear
             | Self::WebhooksAdd
             | Self::WebhooksRemove

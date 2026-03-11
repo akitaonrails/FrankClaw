@@ -204,6 +204,9 @@ async fn dispatch_method(
         Method::CanvasSet => {
             crate::methods::canvas_set(state, request).await
         }
+        Method::CanvasPatch => {
+            crate::methods::canvas_patch(state, request).await
+        }
         Method::CanvasClear => {
             crate::methods::canvas_clear(state, request).await
         }
@@ -385,7 +388,7 @@ mod tests {
         )
         .await;
         assert_eq!(denied.error.as_ref().map(|error| error.code), Some(403));
-        assert!(state.canvas.get().await.is_none());
+        assert!(state.canvas.get("main").await.is_none());
 
         let allowed = dispatch_method(
             &state,
@@ -402,7 +405,7 @@ mod tests {
         .await;
         assert!(allowed.error.is_none());
         assert_eq!(
-            state.canvas.get().await.expect("canvas should exist").body,
+            state.canvas.get("main").await.expect("canvas should exist").body,
             "Editors can update canvas"
         );
 

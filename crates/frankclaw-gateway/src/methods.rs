@@ -281,7 +281,10 @@ pub async fn canvas_get(
     state: &Arc<GatewayState>,
     request: RequestFrame,
 ) -> ResponseFrame {
-    let canvas = state.canvas.get().await;
+    let canvas = state
+        .canvas
+        .get(&canvas_id_from_params(&request.params))
+        .await;
     ResponseFrame::ok(request.id, serde_json::json!({ "canvas": canvas }))
 }
 
@@ -309,24 +312,79 @@ pub async fn canvas_set(
         .get("session_key")
         .and_then(|value| value.as_str())
         .map(str::to_string);
+    let canvas_id = canvas_id_from_params(&request.params);
+    let blocks = match parse_canvas_blocks(request.params.get("blocks")) {
+        Ok(blocks) => blocks,
+        Err(message) => return ResponseFrame::err(request.id, 400, message),
+    };
 
-    if title.is_empty() && body.is_empty() {
+    if title.is_empty() && body.is_empty() && blocks.is_empty() {
         return ResponseFrame::err(
             request.id,
             400,
-            "canvas.set requires a non-empty title or body",
+            "canvas.set requires a non-empty title, body, or blocks",
         );
     }
 
-    let document = crate::canvas::CanvasDocument {
+    let document = state.canvas.set(crate::canvas::CanvasDocument {
+        id: canvas_id,
         title,
         body,
         session_key,
+        blocks,
+        revision: 0,
         updated_at: chrono::Utc::now(),
-    };
-    state.canvas.set(document.clone()).await;
-    broadcast_canvas_update(state, Some(&document));
+    }).await;
+    broadcast_canvas_update(state, &document.id, Some(&document));
 
+    ResponseFrame::ok(request.id, serde_json::json!({ "canvas": document }))
+}
+
+/// Handle `canvas.patch` method.
+pub async fn canvas_patch(
+    state: &Arc<GatewayState>,
+    request: RequestFrame,
+) -> ResponseFrame {
+    let title = request
+        .params
+        .get("title")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .map(str::to_string);
+    let body = request
+        .params
+        .get("body")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .map(str::to_string);
+    let session_key = request.params.get("session_key").and_then(|value| {
+        if value.is_null() {
+            Some(None)
+        } else {
+            value.as_str().map(|session_key| Some(session_key.to_string()))
+        }
+    });
+    let append_blocks = match parse_canvas_blocks(request.params.get("append_blocks")) {
+        Ok(blocks) => blocks,
+        Err(message) => return ResponseFrame::err(request.id, 400, message),
+    };
+    if title.is_none() && body.is_none() && session_key.is_none() && append_blocks.is_empty() {
+        return ResponseFrame::err(request.id, 400, "canvas.patch requires at least one change");
+    }
+
+    let document = state
+        .canvas
+        .patch(
+            &canvas_id_from_params(&request.params),
+            crate::canvas::CanvasPatch {
+                title,
+                body,
+                session_key,
+                append_blocks,
+            },
+        )
+        .await;
+    broadcast_canvas_update(state, &document.id, Some(&document));
     ResponseFrame::ok(request.id, serde_json::json!({ "canvas": document }))
 }
 
@@ -335,24 +393,43 @@ pub async fn canvas_clear(
     state: &Arc<GatewayState>,
     request: RequestFrame,
 ) -> ResponseFrame {
-    state.canvas.clear().await;
-    broadcast_canvas_update(state, None);
-    ResponseFrame::ok(request.id, serde_json::json!({ "cleared": true }))
+    let canvas_id = canvas_id_from_params(&request.params);
+    state.canvas.clear(&canvas_id).await;
+    broadcast_canvas_update(state, &canvas_id, None);
+    ResponseFrame::ok(request.id, serde_json::json!({ "cleared": true, "canvas_id": canvas_id }))
 }
 
 fn broadcast_canvas_update(
     state: &Arc<GatewayState>,
+    canvas_id: &str,
     canvas: Option<&crate::canvas::CanvasDocument>,
 ) {
     let event = Frame::Event(EventFrame {
         event: EventType::CanvasUpdated,
         payload: serde_json::json!({
+            "canvas_id": canvas_id,
             "canvas": canvas,
         }),
     });
     if let Ok(json) = serde_json::to_string(&event) {
         let _ = state.broadcast.send(json);
     }
+}
+
+fn canvas_id_from_params(params: &serde_json::Value) -> String {
+    crate::canvas::CanvasStore::key_for(
+        params.get("canvas_id").and_then(|value| value.as_str()),
+        params.get("session_key").and_then(|value| value.as_str()),
+    )
+}
+
+fn parse_canvas_blocks(
+    value: Option<&serde_json::Value>,
+) -> std::result::Result<Vec<crate::canvas::CanvasBlock>, &'static str> {
+    let Some(value) = value else {
+        return Ok(Vec::new());
+    };
+    serde_json::from_value(value.clone()).map_err(|_| "invalid canvas blocks payload")
 }
 
 fn parse_session_key_param(
@@ -656,17 +733,32 @@ mod tests {
                 id: RequestId::Text("1".into()),
                 method: Method::CanvasSet,
                 params: serde_json::json!({
+                    "canvas_id": "ops",
                     "title": "Ops",
                     "body": "Current deployment summary",
                     "session_key": "default:web:control",
+                    "blocks": [{
+                        "kind": "note",
+                        "text": "deploy window open"
+                    }],
                 }),
             },
         )
         .await;
         assert!(set_response.error.is_none());
         assert_eq!(
-            state.canvas.get().await.expect("canvas should exist").title,
+            state.canvas.get("ops").await.expect("canvas should exist").title,
             "Ops"
+        );
+        assert_eq!(
+            state
+                .canvas
+                .get("ops")
+                .await
+                .expect("canvas should exist")
+                .blocks
+                .len(),
+            1
         );
 
         let get_response = canvas_get(
@@ -674,7 +766,9 @@ mod tests {
             RequestFrame {
                 id: RequestId::Text("2".into()),
                 method: Method::CanvasGet,
-                params: serde_json::json!({}),
+                params: serde_json::json!({
+                    "canvas_id": "ops",
+                }),
             },
         )
         .await;
@@ -686,18 +780,54 @@ mod tests {
                 .and_then(|value| value["canvas"]["body"].as_str()),
             Some("Current deployment summary")
         );
+        assert_eq!(
+            get_response
+                .result
+                .as_ref()
+                .and_then(|value| value["canvas"]["revision"].as_u64()),
+            Some(1)
+        );
+
+        let patch_response = canvas_patch(
+            &state,
+            RequestFrame {
+                id: RequestId::Text("3".into()),
+                method: Method::CanvasPatch,
+                params: serde_json::json!({
+                    "canvas_id": "ops",
+                    "append_blocks": [{
+                        "kind": "markdown",
+                        "text": "## Next steps"
+                    }]
+                }),
+            },
+        )
+        .await;
+        assert!(patch_response.error.is_none());
+        assert_eq!(
+            state
+                .canvas
+                .get("ops")
+                .await
+                .expect("canvas should exist")
+                .blocks
+                .len(),
+            2
+        );
 
         let clear_response = canvas_clear(
             &state,
             RequestFrame {
-                id: RequestId::Text("3".into()),
+                id: RequestId::Text("4".into()),
                 method: Method::CanvasClear,
-                params: serde_json::json!({}),
+                params: serde_json::json!({
+                    "canvas_id": "ops",
+                }),
             },
         )
         .await;
         assert!(clear_response.error.is_none());
-        assert!(state.canvas.get().await.is_none());
+        assert!(state.canvas.get("ops").await.is_none());
 
         let _ = std::fs::remove_file(temp_dir.join("sessions.db"));
         let _ = std::fs::remove_file(temp_dir.join("pairings.json"));
