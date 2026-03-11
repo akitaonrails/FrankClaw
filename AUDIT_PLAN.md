@@ -57,21 +57,21 @@ is audited, fixes are implemented, tests are added, and the section is marked do
 
 ## 2. Discord Channel
 
-**Status:** TODO
+**Status:** IN PROGRESS
 
 ### Critical
 
-- [ ] **HELLO stall watchdog**: After WebSocket opens, wait max 30s for HELLO opcode. Track consecutive stalls — after 3 stalls without HELLO, clear resume state and force a fresh identify. Add a 5-minute reconnect stall watchdog.
+- [x] **HELLO stall watchdog**: After WebSocket opens, wait max 30s for HELLO opcode. Track consecutive stalls — after 3 stalls without HELLO, clear resume state and force a fresh identify. Add a 5-minute reconnect stall watchdog.
 - [ ] **Resume vs fresh identify state management**: On invalid session (code 4006) or intent changes, explicitly clear `sessionId`, `resumeGatewayUrl`, and `sequence`. Trying to resume with stale state causes infinite reconnect loops.
-- [ ] **4014 privileged intents**: Detect disallowed intents error and exit cleanly instead of retrying forever.
+- [x] **4014 privileged intents**: Detect disallowed intents error and exit cleanly instead of retrying forever. Also covers 4004 (auth failed), 4010-4013 fatal codes.
 - [ ] **Early gateway error guard**: Gateway errors can fire before lifecycle listeners are attached. Queue early errors and drain them once listeners are ready.
 
 ### High
 
 - [ ] **Rate limit bucket handling**: Parse both `retry_after` from response body (fractional seconds) and `Retry-After` header. Use exponential backoff with jitter (10%) to avoid thundering herd.
-- [ ] **DM blocked (50007) vs missing permissions (50013)**: Return specific error types. On 50013, probe actual permissions to tell the user what's missing (ViewChannel, SendMessages, SendMessagesInThreads, AttachFiles).
+- [x] **DM blocked (50007) vs missing permissions (50013)**: Return specific error types with human-readable messages.
 - [ ] **Forum/Media channel detection**: Forum and media channels cannot receive regular messages — must create threads. Detect channel type before sending.
-- [ ] **Message chunking**: 2000-char limit, but respect Unicode boundaries, code block structure, and configurable line limits.
+- [x] **Message chunking**: 2000-char limit, respects Unicode character boundaries and prefers newline split points.
 
 ### Medium
 

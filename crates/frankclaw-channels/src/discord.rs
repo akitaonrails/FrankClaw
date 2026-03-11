@@ -21,6 +21,12 @@ const DISCORD_API_BASE: &str = "https://discord.com/api/v10";
 const DISCORD_GATEWAY_VERSION: &str = "10";
 const DISCORD_INTENTS: u64 = (1 << 0) | (1 << 9) | (1 << 12) | (1 << 15);
 
+/// Discord message content limit in characters (code points).
+const DISCORD_MESSAGE_LIMIT: usize = 2000;
+
+/// Maximum time to wait for the HELLO frame after connecting.
+const DISCORD_HELLO_TIMEOUT_SECS: u64 = 30;
+
 pub struct DiscordChannel {
     bot_token: SecretString,
     client: Client,
@@ -85,7 +91,15 @@ impl DiscordChannel {
             })?;
         let (mut ws_tx, mut ws_rx) = socket.split();
 
-        let hello = next_json_frame(self.id(), &mut ws_rx).await?;
+        let hello = tokio::time::timeout(
+            std::time::Duration::from_secs(DISCORD_HELLO_TIMEOUT_SECS),
+            next_json_frame(self.id(), &mut ws_rx),
+        )
+        .await
+        .map_err(|_| FrankClawError::Channel {
+            channel: self.id(),
+            msg: "discord gateway HELLO timeout after 30s".into(),
+        })??;
         let heartbeat_interval_ms = hello["d"]["heartbeat_interval"]
             .as_u64()
             .ok_or_else(|| FrankClawError::Channel {
@@ -195,6 +209,59 @@ impl DiscordChannel {
             }
         }
     }
+
+    async fn send_single(&self, msg: OutboundMessage) -> Result<SendResult> {
+        let channel_id = msg.thread_id.as_deref().unwrap_or(&msg.to);
+        let request = self
+            .client
+            .post(format!("{DISCORD_API_BASE}/channels/{channel_id}/messages"))
+            .header("authorization", self.auth_header());
+        let resp = if msg.attachments.is_empty() {
+            request.json(&build_send_body(&msg)).send().await
+        } else {
+            request.multipart(build_send_form(&msg)?).send().await
+        }
+        .map_err(|e| FrankClawError::Channel {
+            channel: self.id(),
+            msg: format!("send failed: {e}"),
+        })?;
+
+        if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            let body: serde_json::Value =
+                resp.json().await.map_err(|e| FrankClawError::Channel {
+                    channel: self.id(),
+                    msg: format!("invalid rate limit response: {e}"),
+                })?;
+            return Ok(SendResult::RateLimited {
+                retry_after_secs: body["retry_after"]
+                    .as_f64()
+                    .map(|value| value.ceil() as u64),
+            });
+        }
+
+        let status = resp.status();
+        let body: serde_json::Value = resp.json().await.map_err(|e| FrankClawError::Channel {
+            channel: self.id(),
+            msg: format!("invalid response: {e}"),
+        })?;
+
+        if status.is_success() {
+            Ok(SendResult::Sent {
+                platform_message_id: body["id"].as_str().unwrap_or_default().to_string(),
+            })
+        } else {
+            let error_code = body["code"].as_u64().unwrap_or(0);
+            let reason = match error_code {
+                50007 => "cannot send messages to this user (DM blocked)".to_string(),
+                50013 => "missing permissions to send messages in this channel".to_string(),
+                _ => body["message"]
+                    .as_str()
+                    .unwrap_or("unknown discord send failure")
+                    .to_string(),
+            };
+            Ok(SendResult::Failed { reason })
+        }
+    }
 }
 
 #[async_trait]
@@ -230,6 +297,9 @@ impl ChannelPlugin for DiscordChannel {
             match self.run_gateway(inbound_tx.clone()).await {
                 Ok(()) => return Ok(()),
                 Err(err) => {
+                    if is_fatal_gateway_error(&err) {
+                        return Err(err);
+                    }
                     warn!(error = %err, "discord gateway error, retrying in 5s");
                     tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                 }
@@ -261,49 +331,31 @@ impl ChannelPlugin for DiscordChannel {
     }
 
     async fn send(&self, msg: OutboundMessage) -> Result<SendResult> {
-        let channel_id = msg.thread_id.as_deref().unwrap_or(&msg.to);
-        let request = self
-            .client
-            .post(format!("{DISCORD_API_BASE}/channels/{channel_id}/messages"))
-            .header("authorization", self.auth_header());
-        let resp = if msg.attachments.is_empty() {
-            request.json(&build_send_body(&msg)).send().await
-        } else {
-            request.multipart(build_send_form(&msg)?).send().await
+        // Chunk text messages that exceed Discord's 2000-char limit.
+        if msg.attachments.is_empty() {
+            let text = normalize_outbound_text(&msg.text, OutboundTextFlavor::Plain);
+            if text.chars().count() > DISCORD_MESSAGE_LIMIT {
+                let chunks = chunk_discord_text(&text, DISCORD_MESSAGE_LIMIT);
+                let mut last_result = None;
+                for (i, chunk) in chunks.iter().enumerate() {
+                    let mut chunk_msg = msg.clone();
+                    chunk_msg.text = chunk.clone();
+                    if i > 0 {
+                        chunk_msg.reply_to = None;
+                    }
+                    let result = self.send_single(chunk_msg).await?;
+                    if !matches!(result, SendResult::Sent { .. }) {
+                        return Ok(result);
+                    }
+                    last_result = Some(result);
+                }
+                return Ok(last_result.unwrap_or(SendResult::Failed {
+                    reason: "no chunks to send".into(),
+                }));
+            }
         }
-        .map_err(|e| FrankClawError::Channel {
-            channel: self.id(),
-            msg: format!("send failed: {e}"),
-        })?;
 
-        if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            let body: serde_json::Value = resp.json().await.map_err(|e| FrankClawError::Channel {
-                channel: self.id(),
-                msg: format!("invalid rate limit response: {e}"),
-            })?;
-            return Ok(SendResult::RateLimited {
-                retry_after_secs: body["retry_after"].as_f64().map(|value| value.ceil() as u64),
-            });
-        }
-
-        let status = resp.status();
-        let body: serde_json::Value = resp.json().await.map_err(|e| FrankClawError::Channel {
-            channel: self.id(),
-            msg: format!("invalid response: {e}"),
-        })?;
-
-        if status.is_success() {
-            Ok(SendResult::Sent {
-                platform_message_id: body["id"].as_str().unwrap_or_default().to_string(),
-            })
-        } else {
-            Ok(SendResult::Failed {
-                reason: body["message"]
-                    .as_str()
-                    .unwrap_or("unknown discord send failure")
-                    .to_string(),
-            })
-        }
+        self.send_single(msg).await
     }
 
     async fn edit_message(&self, target: &EditMessageTarget, new_text: &str) -> Result<()> {
@@ -446,10 +498,13 @@ fn parse_gateway_message(channel_id: ChannelId, frame: Message) -> Result<serde_
             channel: channel_id.clone(),
             msg: format!("discord gateway sent invalid UTF-8: {e}"),
         })?.into(),
-        Message::Close(_) => {
+        Message::Close(close_frame) => {
+            let (code, reason) = close_frame
+                .map(|cf| (cf.code.into(), cf.reason.to_string()))
+                .unwrap_or((0u16, String::new()));
             return Err(FrankClawError::Channel {
                 channel: channel_id,
-                msg: "discord gateway closed".into(),
+                msg: format!("discord gateway closed (code={code}, reason={reason})"),
             });
         }
         _ => {
@@ -600,6 +655,51 @@ fn build_edit_request(target: &EditMessageTarget, new_text: &str) -> (String, se
         target.thread_id.clone().unwrap_or_else(|| target.to.clone()),
         serde_json::json!({ "content": text }),
     )
+}
+
+/// Fatal Discord gateway close codes that should not be retried.
+/// 4004 = auth failed, 4010 = invalid shard, 4011 = sharding required,
+/// 4012 = invalid API version, 4013 = invalid intents, 4014 = disallowed intents.
+fn is_fatal_gateway_error(err: &FrankClawError) -> bool {
+    let msg = err.to_string();
+    for code in ["4004", "4010", "4011", "4012", "4013", "4014"] {
+        if msg.contains(&format!("code={code}")) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Split text into chunks of at most `limit` characters, preferring newline boundaries.
+fn chunk_discord_text(text: &str, limit: usize) -> Vec<String> {
+    let chars: Vec<char> = text.chars().collect();
+    if chars.len() <= limit {
+        return vec![text.to_string()];
+    }
+
+    let mut chunks = Vec::new();
+    let mut start = 0;
+
+    while start < chars.len() {
+        let end = (start + limit).min(chars.len());
+        if end == chars.len() {
+            chunks.push(chars[start..end].iter().collect());
+            break;
+        }
+
+        // Try to split at a newline near the limit.
+        let slice = &chars[start..end];
+        let split_at = slice
+            .iter()
+            .rposition(|&c| c == '\n')
+            .map(|pos| start + pos + 1)
+            .unwrap_or(end);
+
+        chunks.push(chars[start..split_at].iter().collect());
+        start = split_at;
+    }
+
+    chunks
 }
 
 #[cfg(test)]
@@ -902,5 +1002,81 @@ mod tests {
             inbound.attachments[0].url.as_deref(),
             Some("https://cdn.discordapp.com/attachments/att-1/photo.png")
         );
+    }
+
+    // --- Audit regression tests ---
+
+    #[test]
+    fn chunk_discord_text_returns_single_chunk_when_within_limit() {
+        let text = "hello world";
+        let chunks = chunk_discord_text(text, 2000);
+        assert_eq!(chunks, vec!["hello world"]);
+    }
+
+    #[test]
+    fn chunk_discord_text_splits_at_newline_boundary() {
+        let line_a = "a".repeat(1500);
+        let line_b = "b".repeat(800);
+        let text = format!("{line_a}\n{line_b}");
+        let chunks = chunk_discord_text(&text, 2000);
+        assert_eq!(chunks.len(), 2);
+        assert_eq!(chunks[0], format!("{line_a}\n"));
+        assert_eq!(chunks[1], line_b);
+    }
+
+    #[test]
+    fn chunk_discord_text_splits_at_limit_when_no_newline() {
+        let text = "a".repeat(4500);
+        let chunks = chunk_discord_text(&text, 2000);
+        assert_eq!(chunks.len(), 3);
+        assert_eq!(chunks[0].len(), 2000);
+        assert_eq!(chunks[1].len(), 2000);
+        assert_eq!(chunks[2].len(), 500);
+    }
+
+    #[test]
+    fn chunk_discord_text_handles_multibyte_characters() {
+        // 2001 emoji characters (each 4 bytes in UTF-8)
+        let text: String = std::iter::repeat('🦀').take(2001).collect();
+        let chunks = chunk_discord_text(&text, 2000);
+        assert_eq!(chunks.len(), 2);
+        assert_eq!(chunks[0].chars().count(), 2000);
+        assert_eq!(chunks[1].chars().count(), 1);
+    }
+
+    #[test]
+    fn is_fatal_gateway_error_detects_disallowed_intents() {
+        let err = FrankClawError::Channel {
+            channel: ChannelId::new("discord"),
+            msg: "discord gateway closed (code=4014, reason=Disallowed intents)".into(),
+        };
+        assert!(is_fatal_gateway_error(&err));
+    }
+
+    #[test]
+    fn is_fatal_gateway_error_detects_auth_failed() {
+        let err = FrankClawError::Channel {
+            channel: ChannelId::new("discord"),
+            msg: "discord gateway closed (code=4004, reason=Authentication failed)".into(),
+        };
+        assert!(is_fatal_gateway_error(&err));
+    }
+
+    #[test]
+    fn is_fatal_gateway_error_does_not_match_retriable_errors() {
+        let err = FrankClawError::Channel {
+            channel: ChannelId::new("discord"),
+            msg: "discord gateway closed (code=4000, reason=Unknown error)".into(),
+        };
+        assert!(!is_fatal_gateway_error(&err));
+    }
+
+    #[test]
+    fn is_fatal_gateway_error_does_not_match_non_close_errors() {
+        let err = FrankClawError::Channel {
+            channel: ChannelId::new("discord"),
+            msg: "discord gateway HELLO timeout after 30s".into(),
+        };
+        assert!(!is_fatal_gateway_error(&err));
     }
 }
