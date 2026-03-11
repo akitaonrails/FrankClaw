@@ -29,10 +29,14 @@ impl OllamaProvider {
             .build()
             .expect("failed to build HTTP client");
 
+        let base_url = normalize_ollama_url(
+            &base_url.unwrap_or_else(|| DEFAULT_OLLAMA_URL.to_string()),
+        );
+
         Self {
             id: id.into(),
             client,
-            base_url: base_url.unwrap_or_else(|| DEFAULT_OLLAMA_URL.to_string()),
+            base_url,
         }
     }
 }
@@ -72,9 +76,7 @@ impl ModelProvider for OllamaProvider {
         if !response.status().is_success() {
             let status = response.status();
             let body_text = response.text().await.unwrap_or_default();
-            return Err(FrankClawError::ModelProvider {
-                msg: format!("ollama HTTP {status}: {body_text}"),
-            });
+            return Err(crate::anthropic::classify_provider_error(status, &body_text));
         }
 
         if let Some(stream_tx) = stream_tx {
@@ -169,5 +171,47 @@ impl ModelProvider for OllamaProvider {
             .await
             .map(|r| r.status().is_success())
             .unwrap_or(false)
+    }
+}
+
+/// Strip `/v1` suffix from Ollama base URL.
+/// Users often configure `http://localhost:11434/v1` which works for the
+/// OpenAI-compatible endpoint but breaks native API calls (`/api/tags`, `/api/show`).
+fn normalize_ollama_url(url: &str) -> String {
+    let trimmed = url.trim().trim_end_matches('/');
+    let stripped = trimmed
+        .strip_suffix("/v1")
+        .unwrap_or(trimmed);
+    stripped.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_ollama_url_strips_v1_suffix() {
+        assert_eq!(
+            normalize_ollama_url("http://localhost:11434/v1"),
+            "http://localhost:11434"
+        );
+        assert_eq!(
+            normalize_ollama_url("http://localhost:11434/v1/"),
+            "http://localhost:11434"
+        );
+        assert_eq!(
+            normalize_ollama_url("http://localhost:11434"),
+            "http://localhost:11434"
+        );
+        assert_eq!(
+            normalize_ollama_url("http://localhost:11434/"),
+            "http://localhost:11434"
+        );
+    }
+
+    #[test]
+    fn ollama_provider_uses_normalized_url() {
+        let provider = OllamaProvider::new("test", Some("http://localhost:11434/v1/".into()));
+        assert_eq!(provider.base_url, "http://localhost:11434");
     }
 }

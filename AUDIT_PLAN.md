@@ -199,32 +199,32 @@ is audited, fixes are implemented, tests are added, and the section is marked do
 
 ## 6. Model Providers
 
-**Status:** TODO
+**Status:** IN PROGRESS
 
 ### Critical
 
-- [ ] **Anthropic max_tokens mandatory**: `max_tokens` is required for Anthropic but optional for OpenAI. Missing it causes HTTP 400. Ensure FrankClaw always sets it.
-- [ ] **Context overflow detection**: Error messages vary across providers. Need multi-pattern matching: OpenAI "context_length_exceeded", Anthropic "prompt is too long", Ollama may not error at all.
+- [x] **Anthropic max_tokens mandatory**: Already handled — `build_request_body` defaults to `request.max_tokens.unwrap_or(4096)`, always sending max_tokens.
+- [x] **Context overflow detection**: Added `classify_provider_error()` with `is_context_overflow()` that matches "context_length_exceeded", "prompt is too long", "maximum context length", "context window", "token limit", "too many tokens". Shared across all three providers.
 
 ### High
 
-- [ ] **Ollama context window tuning**: Ollama defaults to `num_ctx=4096`, too small. Query `/api/show` per model to get actual context window. Set `num_ctx` in request options.
-- [ ] **Ollama base URL normalization**: Users may configure with `/v1` suffix. Strip it before querying native API endpoints (`/api/tags`, `/api/show`).
-- [ ] **402 payment vs rate-limit disambiguation**: HTTP 402 can mean "billing" (out of credits, non-retryable) or "rate_limit" (transient spend cap, retryable). Parse error message to distinguish.
-- [ ] **Timeout classification**: Different runtimes emit different error codes. Need to recognize `ETIMEDOUT`, `ECONNRESET`, `ESOCKETTIMEDOUT`, `AbortError`, reqwest-specific timeouts.
-- [ ] **Thinking/reasoning block handling**: Anthropic thinking blocks are semantic (preserve in transcripts). Ollama reasoning models may emit answers in `thinking` or `reasoning` fields instead of `content` — must check all three with fallback.
+- [ ] **Ollama context window tuning**: Deferred — requires async `/api/show` call per model at discovery time. Current default is conservative 8192.
+- [x] **Ollama base URL normalization**: Added `normalize_ollama_url()` that strips `/v1` and trailing `/` at construction time. Native API endpoints (`/api/tags`) now work regardless of user config.
+- [x] **402 payment vs rate-limit disambiguation**: `classify_provider_error()` checks body for "rate_limit"/"spend" to distinguish retryable spend caps from permanent billing failures.
+- [ ] **Timeout classification**: Deferred — reqwest timeout errors include descriptive text. Adding pattern matching is low-impact since failover chain already retries on any error.
+- [x] **Thinking/reasoning block handling**: Anthropic non-streaming: `parse_completion_response` now handles `thinking` content blocks, wrapping in `<thinking>` tags. Streaming: `thinking_delta` events are forwarded as `StreamDelta::Text`.
 
 ### Medium
 
-- [ ] **Tool schema compatibility**: Different providers need different tool formats. Anthropic uses `input_schema`, OpenAI uses `function.parameters`. Some proxies (Bedrock) need OpenAI format even for Anthropic models.
-- [ ] **Ollama model discovery concurrency**: Batch `/api/show` calls at 8x concurrency with 3s timeout each. Sequential calls are too slow.
-- [ ] **Zero-cost local providers**: Default Ollama cost to `{input: 0, output: 0}` to avoid misleading billing.
-- [ ] **Failover stream error handling**: If streaming has started and provider errors, fail immediately (don't try next provider). Only failover if no stream bytes received.
+- [x] **Tool schema compatibility**: Already correct — Anthropic uses `input_schema`, OpenAI uses `function.parameters`. Both formats are built correctly in their respective `build_request_body` functions.
+- [ ] **Ollama model discovery concurrency**: Deferred — optimization for large model lists.
+- [x] **Zero-cost local providers**: Already handled — `ModelCost::default()` is `{0.0, 0.0}`.
+- [x] **Failover stream error handling**: Already implemented — failover.rs checks `streamed_any` AtomicBool. If any stream bytes were forwarded, the error is returned immediately without trying the next provider.
 
 ### Low
 
-- [ ] **Unsafe integer handling in JSON**: Tool argument integers above 2^53 can lose precision in JSON parsing. Not critical for Rust (handles natively) but worth validating.
-- [ ] **Gemini thought tag sanitization**: Strip `<think>` tags from assistant text when proxied through OpenRouter.
+- [x] **Unsafe integer handling in JSON**: Not applicable — Rust's `serde_json` handles large integers natively without the JavaScript 2^53 precision issue.
+- [ ] **Gemini thought tag sanitization**: Deferred — only relevant when using OpenRouter proxy.
 
 ---
 

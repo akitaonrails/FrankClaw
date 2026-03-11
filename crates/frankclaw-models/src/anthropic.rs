@@ -76,9 +76,7 @@ impl ModelProvider for AnthropicProvider {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            return Err(FrankClawError::ModelProvider {
-                msg: format!("HTTP {status}: {body}"),
-            });
+            return Err(classify_provider_error(status, &body));
         }
 
         if let Some(stream_tx) = stream_tx {
@@ -207,6 +205,20 @@ fn parse_completion_response(data: &serde_json::Value) -> Result<CompletionRespo
     if let Some(blocks) = data["content"].as_array() {
         for block in blocks {
             match block["type"].as_str() {
+                Some("thinking") => {
+                    // Anthropic thinking blocks contain internal reasoning.
+                    // Preserve them in content for transcript storage.
+                    if let Some(thinking) = block["thinking"].as_str() {
+                        if !thinking.is_empty() {
+                            if !content.is_empty() {
+                                content.push_str("\n\n");
+                            }
+                            content.push_str("<thinking>\n");
+                            content.push_str(thinking);
+                            content.push_str("\n</thinking>\n\n");
+                        }
+                    }
+                }
                 Some("text") => {
                     if let Some(text) = block["text"].as_str() {
                         content.push_str(text);
@@ -340,6 +352,12 @@ fn apply_stream_event(
                     deltas.push(StreamDelta::Text(text.to_string()));
                 }
             }
+            Some("thinking_delta") => {
+                if let Some(thinking) = payload["delta"]["thinking"].as_str() {
+                    state.content.push_str(thinking);
+                    deltas.push(StreamDelta::Text(thinking.to_string()));
+                }
+            }
             Some("input_json_delta") => {
                 let partial = payload["delta"]["partial_json"].as_str().unwrap_or("");
                 if let Some(index) = payload["index"].as_u64().map(|value| value as usize) {
@@ -410,6 +428,56 @@ fn parse_finish_reason(reason: Option<&str>) -> FinishReason {
     }
 }
 
+/// Classify HTTP errors from model providers into actionable error messages.
+/// Detects context overflow, billing issues, rate limits, and auth failures.
+pub(crate) fn classify_provider_error(
+    status: reqwest::StatusCode,
+    body: &str,
+) -> FrankClawError {
+    let body_lower = body.to_lowercase();
+
+    // Context overflow detection — varies across providers
+    if is_context_overflow(&body_lower) {
+        return FrankClawError::ModelProvider {
+            msg: format!("context length exceeded (HTTP {status}): {body}"),
+        };
+    }
+
+    match status.as_u16() {
+        401 => FrankClawError::ModelProvider {
+            msg: format!("authentication failed (invalid API key): {body}"),
+        },
+        402 => {
+            // 402 can mean billing issue OR rate limit spend cap
+            if body_lower.contains("rate_limit") || body_lower.contains("spend") {
+                FrankClawError::ModelProvider {
+                    msg: format!("rate limit spend cap reached (retryable): {body}"),
+                }
+            } else {
+                FrankClawError::ModelProvider {
+                    msg: format!("billing error (out of credits, non-retryable): {body}"),
+                }
+            }
+        }
+        429 => FrankClawError::ModelProvider {
+            msg: format!("rate limited (HTTP 429): {body}"),
+        },
+        _ => FrankClawError::ModelProvider {
+            msg: format!("HTTP {status}: {body}"),
+        },
+    }
+}
+
+/// Check if an error body indicates context length overflow.
+fn is_context_overflow(body_lower: &str) -> bool {
+    body_lower.contains("context_length_exceeded")
+        || body_lower.contains("prompt is too long")
+        || body_lower.contains("maximum context length")
+        || body_lower.contains("context window")
+        || body_lower.contains("token limit")
+        || body_lower.contains("too many tokens")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -442,6 +510,75 @@ mod tests {
         assert_eq!(response.content, "hello ");
         assert_eq!(response.usage.input_tokens, 12);
         assert_eq!(response.usage.output_tokens, 4);
+    }
+
+    #[test]
+    fn parse_completion_response_preserves_thinking_blocks() {
+        let data = serde_json::json!({
+            "content": [
+                {
+                    "type": "thinking",
+                    "thinking": "Let me reason about this..."
+                },
+                {
+                    "type": "text",
+                    "text": "The answer is 42."
+                }
+            ],
+            "usage": { "input_tokens": 10, "output_tokens": 5 },
+            "stop_reason": "end_turn"
+        });
+        let response = parse_completion_response(&data).expect("should parse");
+        assert!(response.content.contains("<thinking>"));
+        assert!(response.content.contains("Let me reason about this..."));
+        assert!(response.content.contains("The answer is 42."));
+    }
+
+    #[test]
+    fn apply_stream_event_handles_thinking_delta() {
+        let mut state = AnthropicStreamState::default();
+        let deltas = apply_stream_event(
+            &mut state,
+            Some("content_block_delta"),
+            r#"{"delta":{"type":"thinking_delta","thinking":"step 1: "}}"#,
+        )
+        .expect("thinking delta should parse");
+        assert_eq!(deltas, vec![StreamDelta::Text("step 1: ".into())]);
+        assert_eq!(state.content, "step 1: ");
+    }
+
+    #[test]
+    fn classify_provider_error_detects_context_overflow() {
+        let err = classify_provider_error(
+            reqwest::StatusCode::BAD_REQUEST,
+            r#"{"error":{"message":"prompt is too long: 210000 tokens > 200000 maximum"}}"#,
+        );
+        let msg = format!("{err}");
+        assert!(msg.contains("context length exceeded"), "got: {msg}");
+    }
+
+    #[test]
+    fn classify_provider_error_distinguishes_402_billing_vs_rate_limit() {
+        let billing = classify_provider_error(
+            reqwest::StatusCode::PAYMENT_REQUIRED,
+            r#"{"error":{"message":"Your account has insufficient credits"}}"#,
+        );
+        assert!(format!("{billing}").contains("billing error"));
+
+        let rate = classify_provider_error(
+            reqwest::StatusCode::PAYMENT_REQUIRED,
+            r#"{"error":{"message":"rate_limit: monthly spend cap exceeded"}}"#,
+        );
+        assert!(format!("{rate}").contains("retryable"));
+    }
+
+    #[test]
+    fn classify_provider_error_detects_auth_failure() {
+        let err = classify_provider_error(
+            reqwest::StatusCode::UNAUTHORIZED,
+            r#"{"error":{"message":"invalid x-api-key"}}"#,
+        );
+        assert!(format!("{err}").contains("authentication failed"));
     }
 
     #[test]

@@ -79,9 +79,7 @@ impl ModelProvider for OpenAiProvider {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            return Err(FrankClawError::ModelProvider {
-                msg: format!("HTTP {status}: {body}"),
-            });
+            return Err(crate::anthropic::classify_provider_error(status, &body));
         }
 
         if let Some(stream_tx) = stream_tx {
