@@ -2021,6 +2021,91 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn telegram_inbound_roundtrip_targets_topic_and_persists_metadata() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "frankclaw-gateway-telegram-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let mut config = FrankClawConfig::default();
+        config.channels.insert(
+            frankclaw_core::types::ChannelId::new("telegram"),
+            ChannelConfig {
+                enabled: true,
+                accounts: vec![serde_json::json!({
+                    "bot_token": "test-token"
+                })],
+                extra: serde_json::json!({
+                    "dm_policy": "open",
+                    "require_mention_for_groups": true
+                }),
+            },
+        );
+
+        let capture = Arc::new(CaptureChannel::new("telegram", "Telegram"));
+        let mut map: HashMap<
+            frankclaw_core::types::ChannelId,
+            Arc<dyn frankclaw_core::channel::ChannelPlugin>,
+        > = HashMap::new();
+        map.insert(
+            frankclaw_core::types::ChannelId::new("telegram"),
+            capture.clone() as Arc<dyn frankclaw_core::channel::ChannelPlugin>,
+        );
+        let channels = Arc::new(ChannelSet::from_parts(map, None, None));
+        let (state, sessions) = build_test_state(&temp_dir, config, channels).await;
+
+        let inbound = InboundMessage {
+            channel: frankclaw_core::types::ChannelId::new("telegram"),
+            account_id: "default".into(),
+            sender_id: "user-1".into(),
+            sender_name: Some("User".into()),
+            thread_id: Some("-100123:topic:7".into()),
+            is_group: true,
+            is_mention: true,
+            text: Some("@bot hello".into()),
+            attachments: Vec::new(),
+            platform_message_id: Some("99".into()),
+            timestamp: chrono::Utc::now(),
+        };
+        let session_key = state.runtime.session_key_for_inbound(&inbound);
+
+        process_inbound_message(state.clone(), inbound)
+            .await
+            .expect("inbound processing should succeed");
+
+        let outbound = capture.drain().await;
+        assert_eq!(outbound.len(), 1);
+        assert_eq!(outbound[0].thread_id.as_deref(), Some("-100123:topic:7"));
+        assert_eq!(outbound[0].reply_to.as_deref(), Some("99"));
+        assert_eq!(outbound[0].text, "mock reply");
+
+        let transcript = sessions
+            .get_transcript(&session_key, 10, None)
+            .await
+            .expect("transcript should load");
+        assert_eq!(transcript.len(), 2);
+        assert_eq!(transcript[0].role, Role::User);
+        assert_eq!(transcript[1].role, Role::Assistant);
+
+        let session = sessions
+            .get(&session_key)
+            .await
+            .expect("session lookup should work")
+            .expect("session should exist");
+        assert_eq!(
+            session.metadata["delivery"]["last_reply"]["thread_id"],
+            serde_json::json!("-100123:topic:7")
+        );
+        assert_eq!(
+            session.metadata["delivery"]["last_reply"]["reply_to"],
+            serde_json::json!("99")
+        );
+
+        let _ = std::fs::remove_file(temp_dir.join("sessions.db"));
+        let _ = std::fs::remove_file(temp_dir.join("pairings.json"));
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[tokio::test]
     async fn discord_inbound_roundtrip_ignores_unlisted_group_thread() {
         let temp_dir = std::env::temp_dir().join(format!(
             "frankclaw-gateway-discord-group-filter-test-{}",

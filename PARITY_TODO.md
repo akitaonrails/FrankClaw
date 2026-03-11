@@ -57,11 +57,11 @@ The main remaining gap is feature surface, not the core message-to-model flow.
 - [x] Broader edit support beyond Telegram
 - [x] Delete support where platforms allow it
 - [x] Shared outbound text normalization and reply-safe formatting
-- [ ] Channel-specific streaming or pseudo-streaming delivery
+- [x] Channel-specific streaming or pseudo-streaming delivery
 - [x] Explicit group allowlist routing on supported group-capable channels
 - [x] Better reply-tag semantics across supported channels
-- [ ] Better WhatsApp-specific behavior beyond normalized inbound media/webhook handling and safer outbound text shaping
-- [ ] Broader platform-specific retry/backoff semantics
+- [x] Better WhatsApp-specific behavior beyond normalized inbound media/webhook handling and safer outbound text shaping
+- [x] Broader platform-specific retry/backoff semantics
 
 ### Canvas Depth
 
@@ -71,7 +71,7 @@ The main remaining gap is feature surface, not the core message-to-model flow.
 - [x] Multiple canvases or per-session canvases
 - [x] Safer agent-driven UI blocks/components
 - [x] Snapshot/export flows
-- [ ] A2UI-style richer host capabilities
+- [x] A2UI-style richer host capabilities
 
 ### Tool Depth
 
@@ -94,7 +94,7 @@ The main remaining gap is feature surface, not the core message-to-model flow.
 
 ### Test Coverage and Test Quality
 
-- [ ] More integration coverage across supported channels
+- [x] More integration coverage across supported channels
 - [x] Gateway-path coverage for authenticated web media upload/inbound flows
 - [x] Better end-to-end coverage for operator flows
 - [ ] External-API contract fixtures for supported channels
