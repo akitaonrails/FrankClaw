@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 pub mod discord;
+mod media_text;
 pub mod signal;
 pub mod slack;
 pub mod telegram;

@@ -9,6 +9,8 @@ use frankclaw_core::channel::*;
 use frankclaw_core::error::{FrankClawError, Result};
 use frankclaw_core::types::ChannelId;
 
+use crate::media_text::text_or_attachment_placeholder;
+
 const WHATSAPP_GRAPH_BASE: &str = "https://graph.facebook.com/v19.0";
 type HmacSha256 = Hmac<Sha256>;
 
@@ -85,7 +87,7 @@ impl ChannelPlugin for WhatsAppChannel {
         ChannelCapabilities {
             threads: false,
             groups: true,
-            attachments: false,
+            attachments: true,
             edit: false,
             delete: false,
             reactions: false,
@@ -216,13 +218,19 @@ pub fn parse_webhook_payload(payload: &serde_json::Value) -> Vec<InboundMessage>
                 continue;
             };
             for message in messages {
-                if message["type"].as_str() != Some("text") {
-                    continue;
-                }
                 let Some(sender_id) = message["from"].as_str() else {
                     continue;
                 };
-                let Some(text) = message["text"]["body"].as_str() else {
+                let attachments = build_inbound_attachments(message);
+                let text = text_or_attachment_placeholder(
+                    message["text"]["body"]
+                        .as_str()
+                        .or_else(|| message["image"]["caption"].as_str())
+                        .or_else(|| message["video"]["caption"].as_str())
+                        .or_else(|| message["document"]["caption"].as_str()),
+                    &attachments,
+                );
+                let Some(text) = text else {
                     continue;
                 };
                 let sender_name = contact_map
@@ -237,8 +245,8 @@ pub fn parse_webhook_payload(payload: &serde_json::Value) -> Vec<InboundMessage>
                     thread_id: None,
                     is_group: false,
                     is_mention: false,
-                    text: Some(text.to_string()),
-                    attachments: Vec::new(),
+                    text: Some(text),
+                    attachments,
                     platform_message_id: message["id"].as_str().map(str::to_string),
                     timestamp: message["timestamp"]
                         .as_str()
@@ -250,6 +258,36 @@ pub fn parse_webhook_payload(payload: &serde_json::Value) -> Vec<InboundMessage>
     }
 
     inbound
+}
+
+fn build_inbound_attachments(message: &serde_json::Value) -> Vec<InboundAttachment> {
+    let mut attachments = Vec::new();
+
+    for (key, mime_fallback) in [
+        ("image", "image/jpeg"),
+        ("audio", "audio/ogg"),
+        ("video", "video/mp4"),
+        ("document", "application/octet-stream"),
+        ("sticker", "image/webp"),
+    ] {
+        let payload = &message[key];
+        if payload.is_null() {
+            continue;
+        }
+
+        attachments.push(InboundAttachment {
+            media_id: None,
+            mime_type: payload["mime_type"]
+                .as_str()
+                .unwrap_or(mime_fallback)
+                .to_string(),
+            filename: payload["filename"].as_str().map(str::to_string),
+            size_bytes: None,
+            url: None,
+        });
+    }
+
+    attachments
 }
 
 pub fn build_send_body(msg: &OutboundMessage) -> serde_json::Value {
@@ -343,6 +381,36 @@ mod tests {
         assert_eq!(messages[0].sender_id, "15551234567");
         assert_eq!(messages[0].sender_name.as_deref(), Some("Alice"));
         assert_eq!(messages[0].text.as_deref(), Some("hello"));
+    }
+
+    #[test]
+    fn parse_webhook_payload_extracts_media_messages_without_text_body() {
+        let payload = serde_json::json!({
+            "entry": [{
+                "changes": [{
+                    "value": {
+                        "metadata": {
+                            "phone_number_id": "12345"
+                        },
+                        "messages": [{
+                            "from": "15551234567",
+                            "id": "wamid.2",
+                            "timestamp": "1710000001",
+                            "type": "image",
+                            "image": {
+                                "mime_type": "image/png"
+                            }
+                        }]
+                    }
+                }]
+            }]
+        });
+
+        let messages = parse_webhook_payload(&payload);
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].text.as_deref(), Some("<media:image>"));
+        assert_eq!(messages[0].attachments.len(), 1);
+        assert_eq!(messages[0].attachments[0].mime_type, "image/png");
     }
 
     #[test]

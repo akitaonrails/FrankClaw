@@ -10,6 +10,8 @@ use frankclaw_core::channel::*;
 use frankclaw_core::error::{FrankClawError, Result};
 use frankclaw_core::types::ChannelId;
 
+use crate::media_text::text_or_attachment_placeholder;
+
 const SLACK_API_BASE: &str = "https://slack.com/api";
 
 pub struct SlackChannel {
@@ -171,7 +173,7 @@ impl ChannelPlugin for SlackChannel {
         ChannelCapabilities {
             threads: true,
             groups: true,
-            attachments: false,
+            attachments: true,
             edit: false,
             delete: false,
             reactions: false,
@@ -306,7 +308,24 @@ fn parse_event_message(event: &serde_json::Value, bot_user_id: Option<&str>) -> 
 
     let channel_id = event["channel"].as_str()?.to_string();
     let sender_id = event["user"].as_str()?.to_string();
-    let text = event["text"].as_str().map(str::to_string);
+    let attachments = event["files"]
+        .as_array()
+        .map(|files| {
+            files.iter()
+                .map(|file| InboundAttachment {
+                    media_id: None,
+                    mime_type: file["mimetype"]
+                        .as_str()
+                        .unwrap_or("application/octet-stream")
+                        .to_string(),
+                    filename: file["name"].as_str().map(str::to_string),
+                    size_bytes: file["size"].as_u64(),
+                    url: file["url_private"].as_str().map(str::to_string),
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let text = text_or_attachment_placeholder(event["text"].as_str(), &attachments);
     let thread_target = encode_thread_target(&channel_id, event["thread_ts"].as_str());
     let channel_type = event["channel_type"].as_str().unwrap_or("channel");
     let is_group = channel_type != "im";
@@ -331,7 +350,7 @@ fn parse_event_message(event: &serde_json::Value, bot_user_id: Option<&str>) -> 
         is_group,
         is_mention,
         text,
-        attachments: Vec::new(),
+        attachments,
         platform_message_id: event["ts"].as_str().map(str::to_string),
         timestamp,
     })
@@ -413,6 +432,35 @@ mod tests {
         );
 
         assert!(inbound.is_none());
+    }
+
+    #[test]
+    fn parse_event_message_collects_files_and_uses_media_placeholder() {
+        let inbound = parse_event_message(
+            &serde_json::json!({
+                "type": "message",
+                "channel": "C123",
+                "channel_type": "channel",
+                "user": "U123",
+                "ts": "1710000000.123456",
+                "files": [{
+                    "name": "report.pdf",
+                    "mimetype": "application/pdf",
+                    "size": 2048,
+                    "url_private": "https://files.example/report.pdf"
+                }]
+            }),
+            None,
+        )
+        .expect("message should parse");
+
+        assert_eq!(inbound.text.as_deref(), Some("<media:attachment>"));
+        assert_eq!(inbound.attachments.len(), 1);
+        assert_eq!(inbound.attachments[0].filename.as_deref(), Some("report.pdf"));
+        assert_eq!(
+            inbound.attachments[0].url.as_deref(),
+            Some("https://files.example/report.pdf")
+        );
     }
 
     #[test]

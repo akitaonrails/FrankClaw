@@ -7,6 +7,8 @@ use frankclaw_core::channel::*;
 use frankclaw_core::error::{FrankClawError, Result};
 use frankclaw_core::types::ChannelId;
 
+use crate::media_text::text_quote_or_attachment_placeholder;
+
 const SIGNAL_API_PATH_CHECK: &str = "/api/v1/check";
 const SIGNAL_API_PATH_EVENTS: &str = "/api/v1/events";
 const SIGNAL_API_PATH_RPC: &str = "/api/v1/rpc";
@@ -416,7 +418,7 @@ fn parse_receive_event(
         .map(str::to_string);
     let is_group = group_id.is_some();
     let attachments = build_inbound_attachments(data_message.attachments.as_deref());
-    let text = message_or_placeholder(
+    let text = text_quote_or_attachment_placeholder(
         data_message.message.as_deref(),
         data_message.quote.as_ref().and_then(|quote| quote.text.as_deref()),
         &attachments,
@@ -459,49 +461,6 @@ fn build_inbound_attachments(
             url: None,
         })
         .collect()
-}
-
-fn message_or_placeholder(
-    message: Option<&str>,
-    quote: Option<&str>,
-    attachments: &[InboundAttachment],
-) -> Option<String> {
-    let text = message
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string);
-    if text.is_some() {
-        return text;
-    }
-
-    if !attachments.is_empty() {
-        return Some(attachment_placeholder(attachments));
-    }
-
-    quote
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-}
-
-fn attachment_placeholder(attachments: &[InboundAttachment]) -> String {
-    if attachments.len() > 1 {
-        return "<media:attachments>".into();
-    }
-
-    let mime = attachments
-        .first()
-        .map(|attachment| attachment.mime_type.as_str())
-        .unwrap_or("application/octet-stream");
-    if mime.starts_with("image/") {
-        "<media:image>".into()
-    } else if mime.starts_with("audio/") {
-        "<media:audio>".into()
-    } else if mime.starts_with("video/") {
-        "<media:video>".into()
-    } else {
-        "<media:attachment>".into()
-    }
 }
 
 fn detect_group_mention(mentions: Option<&[SignalMention]>, configured_account: Option<&str>) -> bool {

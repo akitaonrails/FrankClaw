@@ -34,6 +34,7 @@ The main remaining gap is feature surface, not the core message-to-model flow.
 - [x] Read-only and bounded model-driven tools
 - [x] Local Canvas host surface
 - [x] Operator health, remote exposure, onboarding, and systemd helpers
+- [x] Normalized inbound media placeholders on supported channels
 
 ## Implemented Channels
 
@@ -53,7 +54,7 @@ The main remaining gap is feature surface, not the core message-to-model flow.
 - [ ] Delete support where platforms allow it
 - [ ] Channel-specific streaming or pseudo-streaming delivery
 - [ ] Better group-routing modes and reply-tag semantics
-- [ ] Better WhatsApp-specific behavior beyond text/webhook basics
+- [ ] Better WhatsApp-specific behavior beyond normalized inbound media/webhook handling
 - [ ] Broader platform-specific retry/backoff semantics
 
 ### Canvas Depth

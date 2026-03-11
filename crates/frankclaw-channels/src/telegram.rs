@@ -7,6 +7,8 @@ use frankclaw_core::channel::*;
 use frankclaw_core::error::{FrankClawError, Result};
 use frankclaw_core::types::ChannelId;
 
+use crate::media_text::text_or_attachment_placeholder;
+
 const TELEGRAM_API_BASE: &str = "https://api.telegram.org";
 
 /// Telegram Bot API channel adapter.
@@ -106,7 +108,11 @@ impl TelegramChannel {
         let chat_id = msg["chat"]["id"].as_i64()?;
         let sender_id = msg["from"]["id"].as_i64()?.to_string();
         let sender_name = msg["from"]["first_name"].as_str().map(String::from);
-        let text = msg["text"].as_str().map(String::from);
+        let attachments = build_inbound_attachments(msg);
+        let text = text_or_attachment_placeholder(
+            msg["text"].as_str().or_else(|| msg["caption"].as_str()),
+            &attachments,
+        );
         let topic_id = msg["message_thread_id"].as_i64();
         let is_group = matches!(
             msg["chat"]["type"].as_str(),
@@ -134,11 +140,51 @@ impl TelegramChannel {
                 .map(|t| t.contains("@"))
                 .unwrap_or(false),
             text,
-            attachments: vec![],
+            attachments,
             platform_message_id: Some(message_id),
             timestamp,
         })
     }
+}
+
+fn build_inbound_attachments(msg: &serde_json::Value) -> Vec<InboundAttachment> {
+    let mut attachments = Vec::new();
+
+    if let Some(photo) = msg["photo"].as_array().and_then(|entries| entries.last()) {
+        attachments.push(InboundAttachment {
+            media_id: None,
+            mime_type: "image/jpeg".into(),
+            filename: None,
+            size_bytes: photo["file_size"].as_u64(),
+            url: None,
+        });
+    }
+
+    for (key, mime_fallback) in [
+        ("document", "application/octet-stream"),
+        ("video", "video/mp4"),
+        ("audio", "audio/mpeg"),
+        ("voice", "audio/ogg"),
+        ("sticker", "image/webp"),
+        ("animation", "video/mp4"),
+    ] {
+        let media = &msg[key];
+        if media.is_null() {
+            continue;
+        }
+        attachments.push(InboundAttachment {
+            media_id: None,
+            mime_type: media["mime_type"]
+                .as_str()
+                .unwrap_or(mime_fallback)
+                .to_string(),
+            filename: media["file_name"].as_str().map(str::to_string),
+            size_bytes: media["file_size"].as_u64(),
+            url: None,
+        });
+    }
+
+    attachments
 }
 
 #[async_trait]
@@ -409,5 +455,60 @@ mod tests {
         assert_eq!(body["chat_id"], serde_json::json!("-100123"));
         assert_eq!(body["message_id"], serde_json::json!(99));
         assert_eq!(body["text"], serde_json::json!("updated"));
+    }
+
+    #[test]
+    fn parse_message_uses_caption_and_collects_media_attachments() {
+        let channel = TelegramChannel::new(SecretString::from("token".to_string()));
+        let inbound = channel
+            .parse_message(&serde_json::json!({
+                "message_id": 100,
+                "date": 1_700_000_000,
+                "caption": "look at this",
+                "chat": {
+                    "id": 42,
+                    "type": "private"
+                },
+                "from": {
+                    "id": 7,
+                    "first_name": "User"
+                },
+                "photo": [
+                    { "file_size": 512 },
+                    { "file_size": 1024 }
+                ]
+            }))
+            .expect("message should parse");
+
+        assert_eq!(inbound.text.as_deref(), Some("look at this"));
+        assert_eq!(inbound.attachments.len(), 1);
+        assert_eq!(inbound.attachments[0].mime_type, "image/jpeg");
+        assert_eq!(inbound.attachments[0].size_bytes, Some(1024));
+    }
+
+    #[test]
+    fn parse_message_falls_back_to_media_placeholder_without_text() {
+        let channel = TelegramChannel::new(SecretString::from("token".to_string()));
+        let inbound = channel
+            .parse_message(&serde_json::json!({
+                "message_id": 101,
+                "date": 1_700_000_000,
+                "chat": {
+                    "id": 42,
+                    "type": "private"
+                },
+                "from": {
+                    "id": 7,
+                    "first_name": "User"
+                },
+                "voice": {
+                    "file_size": 2048
+                }
+            }))
+            .expect("message should parse");
+
+        assert_eq!(inbound.text.as_deref(), Some("<media:audio>"));
+        assert_eq!(inbound.attachments.len(), 1);
+        assert_eq!(inbound.attachments[0].mime_type, "audio/ogg");
     }
 }
