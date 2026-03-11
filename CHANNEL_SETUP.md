@@ -255,7 +255,9 @@ chromium \
           "session.inspect",
           "browser.open",
           "browser.extract",
-          "browser.snapshot"
+          "browser.snapshot",
+          "browser.click",
+          "browser.type"
         ]
       }
     }
@@ -270,7 +272,13 @@ chromium \
 3. Run `frankclaw doctor`.
 4. Start the gateway.
 5. Verify the core path with `frankclaw message send`.
-6. If browser tools are enabled, verify Chromium with `frankclaw tools list` and `frankclaw tools invoke --tool browser.open`.
+6. If browser tools are enabled, verify Chromium with `frankclaw tools list` and:
+
+```bash
+frankclaw tools invoke --tool browser.open --session default:web:control --args '{"url":"https://example.com"}'
+frankclaw tools invoke --tool browser.type --session default:web:control --args '{"selector":"input","text":"frankclaw"}'
+frankclaw tools invoke --tool browser.click --session default:web:control --args '{"selector":"button"}'
+```
 
 ## Common Checks
 

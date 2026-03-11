@@ -54,7 +54,9 @@ impl ToolRegistry {
         registry.register(Arc::new(SessionInspectTool));
         registry.register(Arc::new(BrowserOpenTool::new(browser.clone())));
         registry.register(Arc::new(BrowserExtractTool::new(browser.clone())));
-        registry.register(Arc::new(BrowserSnapshotTool::new(browser)));
+        registry.register(Arc::new(BrowserSnapshotTool::new(browser.clone())));
+        registry.register(Arc::new(BrowserClickTool::new(browser.clone())));
+        registry.register(Arc::new(BrowserTypeTool::new(browser)));
         registry
     }
 
@@ -247,6 +249,52 @@ impl BrowserClient {
         self.snapshot_session(&session).await
     }
 
+    async fn click(&self, session_id: &str, selector: &str) -> Result<BrowserSnapshot> {
+        let session = self
+            .sessions
+            .lock()
+            .await
+            .get(session_id)
+            .cloned()
+            .ok_or_else(|| FrankClawError::InvalidRequest {
+                msg: format!("browser session '{}' was not opened yet", session_id),
+            })?;
+        let mut socket = self.connect_page_socket(&session.page_ws_url).await?;
+        self.wait_for_ready(&mut socket).await?;
+        let clicked = self
+            .evaluate_bool(&mut socket, &click_expression(selector))
+            .await?;
+        if !clicked {
+            return Err(FrankClawError::AgentRuntime {
+                msg: format!("browser.click could not find selector '{}'", selector),
+            });
+        }
+        self.snapshot_session(&session).await
+    }
+
+    async fn type_text(&self, session_id: &str, selector: &str, text: &str) -> Result<BrowserSnapshot> {
+        let session = self
+            .sessions
+            .lock()
+            .await
+            .get(session_id)
+            .cloned()
+            .ok_or_else(|| FrankClawError::InvalidRequest {
+                msg: format!("browser session '{}' was not opened yet", session_id),
+            })?;
+        let mut socket = self.connect_page_socket(&session.page_ws_url).await?;
+        self.wait_for_ready(&mut socket).await?;
+        let typed = self
+            .evaluate_bool(&mut socket, &type_expression(selector, text))
+            .await?;
+        if !typed {
+            return Err(FrankClawError::AgentRuntime {
+                msg: format!("browser.type could not find selector '{}'", selector),
+            });
+        }
+        self.snapshot_session(&session).await
+    }
+
     async fn create_target(&self, url: &str) -> Result<DevtoolsTarget> {
         let mut endpoint = self.base_url.join("json/new").map_err(|err| FrankClawError::Internal {
             msg: format!("invalid browser endpoint: {err}"),
@@ -347,6 +395,31 @@ impl BrowserClient {
         socket: &mut tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
         expression: &str,
     ) -> Result<String> {
+        Ok(self
+            .evaluate_value(socket, expression)
+            .await?
+            .as_str()
+            .unwrap_or_default()
+            .to_string())
+    }
+
+    async fn evaluate_bool(
+        &self,
+        socket: &mut tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+        expression: &str,
+    ) -> Result<bool> {
+        Ok(self
+            .evaluate_value(socket, expression)
+            .await?
+            .as_bool()
+            .unwrap_or(false))
+    }
+
+    async fn evaluate_value(
+        &self,
+        socket: &mut tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+        expression: &str,
+    ) -> Result<serde_json::Value> {
         let response = self
             .send_command(
                 socket,
@@ -357,10 +430,7 @@ impl BrowserClient {
                 }),
             )
             .await?;
-        Ok(response["result"]["result"]["value"]
-            .as_str()
-            .unwrap_or_default()
-            .to_string())
+        Ok(response["result"]["result"]["value"].clone())
     }
 
     async fn send_command(
@@ -424,6 +494,12 @@ struct BrowserExtractTool {
 struct BrowserSnapshotTool {
     client: Arc<BrowserClient>,
 }
+struct BrowserClickTool {
+    client: Arc<BrowserClient>,
+}
+struct BrowserTypeTool {
+    client: Arc<BrowserClient>,
+}
 
 impl BrowserOpenTool {
     fn new(client: Arc<BrowserClient>) -> Self {
@@ -438,6 +514,18 @@ impl BrowserExtractTool {
 }
 
 impl BrowserSnapshotTool {
+    fn new(client: Arc<BrowserClient>) -> Self {
+        Self { client }
+    }
+}
+
+impl BrowserClickTool {
+    fn new(client: Arc<BrowserClient>) -> Self {
+        Self { client }
+    }
+}
+
+impl BrowserTypeTool {
     fn new(client: Arc<BrowserClient>) -> Self {
         Self { client }
     }
@@ -586,6 +674,81 @@ impl Tool for BrowserSnapshotTool {
     }
 }
 
+#[async_trait]
+impl Tool for BrowserClickTool {
+    fn definition(&self) -> ToolDef {
+        ToolDef {
+            name: "browser.click".into(),
+            description: "Click a DOM element by CSS selector in an existing Chromium-backed browser session.".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "required": ["selector"],
+                "properties": {
+                    "session_id": { "type": "string", "description": "Optional browser session identifier. Defaults to the current chat session." },
+                    "selector": { "type": "string", "description": "CSS selector for the target element." }
+                }
+            }),
+        }
+    }
+
+    async fn invoke(&self, args: serde_json::Value, ctx: ToolContext) -> Result<serde_json::Value> {
+        let session_id = self
+            .client
+            .resolve_session_id(args.get("session_id").and_then(|value| value.as_str()), &ctx)?;
+        let selector = args
+            .get("selector")
+            .and_then(|value| value.as_str())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| FrankClawError::InvalidRequest {
+                msg: "browser.click requires a non-empty selector".into(),
+            })?;
+        let snapshot = self.client.click(&session_id, selector).await?;
+        Ok(snapshot_result(snapshot, false, 1000))
+    }
+}
+
+#[async_trait]
+impl Tool for BrowserTypeTool {
+    fn definition(&self) -> ToolDef {
+        ToolDef {
+            name: "browser.type".into(),
+            description: "Set an input or textarea value by CSS selector in an existing Chromium-backed browser session.".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "required": ["selector", "text"],
+                "properties": {
+                    "session_id": { "type": "string", "description": "Optional browser session identifier. Defaults to the current chat session." },
+                    "selector": { "type": "string", "description": "CSS selector for the target input or textarea." },
+                    "text": { "type": "string", "description": "Replacement text value." }
+                }
+            }),
+        }
+    }
+
+    async fn invoke(&self, args: serde_json::Value, ctx: ToolContext) -> Result<serde_json::Value> {
+        let session_id = self
+            .client
+            .resolve_session_id(args.get("session_id").and_then(|value| value.as_str()), &ctx)?;
+        let selector = args
+            .get("selector")
+            .and_then(|value| value.as_str())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| FrankClawError::InvalidRequest {
+                msg: "browser.type requires a non-empty selector".into(),
+            })?;
+        let text = args
+            .get("text")
+            .and_then(|value| value.as_str())
+            .ok_or_else(|| FrankClawError::InvalidRequest {
+                msg: "browser.type requires text".into(),
+            })?;
+        let snapshot = self.client.type_text(&session_id, selector, text).await?;
+        Ok(snapshot_result(snapshot, false, 1000))
+    }
+}
+
 fn snapshot_result(snapshot: BrowserSnapshot, include_html: bool, max_chars: usize) -> serde_json::Value {
     let mut value = serde_json::json!({
         "session_id": snapshot.session_id,
@@ -599,6 +762,21 @@ fn snapshot_result(snapshot: BrowserSnapshot, include_html: bool, max_chars: usi
         value["html"] = serde_json::json!(truncate_chars(&snapshot.html, max_chars));
     }
     value
+}
+
+fn click_expression(selector: &str) -> String {
+    let selector = serde_json::to_string(selector).unwrap_or_else(|_| "\"\"".into());
+    format!(
+        "(function() {{ const el = document.querySelector({selector}); if (!el) return false; el.click(); return true; }})()"
+    )
+}
+
+fn type_expression(selector: &str, text: &str) -> String {
+    let selector = serde_json::to_string(selector).unwrap_or_else(|_| "\"\"".into());
+    let text = serde_json::to_string(text).unwrap_or_else(|_| "\"\"".into());
+    format!(
+        "(function() {{ const el = document.querySelector({selector}); if (!el) return false; el.focus(); if ('value' in el) {{ el.value = {text}; }} else {{ el.textContent = {text}; }} el.dispatchEvent(new Event('input', {{ bubbles: true }})); el.dispatchEvent(new Event('change', {{ bubbles: true }})); return true; }})()"
+    )
 }
 
 fn truncate_chars(value: &str, max_chars: usize) -> String {
@@ -815,7 +993,9 @@ mod tests {
         };
         registry.register(Arc::new(BrowserOpenTool::new(client.clone())));
         registry.register(Arc::new(BrowserExtractTool::new(client.clone())));
-        registry.register(Arc::new(BrowserSnapshotTool::new(client)));
+        registry.register(Arc::new(BrowserSnapshotTool::new(client.clone())));
+        registry.register(Arc::new(BrowserClickTool::new(client.clone())));
+        registry.register(Arc::new(BrowserTypeTool::new(client)));
 
         let ctx = ToolContext {
             agent_id: AgentId::default_agent(),
@@ -826,6 +1006,8 @@ mod tests {
             "browser.open".into(),
             "browser.extract".into(),
             "browser.snapshot".into(),
+            "browser.click".into(),
+            "browser.type".into(),
         ];
 
         let opened = registry
@@ -863,6 +1045,159 @@ mod tests {
             .as_str()
             .expect("html should exist")
             .contains("<h1>Hello from Chromium</h1>"));
+
+        let clicked = registry
+            .invoke_allowed(
+                &allowed,
+                "browser.click",
+                serde_json::json!({ "selector": "#submit" }),
+                ToolContext {
+                    agent_id: AgentId::default_agent(),
+                    session_key: Some(SessionKey::from_raw("default:web:browser")),
+                    sessions: Arc::new(MockSessionStore::default()),
+                },
+            )
+            .await
+            .expect("browser.click should succeed");
+        assert_eq!(clicked.output["title"], serde_json::json!("Clicked"));
+
+        let typed = registry
+            .invoke_allowed(
+                &allowed,
+                "browser.type",
+                serde_json::json!({ "selector": "#query", "text": "frankclaw" }),
+                ToolContext {
+                    agent_id: AgentId::default_agent(),
+                    session_key: Some(SessionKey::from_raw("default:web:browser")),
+                    sessions: Arc::new(MockSessionStore::default()),
+                },
+            )
+            .await
+            .expect("browser.type should succeed");
+        assert!(
+            typed.output["text"]
+                .as_str()
+                .expect("text should exist")
+                .contains("Typed frankclaw")
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "requires a live Chromium DevTools endpoint via FRANKCLAW_BROWSER_DEVTOOLS_URL"]
+    async fn browser_tools_drive_real_chromium() {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener should bind");
+        let addr = listener.local_addr().expect("listener should have local addr");
+        let app = Router::new().route(
+            "/",
+            get(|| async {
+                axum::response::Html(
+                    r#"<!doctype html>
+                    <html>
+                      <head>
+                        <title>Ready</title>
+                        <meta charset="utf-8">
+                      </head>
+                      <body>
+                        <input id="query" value="">
+                        <button id="submit" type="button">Submit</button>
+                        <div id="status">Idle</div>
+                        <script>
+                          const query = document.getElementById("query");
+                          const status = document.getElementById("status");
+                          query.addEventListener("input", () => {
+                            document.title = "Typed";
+                            status.textContent = "Typed " + query.value;
+                          });
+                          document.getElementById("submit").addEventListener("click", () => {
+                            document.title = "Clicked";
+                            status.textContent = "Clicked " + query.value;
+                          });
+                        </script>
+                      </body>
+                    </html>"#,
+                )
+            }),
+        );
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("real browser test server should run");
+        });
+
+        let registry = ToolRegistry::with_builtins();
+        let ctx = ToolContext {
+            agent_id: AgentId::default_agent(),
+            session_key: Some(SessionKey::from_raw("default:web:real-browser")),
+            sessions: Arc::new(MockSessionStore::default()),
+        };
+        let allowed = vec![
+            "browser.open".into(),
+            "browser.extract".into(),
+            "browser.snapshot".into(),
+            "browser.click".into(),
+            "browser.type".into(),
+        ];
+
+        let opened = registry
+            .invoke_allowed(
+                &allowed,
+                "browser.open",
+                serde_json::json!({ "url": format!("http://{addr}/") }),
+                ctx.clone(),
+            )
+            .await
+            .expect("browser.open should succeed against real chromium");
+        assert_eq!(opened.output["title"], serde_json::json!("Ready"));
+
+        let typed = registry
+            .invoke_allowed(
+                &allowed,
+                "browser.type",
+                serde_json::json!({ "selector": "#query", "text": "frankclaw" }),
+                ctx.clone(),
+            )
+            .await
+            .expect("browser.type should succeed against real chromium");
+        assert_eq!(typed.output["title"], serde_json::json!("Typed"));
+        assert!(
+            typed.output["text"]
+                .as_str()
+                .expect("text should exist")
+                .contains("Typed frankclaw")
+        );
+
+        let clicked = registry
+            .invoke_allowed(
+                &allowed,
+                "browser.click",
+                serde_json::json!({ "selector": "#submit" }),
+                ctx.clone(),
+            )
+            .await
+            .expect("browser.click should succeed against real chromium");
+        assert_eq!(clicked.output["title"], serde_json::json!("Clicked"));
+        assert!(
+            clicked.output["text"]
+                .as_str()
+                .expect("text should exist")
+                .contains("Clicked frankclaw")
+        );
+
+        let snapshot = registry
+            .invoke_allowed(
+                &allowed,
+                "browser.snapshot",
+                serde_json::json!({ "max_chars": 4096 }),
+                ctx,
+            )
+            .await
+            .expect("browser.snapshot should succeed against real chromium");
+        assert!(
+            snapshot.output["html"]
+                .as_str()
+                .expect("html should exist")
+                .contains("id=\"status\"")
+        );
     }
 
     async fn mock_create_target(
@@ -903,18 +1238,35 @@ mod tests {
                 "Runtime.evaluate" => {
                     let expression = frame["params"]["expression"].as_str().unwrap_or_default();
                     let value = match expression {
-                        "document.readyState" => "complete".to_string(),
-                        "document.title || ''" => state.title.lock().await.clone(),
-                        "document.body ? document.body.innerText : ''" => state.text.lock().await.clone(),
-                        "document.documentElement ? document.documentElement.outerHTML : ''" => state.html.lock().await.clone(),
-                        "window.location.href" => state.page_url.lock().await.clone(),
-                        _ => String::new(),
+                        "document.readyState" => serde_json::json!("complete"),
+                        "document.title || ''" => serde_json::json!(state.title.lock().await.clone()),
+                        "document.body ? document.body.innerText : ''" => serde_json::json!(state.text.lock().await.clone()),
+                        "document.documentElement ? document.documentElement.outerHTML : ''" => serde_json::json!(state.html.lock().await.clone()),
+                        "window.location.href" => serde_json::json!(state.page_url.lock().await.clone()),
+                        expression if expression.contains(".click();") => {
+                            *state.title.lock().await = "Clicked".into();
+                            *state.text.lock().await = "Clicked submit".into();
+                            serde_json::json!(true)
+                        }
+                        expression if expression.contains("dispatchEvent(new Event('input'") => {
+                            let typed = expression
+                                .split("el.value = ")
+                                .nth(1)
+                                .and_then(|value| value.split(';').next())
+                                .and_then(|value| serde_json::from_str::<String>(value).ok())
+                                .unwrap_or_default();
+                            *state.title.lock().await = "Typed".into();
+                            *state.text.lock().await = format!("Typed {typed}");
+                            serde_json::json!(true)
+                        }
+                        _ => serde_json::json!(""),
                     };
+                    let value_type = if value.is_boolean() { "boolean" } else { "string" };
                     serde_json::json!({
                         "id": id,
                         "result": {
                             "result": {
-                                "type": "string",
+                                "type": value_type,
                                 "value": value,
                             }
                         }

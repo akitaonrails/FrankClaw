@@ -36,6 +36,7 @@ The main remaining gap is feature surface, not the core message-to-model flow.
 - [x] Operator health, remote exposure, onboarding, and systemd helpers
 - [x] Normalized inbound media placeholders on supported channels
 - [x] Chromium-backed browser session tools (`open`, `extract`, `snapshot`)
+- [x] Selector-based browser actions (`click`, `type`)
 
 ## Implemented Channels
 
@@ -73,7 +74,7 @@ The main remaining gap is feature surface, not the core message-to-model flow.
 - [x] Browser automation runtime
 - [ ] Browser session/profile management
 - [x] Visual/browser snapshots
-- [ ] Safer action model for clicks/forms/navigation
+- [x] Safer action model for clicks/forms/navigation
 - [ ] Tool approvals for higher-risk tool families
 - [x] More first-party tools beyond session inspection
 - [ ] Better tool tracing and operator visibility

@@ -20,7 +20,7 @@ For concrete setup snippets for the supported channels and browser runtime, see 
 - **Encrypted sessions** — SQLite-backed with ChaCha20-Poly1305 encryption at rest
 - **Scheduled jobs** — Cron-based task scheduling with agent delivery
 - **Canvas host** — local authenticated visual workspace surface
-- **Bounded tools** — session inspection plus Chromium-backed `browser.open`, `browser.extract`, and `browser.snapshot`
+- **Bounded tools** — session inspection plus Chromium-backed `browser.open`, `browser.extract`, `browser.snapshot`, `browser.click`, and `browser.type`
 - **Operator support** — doctor, status, remote exposure checks, onboarding, and systemd unit generation
 - **Docker browser runtime** — `docker compose up chromium` starts a local DevTools endpoint for browser tools
 - **Media pipeline** — File handling with SSRF protection and filename sanitization
@@ -244,6 +244,15 @@ Example use:
 frankclaw tools invoke --tool browser.open --session default:web:control --args '{"url":"https://example.com"}'
 frankclaw tools invoke --tool browser.extract --session default:web:control
 frankclaw tools invoke --tool browser.snapshot --session default:web:control
+frankclaw tools invoke --tool browser.type --session default:web:control --args '{"selector":"input[name=q]","text":"frankclaw"}'
+frankclaw tools invoke --tool browser.click --session default:web:control --args '{"selector":"button[type=submit]"}'
+```
+
+Live regression check against a real local Chromium instance:
+
+```bash
+FRANKCLAW_BROWSER_DEVTOOLS_URL=http://127.0.0.1:9223/ \
+  cargo test -p frankclaw-tools browser_tools_drive_real_chromium -- --ignored
 ```
 
 ## CLI Reference
