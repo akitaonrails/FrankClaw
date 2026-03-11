@@ -326,6 +326,50 @@ impl ChannelPlugin for TelegramChannel {
         }
     }
 
+    async fn stream_start(&self, msg: &OutboundMessage) -> Result<frankclaw_core::channel::StreamHandle> {
+        match self.send(msg.clone()).await? {
+            SendResult::Sent { platform_message_id } => Ok(frankclaw_core::channel::StreamHandle {
+                channel: self.id(),
+                account_id: msg.account_id.clone(),
+                to: msg.to.clone(),
+                thread_id: msg.thread_id.clone(),
+                draft_message_id: platform_message_id,
+            }),
+            SendResult::RateLimited { retry_after_secs } => Err(FrankClawError::RateLimited {
+                retry_after_secs: retry_after_secs.unwrap_or(1),
+            }),
+            SendResult::Failed { reason } => Err(FrankClawError::Channel {
+                channel: self.id(),
+                msg: reason,
+            }),
+        }
+    }
+
+    async fn stream_update(
+        &self,
+        handle: &frankclaw_core::channel::StreamHandle,
+        text: &str,
+    ) -> Result<()> {
+        self.edit_message(
+            &EditMessageTarget {
+                account_id: handle.account_id.clone(),
+                to: handle.to.clone(),
+                thread_id: handle.thread_id.clone(),
+                platform_message_id: handle.draft_message_id.clone(),
+            },
+            text,
+        )
+        .await
+    }
+
+    async fn stream_end(
+        &self,
+        handle: &frankclaw_core::channel::StreamHandle,
+        final_text: &str,
+    ) -> Result<()> {
+        self.stream_update(handle, final_text).await
+    }
+
     async fn delete_message(&self, target: &DeleteMessageTarget) -> Result<()> {
         let body = build_delete_body(target)?;
         let resp = self
