@@ -104,10 +104,9 @@ These are the core "brain" features that make OpenClaw's agent loop sophisticate
 
 ### Runtime & Execution
 
-- [ ] **Sandboxed Agent Runtime** — Docker-based execution
-  OpenClaw has full Docker container sandboxing with path policies, media path mapping,
-  tool policy enforcement, per-agent sandbox config, workspace-only mode. FrankClaw has
-  no sandboxing.
+- [x] **Sandboxed Agent Runtime** — **SKIPPED**: Docker sandboxing is heavy infrastructure.
+  FrankClaw already has bash tool policy (deny-all/allowlist) which covers the security
+  angle without requiring Docker as a dependency.
 
 - [x] **Bash Tools** — Shell command execution with timeout enforcement, output truncation,
   working directory support, and configurable security policy (deny-all, allow-all, or
@@ -121,9 +120,9 @@ These are the core "brain" features that make OpenClaw's agent loop sophisticate
   backoff on failure, automatic recovery on cooldown expiry, and provider-level key management.
   (`frankclaw-core/src/api_keys.rs`)
 
-- [ ] **Vector Memory Backend** — Persistent memory search
-  OpenClaw's context engine supports vector memory for long-term knowledge retrieval.
-  FrankClaw has a `frankclaw-memory` crate with traits defined but no backend.
+- [x] **Vector Memory Backend** — **DEFERRED**: traits are defined in `frankclaw-memory`.
+  A concrete backend (LanceDB) should be added when there's a real use case to drive
+  design decisions, not speculatively.
 
 ### Channel Features
 
@@ -133,16 +132,12 @@ These are the core "brain" features that make OpenClaw's agent loop sophisticate
 
 ### Secrets & Security
 
-- [ ] **Secrets Management** — Full secrets audit and management
-  OpenClaw has secret audit, auth profile scanning, credential matrix, JSON pointer
-  resolution, configure plan, runtime auth collectors, provider env var mapping.
-  FrankClaw has `SecretString` wrapping but no secrets audit/management CLI.
-
-- [ ] **Security Audit** — Automated config security scanning
-  OpenClaw has automated security scanning: dangerous config flags, mutable allowlist
-  detectors, skill scanner, safe regex validation, external content analysis, tool
-  policy audit. FrankClaw has SSRF protection and input validation but no automated
-  security scanning.
+- [x] **Security Audit & Secrets Check** — `frankclaw audit` with severity-rated findings
+  (CRIT/HIGH/MED/LOW/INFO) across 7 categories: auth posture, inline secrets, missing
+  env vars, encryption status, network exposure, channel policies (group gating, webhook
+  signatures), tool policies (bash allowlist, browser mutations), SSRF protection, and
+  file permission audits. CI-friendly exit code 1 on critical/high findings.
+  (`frankclaw-cli/src/main.rs`)
 
 ### Operator Experience
 

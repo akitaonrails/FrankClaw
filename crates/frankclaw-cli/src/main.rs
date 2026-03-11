@@ -82,6 +82,9 @@ enum Command {
     /// Stop a running gateway daemon.
     Stop,
 
+    /// Security audit: scan config for secrets, auth, and policy issues.
+    Audit,
+
     /// Generate a secure starter config for a chosen channel profile.
     Onboard {
         /// Starter channel profile: web, telegram, whatsapp, slack, discord, signal.
@@ -501,6 +504,18 @@ async fn main() -> anyhow::Result<()> {
                 None => {
                     println!("No running gateway found (no PID file).");
                 }
+            }
+        }
+
+        Command::Audit => {
+            let config = load_config(cli.config.as_deref(), &state_dir)?;
+            let config_file_path = cli
+                .config
+                .clone()
+                .unwrap_or_else(|| state_dir.join("frankclaw.json"));
+            let exit_code = run_security_audit(&config, &config_file_path, &state_dir)?;
+            if exit_code != 0 {
+                std::process::exit(exit_code);
             }
         }
 
@@ -2134,6 +2149,533 @@ async fn check_provider_reachable(base_url: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+// ---------------------------------------------------------------------------
+// Security audit: deep config security scanning
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Severity {
+    Info,
+    Low,
+    Medium,
+    High,
+    Critical,
+}
+
+impl std::fmt::Display for Severity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Info => write!(f, "INFO"),
+            Self::Low => write!(f, " LOW"),
+            Self::Medium => write!(f, " MED"),
+            Self::High => write!(f, "HIGH"),
+            Self::Critical => write!(f, "CRIT"),
+        }
+    }
+}
+
+struct Finding {
+    severity: Severity,
+    category: &'static str,
+    message: String,
+    remediation: String,
+}
+
+fn run_security_audit(
+    config: &frankclaw_core::config::FrankClawConfig,
+    config_path: &std::path::Path,
+    state_dir: &std::path::Path,
+) -> anyhow::Result<i32> {
+    let mut findings = Vec::new();
+
+    // --- Auth posture ---
+    audit_auth(config, &mut findings);
+
+    // --- Secrets: inline values ---
+    audit_inline_secrets(config, &mut findings);
+
+    // --- Secrets: missing env vars ---
+    audit_missing_env_vars(config, &mut findings);
+
+    // --- Encryption ---
+    audit_encryption(config, &mut findings);
+
+    // --- Network exposure ---
+    audit_network(config, &mut findings);
+
+    // --- Channel policies ---
+    audit_channel_policies(config, &mut findings);
+
+    // --- Tool policies ---
+    audit_tool_policies(config, &mut findings);
+
+    // --- File permissions ---
+    audit_file_permissions(config_path, state_dir, &mut findings);
+
+    // --- SSRF protection ---
+    if !config.security.ssrf_protection {
+        findings.push(Finding {
+            severity: Severity::Critical,
+            category: "network",
+            message: "SSRF protection is disabled — outbound requests can reach private networks".into(),
+            remediation: "Set security.ssrf_protection to true".into(),
+        });
+    }
+
+    // --- Print report ---
+    findings.sort_by(|a, b| b.severity.cmp(&a.severity));
+
+    println!("FrankClaw Security Audit");
+    println!("========================");
+    println!();
+
+    if findings.is_empty() {
+        println!("No security issues found. Configuration looks good.");
+        return Ok(0);
+    }
+
+    let mut by_category: std::collections::BTreeMap<&str, Vec<&Finding>> =
+        std::collections::BTreeMap::new();
+    for finding in &findings {
+        by_category.entry(finding.category).or_default().push(finding);
+    }
+
+    for (category, category_findings) in &by_category {
+        println!("  {}", category.to_uppercase());
+        for finding in category_findings {
+            println!("    [{}] {}", finding.severity, finding.message);
+            println!("          Fix: {}", finding.remediation);
+        }
+        println!();
+    }
+
+    // --- Summary ---
+    let crit = findings.iter().filter(|f| f.severity == Severity::Critical).count();
+    let high = findings.iter().filter(|f| f.severity == Severity::High).count();
+    let med = findings.iter().filter(|f| f.severity == Severity::Medium).count();
+    let low = findings.iter().filter(|f| f.severity == Severity::Low).count();
+    let info = findings.iter().filter(|f| f.severity == Severity::Info).count();
+
+    println!(
+        "Summary: {} critical, {} high, {} medium, {} low, {} info",
+        crit, high, med, low, info
+    );
+
+    if crit > 0 || high > 0 {
+        println!("Audit FAILED — fix critical/high issues before deploying.");
+        Ok(1)
+    } else {
+        println!("Audit passed with warnings.");
+        Ok(0)
+    }
+}
+
+fn audit_auth(
+    config: &frankclaw_core::config::FrankClawConfig,
+    findings: &mut Vec<Finding>,
+) {
+    match &config.gateway.auth {
+        frankclaw_core::auth::AuthMode::None => {
+            findings.push(Finding {
+                severity: Severity::High,
+                category: "auth",
+                message: "Gateway authentication is disabled — anyone with network access can connect".into(),
+                remediation: "Set gateway.auth to token or password mode. Run: frankclaw gen-token".into(),
+            });
+        }
+        frankclaw_core::auth::AuthMode::Token { token } => {
+            if let Some(token) = token {
+                use secrecy::ExposeSecret;
+                let token_str = token.expose_secret();
+                if token_str.len() < 16 {
+                    findings.push(Finding {
+                        severity: Severity::Medium,
+                        category: "auth",
+                        message: "Gateway token is shorter than 16 characters".into(),
+                        remediation: "Generate a stronger token: frankclaw gen-token".into(),
+                    });
+                }
+            }
+        }
+        frankclaw_core::auth::AuthMode::Password { hash } => {
+            if hash.trim().is_empty() {
+                findings.push(Finding {
+                    severity: Severity::High,
+                    category: "auth",
+                    message: "Password auth is configured but password hash is empty".into(),
+                    remediation: "Set a password hash: frankclaw hash-password".into(),
+                });
+            }
+        }
+        _ => {}
+    }
+}
+
+fn audit_inline_secrets(
+    config: &frankclaw_core::config::FrankClawConfig,
+    findings: &mut Vec<Finding>,
+) {
+    // Check providers for inline API keys (they should use env refs)
+    for provider in &config.models.providers {
+        if provider.api_key_ref.is_none() && provider.api != "ollama" {
+            findings.push(Finding {
+                severity: Severity::Medium,
+                category: "secrets",
+                message: format!(
+                    "Provider '{}' has no api_key_ref — API key may be missing or hardcoded elsewhere",
+                    provider.id
+                ),
+                remediation: format!(
+                    "Set models.providers[{}].api_key_ref to an env var name like \"{}_API_KEY\"",
+                    provider.id,
+                    provider.api.to_uppercase()
+                ),
+            });
+        }
+    }
+
+    // Check channels for inline secrets
+    for (channel_id, channel) in &config.channels {
+        for account in &channel.accounts {
+            for (inline_key, env_key) in [
+                ("bot_token", "bot_token_env"),
+                ("token", "token_env"),
+                ("app_token", "app_token_env"),
+                ("access_token", "access_token_env"),
+                ("verify_token", "verify_token_env"),
+                ("app_secret", "app_secret_env"),
+            ] {
+                if account
+                    .get(inline_key)
+                    .and_then(|v| v.as_str())
+                    .filter(|v| !v.trim().is_empty())
+                    .is_some()
+                {
+                    findings.push(Finding {
+                        severity: Severity::High,
+                        category: "secrets",
+                        message: format!(
+                            "Channel '{}' has '{}' stored inline in config file",
+                            channel_id, inline_key
+                        ),
+                        remediation: format!(
+                            "Move to env var: rename '{}' to '{}' and set the value in the environment",
+                            inline_key, env_key
+                        ),
+                    });
+                }
+            }
+        }
+    }
+
+    // Check gateway token stored inline (it's always inline for now, but warn if config is world-readable)
+    if let frankclaw_core::auth::AuthMode::Token { token: Some(_) } = &config.gateway.auth {
+        findings.push(Finding {
+            severity: Severity::Low,
+            category: "secrets",
+            message: "Gateway auth token is stored inline in config file".into(),
+            remediation: "Ensure config file permissions are 0600 (owner-only). Consider using FRANKCLAW_AUTH_TOKEN env var if supported.".into(),
+        });
+    }
+}
+
+fn audit_missing_env_vars(
+    config: &frankclaw_core::config::FrankClawConfig,
+    findings: &mut Vec<Finding>,
+) {
+    for provider in &config.models.providers {
+        if let Some(env_name) = provider.api_key_ref.as_deref() {
+            if std::env::var(env_name)
+                .ok()
+                .filter(|v| !v.trim().is_empty())
+                .is_none()
+            {
+                findings.push(Finding {
+                    severity: Severity::Medium,
+                    category: "secrets",
+                    message: format!(
+                        "Provider '{}' references env var '{}' which is not set",
+                        provider.id, env_name
+                    ),
+                    remediation: format!("Export the API key: export {}=<your-key>", env_name),
+                });
+            }
+        }
+    }
+
+    for (channel_id, channel) in &config.channels {
+        for account in &channel.accounts {
+            for key in [
+                "bot_token_env", "token_env", "app_token_env",
+                "access_token_env", "verify_token_env", "app_secret_env",
+                "base_url_env", "account_env", "phone_number_id_env",
+            ] {
+                if let Some(env_name) = account.get(key).and_then(|v| v.as_str()) {
+                    if std::env::var(env_name)
+                        .ok()
+                        .filter(|v| !v.trim().is_empty())
+                        .is_none()
+                    {
+                        findings.push(Finding {
+                            severity: Severity::Medium,
+                            category: "secrets",
+                            message: format!(
+                                "Channel '{}' references env var '{}' (via {}) which is not set",
+                                channel_id, env_name, key
+                            ),
+                            remediation: format!("Export: export {}=<value>", env_name),
+                        });
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn audit_encryption(
+    config: &frankclaw_core::config::FrankClawConfig,
+    findings: &mut Vec<Finding>,
+) {
+    if !config.security.encrypt_sessions {
+        findings.push(Finding {
+            severity: Severity::Medium,
+            category: "encryption",
+            message: "Session transcript encryption is disabled — transcripts stored in plaintext".into(),
+            remediation: "Set security.encrypt_sessions to true and export FRANKCLAW_MASTER_KEY".into(),
+        });
+    } else if load_master_key_from_env().unwrap_or(None).is_none() {
+        findings.push(Finding {
+            severity: Severity::High,
+            category: "encryption",
+            message: "Session encryption is enabled but FRANKCLAW_MASTER_KEY is not set — sessions will fail".into(),
+            remediation: "Generate and export: export FRANKCLAW_MASTER_KEY=$(frankclaw gen-token)".into(),
+        });
+    }
+
+    if !config.security.encrypt_media {
+        findings.push(Finding {
+            severity: Severity::Low,
+            category: "encryption",
+            message: "Media file encryption is disabled".into(),
+            remediation: "Set security.encrypt_media to true if media files contain sensitive content".into(),
+        });
+    }
+}
+
+fn audit_network(
+    config: &frankclaw_core::config::FrankClawConfig,
+    findings: &mut Vec<Finding>,
+) {
+    use frankclaw_core::config::BindMode;
+
+    let is_network_exposed = !matches!(config.gateway.bind, BindMode::Loopback);
+
+    if is_network_exposed {
+        if matches!(config.gateway.auth, frankclaw_core::auth::AuthMode::None) {
+            findings.push(Finding {
+                severity: Severity::Critical,
+                category: "network",
+                message: "Gateway is network-exposed with no authentication".into(),
+                remediation: "Either bind to loopback only, or configure auth: frankclaw gen-token".into(),
+            });
+        }
+
+        if config.gateway.tls.is_none() {
+            findings.push(Finding {
+                severity: Severity::High,
+                category: "network",
+                message: "Gateway is network-exposed without TLS — credentials sent in cleartext".into(),
+                remediation: "Configure TLS, use a reverse proxy with TLS termination, or restrict to a Tailscale network".into(),
+            });
+        }
+    }
+}
+
+fn audit_channel_policies(
+    config: &frankclaw_core::config::FrankClawConfig,
+    findings: &mut Vec<Finding>,
+) {
+    for (channel_id, channel) in &config.channels {
+        if !channel.enabled {
+            continue;
+        }
+
+        let policy = match channel.security_policy() {
+            Ok(p) => p,
+            Err(_) => {
+                findings.push(Finding {
+                    severity: Severity::High,
+                    category: "channels",
+                    message: format!("Channel '{}' has an invalid security policy", channel_id),
+                    remediation: "Check the channel's extra configuration for valid policy fields".into(),
+                });
+                continue;
+            }
+        };
+
+        if group_surface_needs_guard(channel_id.as_str())
+            && !policy.require_mention_for_groups
+            && policy.allowed_groups.is_none()
+        {
+            findings.push(Finding {
+                severity: Severity::Medium,
+                category: "channels",
+                message: format!(
+                    "Channel '{}' responds to all group messages without mention gating or allowlist",
+                    channel_id
+                ),
+                remediation: format!(
+                    "Set extra.require_mention_for_groups=true or configure extra.allowed_groups for '{}'",
+                    channel_id
+                ),
+            });
+        }
+
+        // WhatsApp webhook signature verification
+        if channel_id.as_str() == "whatsapp" {
+            let has_app_secret = channel.accounts.iter().any(|account| {
+                account.get("app_secret").and_then(|v| v.as_str()).filter(|v| !v.trim().is_empty()).is_some()
+                    || account.get("app_secret_env").and_then(|v| v.as_str()).filter(|v| !v.trim().is_empty()).is_some()
+            });
+            if !has_app_secret {
+                findings.push(Finding {
+                    severity: Severity::High,
+                    category: "channels",
+                    message: "WhatsApp channel has no app_secret — webhook signatures are not verified".into(),
+                    remediation: "Set app_secret_env in the WhatsApp account config".into(),
+                });
+            }
+        }
+    }
+}
+
+fn audit_tool_policies(
+    config: &frankclaw_core::config::FrankClawConfig,
+    findings: &mut Vec<Finding>,
+) {
+    let bash_policy = frankclaw_tools::bash::BashPolicy::from_env();
+    let has_bash_tools = config
+        .agents
+        .agents
+        .values()
+        .flat_map(|agent| agent.tools.iter())
+        .any(|tool| tool == "bash");
+
+    if has_bash_tools {
+        match bash_policy {
+            frankclaw_tools::bash::BashPolicy::AllowAll => {
+                findings.push(Finding {
+                    severity: Severity::Critical,
+                    category: "tools",
+                    message: "Bash tool policy is allow-all — agents can execute any shell command".into(),
+                    remediation: "Set FRANKCLAW_BASH_POLICY to a comma-separated allowlist of permitted binaries, or deny-all".into(),
+                });
+            }
+            frankclaw_tools::bash::BashPolicy::DenyAll => {
+                findings.push(Finding {
+                    severity: Severity::Info,
+                    category: "tools",
+                    message: "Bash tool is configured for agents but policy is deny-all (safe default)".into(),
+                    remediation: "If bash execution is needed, set FRANKCLAW_BASH_POLICY to an allowlist".into(),
+                });
+            }
+            frankclaw_tools::bash::BashPolicy::Allowlist(ref allowed) => {
+                findings.push(Finding {
+                    severity: Severity::Low,
+                    category: "tools",
+                    message: format!(
+                        "Bash tool allowlist permits {} command(s): {}",
+                        allowed.len(),
+                        allowed.join(", ")
+                    ),
+                    remediation: "Review the allowlist and remove any unnecessary commands".into(),
+                });
+            }
+        }
+    }
+
+    let browser_mutations = frankclaw_tools::ToolPolicy::from_env().allow_browser_mutations;
+    let has_browser_mutation_tools = config
+        .agents
+        .agents
+        .values()
+        .flat_map(|agent| agent.tools.iter())
+        .any(|tool| frankclaw_tools::tool_requires_operator_approval(tool));
+
+    if has_browser_mutation_tools && browser_mutations {
+        findings.push(Finding {
+            severity: Severity::Medium,
+            category: "tools",
+            message: "Browser mutation tools are enabled — agents can click, type, and navigate".into(),
+            remediation: "Unset FRANKCLAW_ALLOW_BROWSER_MUTATIONS if browser interaction is not needed".into(),
+        });
+    }
+}
+
+#[cfg(unix)]
+fn audit_file_permissions(
+    config_path: &std::path::Path,
+    state_dir: &std::path::Path,
+    findings: &mut Vec<Finding>,
+) {
+    use std::os::unix::fs::PermissionsExt;
+
+    if let Ok(meta) = std::fs::metadata(config_path) {
+        let mode = meta.permissions().mode() & 0o777;
+        if mode & 0o077 != 0 {
+            findings.push(Finding {
+                severity: Severity::High,
+                category: "filesystem",
+                message: format!(
+                    "Config file has permissions {:04o} — readable by other users",
+                    mode
+                ),
+                remediation: format!("chmod 600 {}", config_path.display()),
+            });
+        }
+    }
+
+    if let Ok(meta) = std::fs::metadata(state_dir) {
+        let mode = meta.permissions().mode() & 0o777;
+        if mode & 0o077 != 0 {
+            findings.push(Finding {
+                severity: Severity::Medium,
+                category: "filesystem",
+                message: format!(
+                    "State directory has permissions {:04o} — accessible by other users",
+                    mode
+                ),
+                remediation: format!("chmod 700 {}", state_dir.display()),
+            });
+        }
+    }
+
+    let db_path = state_dir.join("sessions.db");
+    if let Ok(meta) = std::fs::metadata(&db_path) {
+        let mode = meta.permissions().mode() & 0o777;
+        if mode & 0o077 != 0 {
+            findings.push(Finding {
+                severity: Severity::High,
+                category: "filesystem",
+                message: format!(
+                    "Sessions database has permissions {:04o} — readable by other users",
+                    mode
+                ),
+                remediation: format!("chmod 600 {}", db_path.display()),
+            });
+        }
+    }
+}
+
+#[cfg(not(unix))]
+fn audit_file_permissions(
+    _config_path: &std::path::Path,
+    _state_dir: &std::path::Path,
+    _findings: &mut Vec<Finding>,
+) {
+    // No permission checks on non-Unix platforms
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2819,6 +3361,146 @@ mod tests {
         };
         assert!(config.base_url.is_some());
         assert!(config.api_key_ref.is_none());
+    }
+
+    // --- Security audit tests ---
+
+    #[test]
+    fn audit_auth_flags_no_auth() {
+        let mut config = frankclaw_core::config::FrankClawConfig::default();
+        config.gateway.auth = frankclaw_core::auth::AuthMode::None;
+
+        let mut findings = Vec::new();
+        audit_auth(&config, &mut findings);
+
+        assert!(!findings.is_empty());
+        assert!(findings.iter().any(|f| f.severity == Severity::High && f.category == "auth"));
+    }
+
+    #[test]
+    fn audit_auth_passes_with_token() {
+        let mut config = frankclaw_core::config::FrankClawConfig::default();
+        config.gateway.auth = frankclaw_core::auth::AuthMode::Token {
+            token: Some(secrecy::SecretString::from("a-long-enough-token-here".to_string())),
+        };
+
+        let mut findings = Vec::new();
+        audit_auth(&config, &mut findings);
+
+        assert!(findings.iter().all(|f| f.severity < Severity::High));
+    }
+
+    #[test]
+    fn audit_auth_warns_short_token() {
+        let mut config = frankclaw_core::config::FrankClawConfig::default();
+        config.gateway.auth = frankclaw_core::auth::AuthMode::Token {
+            token: Some(secrecy::SecretString::from("short".to_string())),
+        };
+
+        let mut findings = Vec::new();
+        audit_auth(&config, &mut findings);
+
+        assert!(findings.iter().any(|f| f.severity == Severity::Medium && f.message.contains("shorter")));
+    }
+
+    #[test]
+    fn audit_inline_secrets_detects_inline_bot_token() {
+        let mut config = frankclaw_core::config::FrankClawConfig::default();
+        config.channels.insert(
+            ChannelId::new("telegram"),
+            ChannelConfig {
+                enabled: true,
+                accounts: vec![serde_json::json!({
+                    "bot_token": "123456:ABC-DEF"
+                })],
+                extra: serde_json::json!({}),
+            },
+        );
+
+        let mut findings = Vec::new();
+        audit_inline_secrets(&config, &mut findings);
+
+        assert!(findings.iter().any(|f| f.severity == Severity::High
+            && f.message.contains("bot_token")
+            && f.message.contains("inline")));
+    }
+
+    #[test]
+    fn audit_encryption_warns_when_disabled() {
+        let mut config = frankclaw_core::config::FrankClawConfig::default();
+        config.security.encrypt_sessions = false;
+
+        let mut findings = Vec::new();
+        audit_encryption(&config, &mut findings);
+
+        assert!(findings.iter().any(|f| f.category == "encryption" && f.message.contains("disabled")));
+    }
+
+    #[test]
+    fn audit_network_flags_exposed_no_auth() {
+        let mut config = frankclaw_core::config::FrankClawConfig::default();
+        config.gateway.bind = frankclaw_core::config::BindMode::Lan;
+        config.gateway.auth = frankclaw_core::auth::AuthMode::None;
+
+        let mut findings = Vec::new();
+        audit_network(&config, &mut findings);
+
+        assert!(findings.iter().any(|f| f.severity == Severity::Critical
+            && f.message.contains("network-exposed")));
+    }
+
+    #[test]
+    fn audit_network_ok_for_loopback() {
+        let config = frankclaw_core::config::FrankClawConfig::default();
+
+        let mut findings = Vec::new();
+        audit_network(&config, &mut findings);
+
+        assert!(findings.is_empty());
+    }
+
+    #[test]
+    fn audit_channel_policies_flags_ungated_groups() {
+        let mut config = frankclaw_core::config::FrankClawConfig::default();
+        config.channels.insert(
+            ChannelId::new("discord"),
+            ChannelConfig {
+                enabled: true,
+                accounts: vec![serde_json::json!({
+                    "bot_token_env": "DISCORD_BOT_TOKEN"
+                })],
+                extra: serde_json::json!({
+                    "require_mention_for_groups": false
+                }),
+            },
+        );
+
+        let mut findings = Vec::new();
+        audit_channel_policies(&config, &mut findings);
+
+        assert!(findings.iter().any(|f| f.message.contains("group messages")));
+    }
+
+    #[test]
+    fn audit_ssrf_disabled_is_critical() {
+        let mut config = frankclaw_core::config::FrankClawConfig::default();
+        config.security.ssrf_protection = false;
+        let config_path = std::path::Path::new("/tmp/nonexistent-config.json");
+        let state_dir = std::path::Path::new("/tmp/nonexistent-state");
+
+        let exit_code = run_security_audit(&config, config_path, state_dir)
+            .expect("audit should succeed");
+
+        // Should fail due to SSRF being critical + likely other high findings
+        assert_eq!(exit_code, 1);
+    }
+
+    #[test]
+    fn severity_ordering_is_correct() {
+        assert!(Severity::Critical > Severity::High);
+        assert!(Severity::High > Severity::Medium);
+        assert!(Severity::Medium > Severity::Low);
+        assert!(Severity::Low > Severity::Info);
     }
 }
 
