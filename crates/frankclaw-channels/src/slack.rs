@@ -17,6 +17,17 @@ use crate::outbound_text::{normalize_outbound_text, OutboundTextFlavor};
 
 const SLACK_API_BASE: &str = "https://slack.com/api";
 
+/// Slack API error codes that are permanent failures and must not be retried.
+const SLACK_FATAL_ERRORS: &[&str] = &[
+    "account_inactive",
+    "invalid_auth",
+    "token_revoked",
+    "org_login_required",
+    "missing_scope",
+    "not_allowed_token_type",
+    "team_access_not_granted",
+];
+
 pub struct SlackChannel {
     app_token: SecretString,
     bot_token: SecretString,
@@ -344,6 +355,9 @@ impl ChannelPlugin for SlackChannel {
             match self.run_socket_mode(inbound_tx.clone()).await {
                 Ok(()) => return Ok(()),
                 Err(err) => {
+                    if is_fatal_slack_error(&err) {
+                        return Err(err);
+                    }
                     warn!(error = %err, "slack socket mode error, retrying in 5s");
                     tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                 }
@@ -410,11 +424,9 @@ impl ChannelPlugin for SlackChannel {
                 platform_message_id: body["ts"].as_str().unwrap_or_default().to_string(),
             })
         } else {
+            let error = body["error"].as_str().unwrap_or("unknown slack send failure");
             Ok(SendResult::Failed {
-                reason: body["error"]
-                    .as_str()
-                    .unwrap_or("unknown slack send failure")
-                    .to_string(),
+                reason: classify_slack_send_error(error),
             })
         }
     }
@@ -692,6 +704,26 @@ fn parse_slack_timestamp(value: &str) -> Option<chrono::DateTime<chrono::Utc>> {
     chrono::DateTime::from_timestamp(seconds, 0)
 }
 
+/// Check if a Slack error is a permanent authentication/authorization failure
+/// that should not be retried.
+fn is_fatal_slack_error(err: &FrankClawError) -> bool {
+    let msg = err.to_string();
+    SLACK_FATAL_ERRORS.iter().any(|code| msg.contains(code))
+}
+
+/// Provide human-readable error messages for common Slack API errors.
+fn classify_slack_send_error(error: &str) -> String {
+    match error {
+        "channel_not_found" => "channel not found (bot may not be invited)".into(),
+        "not_in_channel" => "bot is not a member of this channel".into(),
+        "is_archived" => "cannot send to an archived channel".into(),
+        "msg_too_long" => "message exceeds Slack's length limit".into(),
+        "no_text" => "message text is empty".into(),
+        "restricted_action" => "workspace policy restricts this action".into(),
+        _ => error.to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -948,5 +980,55 @@ mod tests {
 
         assert_eq!(body["channel"], serde_json::json!("C123"));
         assert_eq!(body["ts"], serde_json::json!("1710000000.123456"));
+    }
+
+    // --- Audit regression tests ---
+
+    #[test]
+    fn is_fatal_slack_error_detects_invalid_auth() {
+        let err = FrankClawError::Channel {
+            channel: ChannelId::new("slack"),
+            msg: "invalid_auth".into(),
+        };
+        assert!(is_fatal_slack_error(&err));
+    }
+
+    #[test]
+    fn is_fatal_slack_error_detects_token_revoked() {
+        let err = FrankClawError::Channel {
+            channel: ChannelId::new("slack"),
+            msg: "token_revoked".into(),
+        };
+        assert!(is_fatal_slack_error(&err));
+    }
+
+    #[test]
+    fn is_fatal_slack_error_detects_account_inactive() {
+        let err = FrankClawError::Channel {
+            channel: ChannelId::new("slack"),
+            msg: "account_inactive".into(),
+        };
+        assert!(is_fatal_slack_error(&err));
+    }
+
+    #[test]
+    fn is_fatal_slack_error_does_not_match_transient_errors() {
+        let err = FrankClawError::Channel {
+            channel: ChannelId::new("slack"),
+            msg: "slack socket mode closed".into(),
+        };
+        assert!(!is_fatal_slack_error(&err));
+    }
+
+    #[test]
+    fn classify_slack_send_error_provides_helpful_messages() {
+        assert!(classify_slack_send_error("channel_not_found").contains("not be invited"));
+        assert!(classify_slack_send_error("not_in_channel").contains("not a member"));
+        assert!(classify_slack_send_error("is_archived").contains("archived"));
+    }
+
+    #[test]
+    fn classify_slack_send_error_passes_through_unknown_errors() {
+        assert_eq!(classify_slack_send_error("some_new_error"), "some_new_error");
     }
 }

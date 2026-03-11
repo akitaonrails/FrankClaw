@@ -92,11 +92,11 @@ is audited, fixes are implemented, tests are added, and the section is marked do
 
 ## 3. Slack Channel
 
-**Status:** TODO
+**Status:** IN PROGRESS
 
 ### Critical
 
-- [ ] **Non-recoverable auth error detection**: Detect `account_inactive`, `invalid_auth`, `token_revoked`, `org_login_required`, `missing_scope` via regex. Throw immediately instead of retrying — these are permanent failures.
+- [x] **Non-recoverable auth error detection**: Detect `account_inactive`, `invalid_auth`, `token_revoked`, `org_login_required`, `missing_scope`, `not_allowed_token_type`, `team_access_not_granted`. Exit immediately instead of retrying — these are permanent failures.
 - [ ] **Event liveness tracking**: Track `lastEventAt` and `lastInboundAt` separately to detect "half-dead" sockets that pass health checks but silently stop delivering events.
 
 ### High
