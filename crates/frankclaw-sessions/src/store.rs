@@ -100,8 +100,11 @@ impl SqliteSessionStore {
     }
 
     /// Decrypt content if encryption is enabled, otherwise return raw string.
-    fn decrypt_content(&self, data: &[u8]) -> Result<String> {
-        match &self.encryption_key {
+    fn decrypt_content(
+        encryption_key: Option<&[u8; 32]>,
+        data: &[u8],
+    ) -> Result<String> {
+        match encryption_key {
             Some(key) => {
                 let blob: frankclaw_crypto::EncryptedBlob =
                     serde_json::from_slice(data).map_err(|e| FrankClawError::SessionStorage {
@@ -419,29 +422,7 @@ impl SessionStore for SqliteSessionStore {
 
             let mut entries = Vec::new();
             for (seq, role_str, content_bytes, metadata_str, timestamp_str) in raw_rows {
-                // Decrypt content.
-                let content = match &encryption_key {
-                    Some(key) => {
-                        let blob: frankclaw_crypto::EncryptedBlob =
-                            serde_json::from_slice(&content_bytes).map_err(|e| {
-                                FrankClawError::SessionStorage {
-                                    msg: format!("decrypt deser error: {e}"),
-                                }
-                            })?;
-                        let plaintext =
-                            decrypt(key, &blob).map_err(FrankClawError::Crypto)?;
-                        String::from_utf8(plaintext).map_err(|e| {
-                            FrankClawError::SessionStorage {
-                                msg: format!("invalid UTF-8: {e}"),
-                            }
-                        })?
-                    }
-                    None => String::from_utf8(content_bytes).map_err(|e| {
-                        FrankClawError::SessionStorage {
-                            msg: format!("invalid UTF-8: {e}"),
-                        }
-                    })?,
-                };
+                let content = Self::decrypt_content(encryption_key.as_ref(), &content_bytes)?;
 
                 entries.push(TranscriptEntry {
                     seq: seq as u64,
