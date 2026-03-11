@@ -16,6 +16,9 @@ use frankclaw_core::types::{AgentId, SessionKey};
 
 use crate::{RunLog, RunStatus};
 
+/// Default timeout for a single cron job execution.
+const JOB_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(600);
+
 /// A scheduled job definition.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CronJob {
@@ -108,6 +111,16 @@ impl CronService {
                                     continue;
                                 }
 
+                                // Skip if a previous run is still active.
+                                if job
+                                    .last_run
+                                    .as_ref()
+                                    .is_some_and(|run| run.status == RunStatus::Running)
+                                {
+                                    debug!(job_id = %job.id, "skipping cron job — previous run still active");
+                                    continue;
+                                }
+
                                 let already_started = job
                                     .last_run
                                     .as_ref()
@@ -136,7 +149,15 @@ impl CronService {
                             let path = path.clone();
                             tokio::spawn(async move {
                                 let started_at = Utc::now();
-                                let result = runner(job.clone()).await;
+                                let result = match tokio::time::timeout(JOB_TIMEOUT, runner(job.clone())).await {
+                                    Ok(r) => r,
+                                    Err(_) => {
+                                        warn!(job_id = %job.id, timeout_secs = JOB_TIMEOUT.as_secs(), "cron job timed out");
+                                        Err(FrankClawError::AgentRuntime {
+                                            msg: format!("cron job '{}' timed out after {}s", job.id, JOB_TIMEOUT.as_secs()),
+                                        })
+                                    }
+                                };
                                 let finished_at = Utc::now();
 
                                 {
@@ -175,6 +196,18 @@ impl CronService {
                 msg: format!("invalid cron schedule '{}': {e}", job.schedule),
             }
         })?;
+        // Validate prompt is non-empty.
+        if job.prompt.trim().is_empty() {
+            return Err(FrankClawError::ConfigValidation {
+                msg: "cron job prompt must not be empty".into(),
+            });
+        }
+        // Validate job ID is non-empty.
+        if job.id.trim().is_empty() {
+            return Err(FrankClawError::ConfigValidation {
+                msg: "cron job id must not be empty".into(),
+            });
+        }
 
         self.jobs.write().await.insert(job.id.clone(), job);
         save_jobs(self.path.as_deref(), &self.jobs).await;
@@ -293,5 +326,62 @@ mod tests {
         assert!(synced[0].last_run.is_some());
 
         let _ = std::fs::remove_file(temp);
+    }
+
+    #[tokio::test]
+    async fn add_rejects_empty_prompt() {
+        let service = CronService::new();
+        let err = service
+            .add(CronJob {
+                id: "empty-prompt".into(),
+                schedule: "0 * * * * *".into(),
+                agent_id: AgentId::default_agent(),
+                session_key: SessionKey::from_raw("default:cron:test"),
+                prompt: "   ".into(),
+                enabled: true,
+                created_at: Utc::now(),
+                last_run: None,
+            })
+            .await;
+        assert!(err.is_err());
+        assert!(err.unwrap_err().to_string().contains("prompt must not be empty"));
+    }
+
+    #[tokio::test]
+    async fn add_rejects_empty_job_id() {
+        let service = CronService::new();
+        let err = service
+            .add(CronJob {
+                id: "".into(),
+                schedule: "0 * * * * *".into(),
+                agent_id: AgentId::default_agent(),
+                session_key: SessionKey::from_raw("default:cron:test"),
+                prompt: "hello".into(),
+                enabled: true,
+                created_at: Utc::now(),
+                last_run: None,
+            })
+            .await;
+        assert!(err.is_err());
+        assert!(err.unwrap_err().to_string().contains("id must not be empty"));
+    }
+
+    #[tokio::test]
+    async fn add_rejects_invalid_schedule() {
+        let service = CronService::new();
+        let err = service
+            .add(CronJob {
+                id: "bad-schedule".into(),
+                schedule: "not-a-cron-expression".into(),
+                agent_id: AgentId::default_agent(),
+                session_key: SessionKey::from_raw("default:cron:test"),
+                prompt: "hello".into(),
+                enabled: true,
+                created_at: Utc::now(),
+                last_run: None,
+            })
+            .await;
+        assert!(err.is_err());
+        assert!(err.unwrap_err().to_string().contains("invalid cron schedule"));
     }
 }
