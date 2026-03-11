@@ -66,10 +66,9 @@ These are the core "brain" features that make OpenClaw's agent loop sophisticate
 - [x] **Context Compaction** — Automatic context window management with safety margins,
   per-message overhead estimation, and orphaned tool result cleanup.
 
-- [ ] **Subagent System** — Hierarchical agent spawning
-  OpenClaw supports spawning subagents with depth limits, lifecycle management (spawn, steer,
-  announce, complete), a persistent registry, attachment forwarding, and context inheritance.
-  FrankClaw has no subagent concept.
+- [x] **Subagent System** — Hierarchical agent spawning with depth limits, concurrency control,
+  lifecycle tracking (pending → running → completed/failed/killed), push-based completion
+  notification, and system prompt context injection. (`frankclaw-runtime/src/subagent.rs`)
 
 - [ ] **Auto-Reply Command System** — Structured command dispatch
   OpenClaw has a full command detection, registry, and dispatch pipeline with heartbeat,
@@ -255,7 +254,7 @@ These are the core "brain" features that make OpenClaw's agent loop sophisticate
 
 ### Tier 2 — Advanced Agent Capabilities
 
-5. Subagent system (enables complex multi-step workflows)
+5. ~~Subagent system~~ ✅
 6. Auto-reply command system (richer interaction model)
 7. ~~Model catalog/discovery~~ ✅
 8. Auth profile rotation (production reliability)
