@@ -397,6 +397,15 @@ fn parse_receive_event(
         return None;
     }
 
+    // Self-message echo prevention: skip messages from our own account
+    if is_self_message(
+        envelope.source_number.as_deref(),
+        envelope.source_uuid.as_deref(),
+        configured_account,
+    ) {
+        return None;
+    }
+
     let data_message = envelope
         .data_message
         .or_else(|| envelope.edit_message.and_then(|edit| edit.data_message))?;
@@ -427,8 +436,13 @@ fn parse_receive_event(
         .map(str::to_string);
     let is_group = group_id.is_some();
     let attachments = build_inbound_attachments(data_message.attachments.as_deref());
+    // Replace Object Replacement Characters (U+FFFC) with @mention names
+    let message_text = data_message
+        .message
+        .as_deref()
+        .map(|text| replace_mention_orc(text, data_message.mentions.as_deref()));
     let text = text_quote_or_attachment_placeholder(
-        data_message.message.as_deref(),
+        message_text.as_deref(),
         data_message.quote.as_ref().and_then(|quote| quote.text.as_deref()),
         &attachments,
     )?;
@@ -616,11 +630,84 @@ fn normalize_base_url(value: &str) -> String {
 }
 
 fn normalize_signal_identity(value: &str) -> String {
-    value
-        .trim()
-        .trim_start_matches("signal:")
-        .trim()
-        .to_string()
+    let stripped = value.trim().trim_start_matches("signal:").trim();
+    // If it looks like a phone number (starts with + or digits), normalize to E.164
+    if stripped.starts_with('+') || stripped.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+        normalize_e164(stripped)
+    } else {
+        // UUID or other identifier — lowercase for case-insensitive comparison
+        stripped.to_lowercase()
+    }
+}
+
+/// Normalize a phone number to E.164 format: strip non-digits, re-add leading `+`.
+fn normalize_e164(value: &str) -> String {
+    let digits: String = value.chars().filter(|c| c.is_ascii_digit()).collect();
+    if digits.is_empty() {
+        return String::new();
+    }
+    format!("+{digits}")
+}
+
+/// Check if a sender identity matches the configured account (self-message detection).
+/// Compares both phone number and UUID against the configured account value.
+fn is_self_message(
+    source_number: Option<&str>,
+    source_uuid: Option<&str>,
+    configured_account: Option<&str>,
+) -> bool {
+    let Some(account) = configured_account else {
+        return false;
+    };
+    let normalized_account = normalize_signal_identity(account);
+    if normalized_account.is_empty() {
+        return false;
+    }
+
+    if let Some(number) = source_number {
+        let normalized = normalize_signal_identity(number);
+        if !normalized.is_empty() && normalized == normalized_account {
+            return true;
+        }
+    }
+    if let Some(uuid) = source_uuid {
+        let normalized = normalize_signal_identity(uuid);
+        if !normalized.is_empty() && normalized == normalized_account {
+            return true;
+        }
+    }
+    false
+}
+
+/// Replace U+FFFC (Object Replacement Character) placeholders with `@name` strings.
+/// Signal encodes mentions as ORC characters with a parallel metadata array.
+fn replace_mention_orc(text: &str, mentions: Option<&[SignalMention]>) -> String {
+    let mentions = mentions.unwrap_or(&[]);
+    if mentions.is_empty() || !text.contains('\u{FFFC}') {
+        return text.to_string();
+    }
+
+    let mut result = String::with_capacity(text.len());
+    let mut mention_idx = 0;
+    for ch in text.chars() {
+        if ch == '\u{FFFC}' {
+            if let Some(mention) = mentions.get(mention_idx) {
+                let name = mention
+                    .name
+                    .as_deref()
+                    .or(mention.number.as_deref())
+                    .unwrap_or("someone");
+                result.push('@');
+                result.push_str(name);
+            } else {
+                result.push(ch);
+            }
+            mention_idx += 1;
+        } else {
+            result.push(ch);
+        }
+    }
+    result
 }
 
 fn timestamp_millis(value: i64) -> Option<chrono::DateTime<chrono::Utc>> {
@@ -864,6 +951,180 @@ mod tests {
             body["base64_attachments"],
             serde_json::json!(["cG5n", "JVBERg=="])
         );
+    }
+
+    // --- Self-message echo prevention ---
+
+    #[test]
+    fn parse_receive_event_skips_self_messages_by_phone() {
+        let inbound = parse_receive_event(
+            &SignalSseEvent {
+                event: Some("message".into()),
+                data: Some(
+                    serde_json::json!({
+                        "envelope": {
+                            "sourceNumber": "+15551234567",
+                            "sourceName": "Me",
+                            "timestamp": 1710000000123_i64,
+                            "dataMessage": {
+                                "message": "echo"
+                            }
+                        }
+                    })
+                    .to_string(),
+                ),
+                id: None,
+            },
+            Some("+15551234567"),
+        );
+
+        assert!(inbound.is_none(), "should skip self-message by phone match");
+    }
+
+    #[test]
+    fn parse_receive_event_skips_self_messages_by_uuid() {
+        let inbound = parse_receive_event(
+            &SignalSseEvent {
+                event: Some("message".into()),
+                data: Some(
+                    serde_json::json!({
+                        "envelope": {
+                            "sourceUuid": "abc-def-123",
+                            "sourceName": "Me",
+                            "timestamp": 1710000000123_i64,
+                            "dataMessage": {
+                                "message": "echo"
+                            }
+                        }
+                    })
+                    .to_string(),
+                ),
+                id: None,
+            },
+            Some("abc-def-123"),
+        );
+
+        assert!(inbound.is_none(), "should skip self-message by UUID match");
+    }
+
+    // --- E.164 normalization ---
+
+    #[test]
+    fn normalize_e164_strips_formatting() {
+        assert_eq!(normalize_e164("+1 (555) 123-4567"), "+15551234567");
+        assert_eq!(normalize_e164("1.555.123.4567"), "+15551234567");
+        assert_eq!(normalize_e164("+15551234567"), "+15551234567");
+    }
+
+    #[test]
+    fn normalize_signal_identity_handles_phone_and_uuid() {
+        // Phone numbers get E.164 normalization
+        assert_eq!(normalize_signal_identity("+1 555 123 4567"), "+15551234567");
+        assert_eq!(normalize_signal_identity("signal:+15551234567"), "+15551234567");
+
+        // UUIDs get lowercased
+        assert_eq!(
+            normalize_signal_identity("ABC-DEF-123"),
+            "abc-def-123"
+        );
+    }
+
+    #[test]
+    fn self_message_matches_with_formatting_differences() {
+        // Phone with spaces vs clean
+        assert!(is_self_message(
+            Some("+1 555 123 4567"),
+            None,
+            Some("+15551234567"),
+        ));
+        // UUID case mismatch
+        assert!(is_self_message(
+            None,
+            Some("ABC-DEF-123"),
+            Some("abc-def-123"),
+        ));
+        // Different sender
+        assert!(!is_self_message(
+            Some("+15559999999"),
+            None,
+            Some("+15551234567"),
+        ));
+        // No configured account — can't detect self
+        assert!(!is_self_message(
+            Some("+15551234567"),
+            None,
+            None,
+        ));
+    }
+
+    // --- Mention ORC replacement ---
+
+    #[test]
+    fn replace_mention_orc_substitutes_names() {
+        let text = "Hello \u{FFFC} and \u{FFFC}!";
+        let mentions = vec![
+            SignalMention {
+                name: Some("Alice".into()),
+                number: Some("+15550001111".into()),
+                uuid: None,
+            },
+            SignalMention {
+                name: Some("Bob".into()),
+                number: None,
+                uuid: None,
+            },
+        ];
+        let result = replace_mention_orc(text, Some(&mentions));
+        assert_eq!(result, "Hello @Alice and @Bob!");
+    }
+
+    #[test]
+    fn replace_mention_orc_falls_back_to_number() {
+        let text = "\u{FFFC} said hi";
+        let mentions = vec![SignalMention {
+            name: None,
+            number: Some("+15550001111".into()),
+            uuid: None,
+        }];
+        let result = replace_mention_orc(text, Some(&mentions));
+        assert_eq!(result, "@+15550001111 said hi");
+    }
+
+    #[test]
+    fn replace_mention_orc_no_mentions_returns_unchanged() {
+        let text = "no mentions here";
+        assert_eq!(replace_mention_orc(text, None), "no mentions here");
+        assert_eq!(replace_mention_orc(text, Some(&[])), "no mentions here");
+    }
+
+    #[test]
+    fn parse_receive_event_replaces_orc_in_message_text() {
+        let inbound = parse_receive_event(
+            &SignalSseEvent {
+                event: Some("message".into()),
+                data: Some(
+                    serde_json::json!({
+                        "envelope": {
+                            "sourceNumber": "+15550001111",
+                            "sourceName": "Alice",
+                            "timestamp": 1710000000123_i64,
+                            "dataMessage": {
+                                "message": "Hey \u{FFFC} check this",
+                                "mentions": [
+                                    { "name": "Bot", "number": "+15551234567" }
+                                ]
+                            }
+                        }
+                    })
+                    .to_string(),
+                ),
+                id: None,
+            },
+            Some("+15559999999"),
+        )
+        .expect("should parse with ORC replacement");
+
+        assert_eq!(inbound.text.as_deref(), Some("Hey @Bot check this"));
     }
 
     #[test]

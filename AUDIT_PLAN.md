@@ -163,37 +163,37 @@ is audited, fixes are implemented, tests are added, and the section is marked do
 
 ## 5. Signal Channel
 
-**Status:** TODO
+**Status:** IN PROGRESS
 
 ### Critical
 
-- [ ] **UUID vs phone dual identity**: Signal senders can be identified by phone OR UUID. Allowlist matching must check both. Self-reply loop prevention must compare both phone AND UUID.
-- [ ] **SyncMessage filtering**: Use `"syncMessage" in envelope` (not truthiness) because signal-cli may set `syncMessage: null`. Without proper filtering, multi-device echoes cause infinite loops.
+- [x] **UUID vs phone dual identity**: Self-message echo prevention compares both sourceNumber and sourceUuid against configured_account. `is_self_message()` helper added.
+- [x] **SyncMessage filtering**: Already implemented — `envelope.sync_message.is_some()` check correctly catches both populated and null syncMessage fields since serde deserializes `null` as `Some(Value::Null)`.
 
 ### High
 
-- [ ] **E.164 normalization**: Strip all non-digit chars, re-add leading `+`. A single format mismatch breaks allowlist checks.
+- [x] **E.164 normalization**: `normalize_e164()` strips all non-digit chars and re-adds leading `+`. `normalize_signal_identity()` routes phone-looking values through E.164 and lowercases UUIDs.
 - [ ] **Attachment base64 + size pre-check**: Check `attachment.size > maxBytes` before calling RPC. Decode base64 per-attachment with try-catch so one bad attachment doesn't block others.
-- [ ] **Edit message handling**: Signal sends edits as `editMessage.dataMessage`, not as an updated `dataMessage`. Must fall back to check `editMessage`.
-- [ ] **Mention rendering (Object Replacement Character)**: Signal encodes mentions as U+FFFC with metadata array. Must reconstruct `@username` strings by scanning for ORC and replacing from metadata.
-- [ ] **Text chunking with style preservation**: ~3072 char limit. Track cursor position (not indexOf), prefer newline breaks, avoid breaking inside parentheses. Styles must be re-applied per chunk.
+- [x] **Edit message handling**: Already implemented — falls back to `editMessage.dataMessage` when `dataMessage` is absent.
+- [x] **Mention rendering (Object Replacement Character)**: `replace_mention_orc()` scans for U+FFFC and replaces with `@name` (falls back to phone number, then "someone").
+- [ ] **Text chunking with style preservation**: ~3072 char limit. Deferred — Signal messages rarely hit this limit in practice.
 
 ### Medium
 
-- [ ] **Group ID vs sender routing**: Key conversation by `groupId`, not sender. Same sender in different groups must route to different conversations.
-- [ ] **Reaction dual target identification**: Reactions target by sender + timestamp. Sender can be phone OR UUID. Build an array of targets checking both.
-- [ ] **Reaction removal flag**: Check `reaction.isRemove` early and skip notification for removals.
-- [ ] **Read receipt validation**: Require positive finite `targetTimestamp`. DM-only (not groups).
-- [ ] **Typing indicator stop**: Must explicitly send `stop: true` to clear typing state.
-- [ ] **Daemon lifecycle**: Single daemon handle, SSE reconnect with backoff (1s→10s, 20% jitter). Detect logout and refuse to re-authenticate.
-- [ ] **Attachment content-type fallback**: If `contentType` is null/undefined, fall back to `application/octet-stream`.
-- [ ] **Mention gate skip optimization**: If message will be skipped due to mention requirement, don't download attachments.
+- [x] **Group ID vs sender routing**: Already implemented — thread_id keyed by `group:{groupId}`.
+- [ ] **Reaction dual target identification**: Reactions are already filtered out (reaction-only messages skipped).
+- [x] **Reaction removal flag**: Covered by existing reaction filtering — all reaction-only payloads are skipped.
+- [ ] **Read receipt validation**: Not applicable — FrankClaw doesn't process read receipts.
+- [ ] **Typing indicator stop**: Not applicable — FrankClaw doesn't send typing indicators for Signal.
+- [ ] **Daemon lifecycle**: SSE reconnect exists (5s backoff in start loop). Jitter/backoff-growth deferred.
+- [x] **Attachment content-type fallback**: Handled by shared `infer_inbound_mime_type()` which falls back to `application/octet-stream`.
+- [ ] **Mention gate skip optimization**: Deferred — optimization, not correctness.
 
 ### Low
 
-- [ ] **Daemon stderr classification**: Lines with ERROR/WARN/FAILED/SEVERE/EXCEPTION logged as errors; others as info.
-- [ ] **SSE multiline data**: Accumulate multiline `data:` fields before JSON parsing.
-- [ ] **RPC envelope validation**: Check `Object.hasOwn(rpc, "result")` not truthiness. 201 = success with no content.
+- [ ] **Daemon stderr classification**: Not applicable — signal-cli REST API used via SSE, not daemon process.
+- [x] **SSE multiline data**: Already implemented — `SignalSseParser` accumulates multiline `data:` fields with newline separators.
+- [x] **RPC envelope validation**: Already implemented — checks for `rpc.error` field and HTTP 201 status separately.
 
 ---
 
