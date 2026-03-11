@@ -14,6 +14,9 @@ use frankclaw_crypto::{decrypt, derive_subkey, encrypt, MasterKey};
 
 use crate::migrations;
 
+/// Maximum size of a single transcript entry content (1 MB).
+const MAX_TRANSCRIPT_ENTRY_BYTES: usize = 1_024 * 1_024;
+
 /// SQLite-backed session store with optional encryption at rest.
 ///
 /// All transcript content is encrypted with a session-derived key when
@@ -51,6 +54,7 @@ impl SqliteSessionStore {
         let manager = SqliteConnectionManager::file(path);
         let pool = Pool::builder()
             .max_size(8)
+            .connection_timeout(std::time::Duration::from_secs(5))
             .build(manager)
             .map_err(|e| FrankClawError::SessionStorage {
                 msg: format!("connection pool error: {e}"),
@@ -108,9 +112,18 @@ impl SqliteSessionStore {
             Some(key) => {
                 let blob: frankclaw_crypto::EncryptedBlob =
                     serde_json::from_slice(data).map_err(|e| FrankClawError::SessionStorage {
-                        msg: format!("decryption deserialization error: {e}"),
+                        msg: format!(
+                            "transcript data is not valid encrypted blob (was it written without encryption?): {e}"
+                        ),
                     })?;
-                let plaintext = decrypt(key, &blob).map_err(FrankClawError::Crypto)?;
+                let plaintext = decrypt(key, &blob).map_err(|e| {
+                    warn!("transcript decryption failed — if the master key was rotated, existing encrypted transcripts cannot be read with the new key");
+                    FrankClawError::SessionStorage {
+                        msg: format!(
+                            "transcript decryption failed (possible key rotation): {e}"
+                        ),
+                    }
+                })?;
                 String::from_utf8(plaintext).map_err(|e| FrankClawError::SessionStorage {
                     msg: format!("invalid UTF-8 in transcript: {e}"),
                 })
@@ -332,6 +345,15 @@ impl SessionStore for SqliteSessionStore {
     }
 
     async fn append_transcript(&self, key: &SessionKey, entry: &TranscriptEntry) -> Result<()> {
+        if entry.content.len() > MAX_TRANSCRIPT_ENTRY_BYTES {
+            return Err(FrankClawError::InvalidRequest {
+                msg: format!(
+                    "transcript entry exceeds maximum size ({} bytes > {} limit)",
+                    entry.content.len(),
+                    MAX_TRANSCRIPT_ENTRY_BYTES,
+                ),
+            });
+        }
         let conn = self.get_conn()?;
         let key_str = key.as_str().to_string();
         let encrypted_content = self.encrypt_content(&entry.content)?;
@@ -641,6 +663,220 @@ mod tests {
         assert_eq!(transcript[0].content, "hello");
 
         let _ = std::fs::remove_file(path);
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[tokio::test]
+    async fn concurrent_transcript_appends_are_serialized() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "frankclaw-sessions-concurrent-{}",
+            Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        std::fs::create_dir_all(&temp_dir).expect("temp dir should exist");
+        let path = temp_dir.join("sessions.db");
+        let store = std::sync::Arc::new(
+            SqliteSessionStore::open(&path, None).expect("store should open"),
+        );
+        let key = SessionKey::from_raw("agent:main:concurrent");
+
+        store
+            .upsert(&SessionEntry {
+                key: key.clone(),
+                agent_id: AgentId::default_agent(),
+                channel: ChannelId::new("web"),
+                account_id: "default".into(),
+                scoping: SessionScoping::PerChannelPeer,
+                created_at: Utc::now(),
+                last_message_at: Some(Utc::now()),
+                thread_id: None,
+                metadata: serde_json::json!({}),
+            })
+            .await
+            .expect("session should upsert");
+
+        // Spawn 20 concurrent appends.
+        let mut handles = Vec::new();
+        for i in 0..20u64 {
+            let store = store.clone();
+            let key = key.clone();
+            handles.push(tokio::spawn(async move {
+                store
+                    .append_transcript(
+                        &key,
+                        &TranscriptEntry {
+                            seq: i + 1,
+                            role: Role::User,
+                            content: format!("message-{i}"),
+                            timestamp: Utc::now(),
+                            metadata: None,
+                        },
+                    )
+                    .await
+                    .expect("append should succeed");
+            }));
+        }
+        for handle in handles {
+            handle.await.expect("task should complete");
+        }
+
+        let transcript = store
+            .get_transcript(&key, 100, None)
+            .await
+            .expect("transcript should load");
+        assert_eq!(transcript.len(), 20, "all 20 appends should be persisted");
+
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[tokio::test]
+    async fn transcript_entry_size_limit_rejects_oversized_content() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "frankclaw-sessions-size-limit-{}",
+            Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        std::fs::create_dir_all(&temp_dir).expect("temp dir should exist");
+        let path = temp_dir.join("sessions.db");
+        let store = SqliteSessionStore::open(&path, None).expect("store should open");
+        let key = SessionKey::from_raw("agent:main:size-limit");
+
+        store
+            .upsert(&SessionEntry {
+                key: key.clone(),
+                agent_id: AgentId::default_agent(),
+                channel: ChannelId::new("web"),
+                account_id: "default".into(),
+                scoping: SessionScoping::PerChannelPeer,
+                created_at: Utc::now(),
+                last_message_at: Some(Utc::now()),
+                thread_id: None,
+                metadata: serde_json::json!({}),
+            })
+            .await
+            .expect("session should upsert");
+
+        // Content just over 1MB should be rejected.
+        let oversized = "x".repeat(MAX_TRANSCRIPT_ENTRY_BYTES + 1);
+        let err = store
+            .append_transcript(
+                &key,
+                &TranscriptEntry {
+                    seq: 1,
+                    role: Role::User,
+                    content: oversized,
+                    timestamp: Utc::now(),
+                    metadata: None,
+                },
+            )
+            .await;
+        assert!(err.is_err());
+        assert!(err.unwrap_err().to_string().contains("maximum size"));
+
+        // Content at exactly 1MB should succeed.
+        let just_right = "x".repeat(MAX_TRANSCRIPT_ENTRY_BYTES);
+        store
+            .append_transcript(
+                &key,
+                &TranscriptEntry {
+                    seq: 1,
+                    role: Role::User,
+                    content: just_right,
+                    timestamp: Utc::now(),
+                    metadata: None,
+                },
+            )
+            .await
+            .expect("1MB content should be accepted");
+
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[tokio::test]
+    async fn encrypted_transcript_with_wrong_key_gives_clear_error() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "frankclaw-sessions-keyrot-{}",
+            Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        std::fs::create_dir_all(&temp_dir).expect("temp dir should exist");
+        let path = temp_dir.join("sessions.db");
+
+        let key1 = MasterKey::from_bytes([1u8; 32]);
+        let store1 = SqliteSessionStore::open(&path, Some(&key1)).expect("store should open");
+        let session_key = SessionKey::from_raw("agent:main:keyrot");
+
+        store1
+            .upsert(&SessionEntry {
+                key: session_key.clone(),
+                agent_id: AgentId::default_agent(),
+                channel: ChannelId::new("web"),
+                account_id: "default".into(),
+                scoping: SessionScoping::PerChannelPeer,
+                created_at: Utc::now(),
+                last_message_at: Some(Utc::now()),
+                thread_id: None,
+                metadata: serde_json::json!({}),
+            })
+            .await
+            .expect("session should upsert");
+        store1
+            .append_transcript(
+                &session_key,
+                &TranscriptEntry {
+                    seq: 1,
+                    role: Role::User,
+                    content: "secret".into(),
+                    timestamp: Utc::now(),
+                    metadata: None,
+                },
+            )
+            .await
+            .expect("encrypted append should work");
+
+        // Open with a different key — reading should fail with clear error.
+        let key2 = MasterKey::from_bytes([2u8; 32]);
+        let store2 = SqliteSessionStore::open(&path, Some(&key2)).expect("store should open");
+        let err = store2
+            .get_transcript(&session_key, 10, None)
+            .await;
+        assert!(err.is_err());
+        let msg = err.unwrap_err().to_string();
+        assert!(
+            msg.contains("key rotation") || msg.contains("decryption failed"),
+            "error should mention key rotation: {msg}"
+        );
+
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[tokio::test]
+    async fn migration_is_idempotent() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "frankclaw-sessions-idempotent-{}",
+            Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        std::fs::create_dir_all(&temp_dir).expect("temp dir should exist");
+        let path = temp_dir.join("sessions.db");
+
+        // Open twice — second open runs migrations again.
+        let _store1 = SqliteSessionStore::open(&path, None).expect("first open should succeed");
+        let store2 = SqliteSessionStore::open(&path, None).expect("second open should succeed");
+
+        // Verify it works by doing a write.
+        let key = SessionKey::from_raw("agent:main:idempotent");
+        store2
+            .upsert(&SessionEntry {
+                key: key.clone(),
+                agent_id: AgentId::default_agent(),
+                channel: ChannelId::new("web"),
+                account_id: "default".into(),
+                scoping: SessionScoping::PerChannelPeer,
+                created_at: Utc::now(),
+                last_message_at: Some(Utc::now()),
+                thread_id: None,
+                metadata: serde_json::json!({}),
+            })
+            .await
+            .expect("upsert should work after re-migration");
+
         let _ = std::fs::remove_dir_all(temp_dir);
     }
 }
