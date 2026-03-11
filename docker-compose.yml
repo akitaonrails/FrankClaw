@@ -1,0 +1,10 @@
+services:
+  chromium:
+    build:
+      context: .
+      dockerfile: docker/chromium/Dockerfile
+    container_name: frankclaw-chromium
+    ports:
+      - "127.0.0.1:9222:9222"
+    shm_size: "1gb"
+    restart: unless-stopped

@@ -7,7 +7,7 @@ FrankClaw is a ground-up Rust rewrite of [OpenClaw](https://github.com/openclaw/
 Current scope and parity status:
 - supported channels: `web`, `telegram`, `discord`, `slack`, `signal`, `whatsapp`
 - local Canvas host
-- bounded tool orchestration
+- bounded tool orchestration with Chromium-backed browser sessions
 - operator onboarding and install helpers
 
 For the remaining distance to OpenClaw feature parity, see [PARITY_TODO.md](PARITY_TODO.md) and [FEATURE_PLANS.md](FEATURE_PLANS.md).
@@ -19,8 +19,9 @@ For the remaining distance to OpenClaw feature parity, see [PARITY_TODO.md](PARI
 - **Encrypted sessions** — SQLite-backed with ChaCha20-Poly1305 encryption at rest
 - **Scheduled jobs** — Cron-based task scheduling with agent delivery
 - **Canvas host** — local authenticated visual workspace surface
-- **Bounded tools** — session inspection today, richer tool depth planned
+- **Bounded tools** — session inspection plus Chromium-backed `browser.open`, `browser.extract`, and `browser.snapshot`
 - **Operator support** — doctor, status, remote exposure checks, onboarding, and systemd unit generation
+- **Docker browser runtime** — `docker compose up chromium` starts a local DevTools endpoint for browser tools
 - **Media pipeline** — File handling with SSRF protection and filename sanitization
 - **Plugin system** — Trait-based channel and provider adapters
 - **Zero unsafe code** — `#![forbid(unsafe_code)]` on every crate
@@ -183,6 +184,67 @@ The gateway starts on `127.0.0.1:18789` by default. Connect via WebSocket for th
 cargo test
 ```
 
+## Browser Tools
+
+FrankClaw can now drive a real Chromium instance over the DevTools protocol for safe browser-backed page sessions.
+
+### Local Dev Mode
+
+You can run Chromium directly on the host:
+
+```bash
+chromium \
+  --headless=new \
+  --disable-gpu \
+  --no-sandbox \
+  --remote-debugging-address=127.0.0.1 \
+  --remote-debugging-port=9222 \
+  --user-data-dir=/tmp/frankclaw-chromium \
+  about:blank
+```
+
+### Docker Compose Mode
+
+```bash
+docker compose up -d chromium
+```
+
+This starts a local Chromium container exposing DevTools on `127.0.0.1:9222`.
+
+If you need a non-default endpoint, set:
+
+```bash
+export FRANKCLAW_BROWSER_DEVTOOLS_URL="http://127.0.0.1:9222/"
+```
+
+Then allow browser tools on an agent:
+
+```json
+{
+  "agents": {
+    "default_agent": "default",
+    "agents": {
+      "default": {
+        "tools": [
+          "session.inspect",
+          "browser.open",
+          "browser.extract",
+          "browser.snapshot"
+        ]
+      }
+    }
+  }
+}
+```
+
+Example use:
+
+```bash
+frankclaw tools invoke --tool browser.open --session default:web:control --args '{"url":"https://example.com"}'
+frankclaw tools invoke --tool browser.extract --session default:web:control
+frankclaw tools invoke --tool browser.snapshot --session default:web:control
+```
+
 ## CLI Reference
 
 ```
@@ -197,6 +259,8 @@ frankclaw status          Show runtime and exposure status
 frankclaw remote-status   Show remote exposure posture
 frankclaw install-systemd Print a systemd unit for the current install
 frankclaw config          Show resolved configuration (secrets redacted)
+frankclaw tools list      Show tools allowed for an agent
+frankclaw tools invoke    Invoke a configured tool locally
 ```
 
 ### Global Options

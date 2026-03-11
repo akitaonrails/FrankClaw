@@ -913,11 +913,17 @@ name = "frankclaw-tools"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "axum",
  "chrono",
  "frankclaw-core",
+ "futures-util",
+ "reqwest",
  "serde",
  "serde_json",
  "tokio",
+ "tokio-tungstenite 0.26.2",
+ "url",
+ "uuid",
 ]
 
 [[package]]

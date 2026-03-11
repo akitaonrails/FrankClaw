@@ -35,6 +35,7 @@ The main remaining gap is feature surface, not the core message-to-model flow.
 - [x] Local Canvas host surface
 - [x] Operator health, remote exposure, onboarding, and systemd helpers
 - [x] Normalized inbound media placeholders on supported channels
+- [x] Chromium-backed browser session tools (`open`, `extract`, `snapshot`)
 
 ## Implemented Channels
 
@@ -69,17 +70,17 @@ The main remaining gap is feature surface, not the core message-to-model flow.
 
 ### Tool Depth
 
-- [ ] Browser automation runtime
+- [x] Browser automation runtime
 - [ ] Browser session/profile management
-- [ ] Visual/browser snapshots
+- [x] Visual/browser snapshots
 - [ ] Safer action model for clicks/forms/navigation
 - [ ] Tool approvals for higher-risk tool families
-- [ ] More first-party tools beyond session inspection
+- [x] More first-party tools beyond session inspection
 - [ ] Better tool tracing and operator visibility
 
 ### Operator / Install
 
-- [ ] Docker support and documented container flow
+- [x] Docker support and documented container flow
 - [ ] Easier channel setup flows
 - [ ] Better channel/provider setup verification in `doctor`
 - [ ] Better deployment docs and examples
