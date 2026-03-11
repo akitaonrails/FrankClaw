@@ -52,6 +52,13 @@ enum Command {
     /// Run high-signal validation and readiness checks.
     Doctor,
 
+    /// Interactive guided setup for first-time configuration.
+    Setup {
+        /// Force overwrite an existing config.
+        #[arg(long)]
+        force: bool,
+    },
+
     /// Show resolved configuration (secrets redacted).
     Config,
 
@@ -330,6 +337,10 @@ async fn main() -> anyhow::Result<()> {
 
         Command::Doctor => {
             run_doctor(cli.config.as_deref(), &state_dir).await?;
+        }
+
+        Command::Setup { force } => {
+            run_setup(cli.config.as_deref(), &state_dir, force)?;
         }
 
         Command::Config => {
@@ -1341,6 +1352,281 @@ fn restrict_file_permissions(path: &std::path::Path) {
 }
 
 // ---------------------------------------------------------------------------
+// Setup wizard: interactive guided configuration
+// ---------------------------------------------------------------------------
+
+fn prompt_line(question: &str) -> anyhow::Result<String> {
+    eprint!("{question}: ");
+    let mut input = String::new();
+    std::io::stdin()
+        .read_line(&mut input)
+        .context("failed to read input")?;
+    Ok(input.trim().to_string())
+}
+
+fn prompt_choice(question: &str, options: &[&str], default: usize) -> anyhow::Result<usize> {
+    eprintln!("{question}");
+    for (i, option) in options.iter().enumerate() {
+        let marker = if i == default { " (default)" } else { "" };
+        eprintln!("  {}: {}{}", i + 1, option, marker);
+    }
+    let input = prompt_line(&format!("Choose [1-{}]", options.len()))?;
+    if input.is_empty() {
+        return Ok(default);
+    }
+    match input.parse::<usize>() {
+        Ok(n) if n >= 1 && n <= options.len() => Ok(n - 1),
+        _ => {
+            eprintln!("Invalid choice, using default.");
+            Ok(default)
+        }
+    }
+}
+
+fn prompt_yes_no(question: &str, default_yes: bool) -> anyhow::Result<bool> {
+    let hint = if default_yes { "[Y/n]" } else { "[y/N]" };
+    let input = prompt_line(&format!("{question} {hint}"))?;
+    if input.is_empty() {
+        return Ok(default_yes);
+    }
+    Ok(matches!(input.to_lowercase().as_str(), "y" | "yes"))
+}
+
+fn run_setup(
+    config_path_override: Option<&std::path::Path>,
+    state_dir: &std::path::Path,
+    force: bool,
+) -> anyhow::Result<()> {
+    use frankclaw_core::auth::AuthMode;
+    use frankclaw_core::config::{ChannelConfig, ProviderConfig};
+    use frankclaw_core::types::ChannelId;
+
+    let config_path = config_path_override
+        .map(PathBuf::from)
+        .unwrap_or_else(|| state_dir.join("frankclaw.json"));
+
+    println!("FrankClaw Setup");
+    println!("===============");
+    println!();
+
+    if config_path.exists() && !force {
+        eprintln!(
+            "Config already exists at {}.",
+            config_path.display()
+        );
+        if !prompt_yes_no("Overwrite?", false)? {
+            println!("Setup cancelled.");
+            return Ok(());
+        }
+    }
+
+    // --- Provider selection ---
+    println!();
+    let provider_idx = prompt_choice(
+        "Which AI provider?",
+        &["OpenAI", "Anthropic", "Ollama (local)"],
+        0,
+    )?;
+
+    let (provider_id, provider_api, default_env, default_model, needs_key) = match provider_idx {
+        0 => ("openai", "openai", "OPENAI_API_KEY", "gpt-4o-mini", true),
+        1 => (
+            "anthropic",
+            "anthropic",
+            "ANTHROPIC_API_KEY",
+            "claude-sonnet-4-6-20250514",
+            true,
+        ),
+        2 => ("ollama", "ollama", "", "llama3.1", false),
+        _ => unreachable!(),
+    };
+
+    let api_key_ref = if needs_key {
+        println!();
+        let env_name = prompt_line(&format!(
+            "API key env var name (default: {default_env})"
+        ))?;
+        let env_name = if env_name.is_empty() {
+            default_env.to_string()
+        } else {
+            env_name
+        };
+        Some(env_name)
+    } else {
+        None
+    };
+
+    let base_url = if provider_api == "ollama" {
+        println!();
+        let url = prompt_line("Ollama base URL (default: http://127.0.0.1:11434)")?;
+        Some(if url.is_empty() {
+            "http://127.0.0.1:11434".to_string()
+        } else {
+            url
+        })
+    } else {
+        None
+    };
+
+    println!();
+    let model_input = prompt_line(&format!("Default model (default: {default_model})"))?;
+    let model = if model_input.is_empty() {
+        default_model.to_string()
+    } else {
+        model_input
+    };
+
+    // --- Channel selection ---
+    println!();
+    let channel_idx = prompt_choice(
+        "Primary channel?",
+        &[
+            "Web (browser UI)",
+            "Telegram",
+            "Discord",
+            "Slack",
+            "WhatsApp (Cloud API)",
+            "Signal",
+        ],
+        0,
+    )?;
+
+    let (channel_id, channel_config) = match channel_idx {
+        0 => (
+            "web",
+            ChannelConfig {
+                enabled: true,
+                accounts: Vec::new(),
+                extra: serde_json::json!({ "dm_policy": "open" }),
+            },
+        ),
+        1 => (
+            "telegram",
+            ChannelConfig {
+                enabled: true,
+                accounts: vec![serde_json::json!({
+                    "bot_token_env": "TELEGRAM_BOT_TOKEN"
+                })],
+                extra: serde_json::json!({}),
+            },
+        ),
+        2 => (
+            "discord",
+            ChannelConfig {
+                enabled: true,
+                accounts: vec![serde_json::json!({
+                    "bot_token_env": "DISCORD_BOT_TOKEN"
+                })],
+                extra: serde_json::json!({}),
+            },
+        ),
+        3 => (
+            "slack",
+            ChannelConfig {
+                enabled: true,
+                accounts: vec![serde_json::json!({
+                    "app_token_env": "SLACK_APP_TOKEN",
+                    "bot_token_env": "SLACK_BOT_TOKEN"
+                })],
+                extra: serde_json::json!({}),
+            },
+        ),
+        4 => (
+            "whatsapp",
+            ChannelConfig {
+                enabled: true,
+                accounts: vec![serde_json::json!({
+                    "access_token_env": "WHATSAPP_ACCESS_TOKEN",
+                    "phone_number_id_env": "WHATSAPP_PHONE_NUMBER_ID",
+                    "verify_token_env": "WHATSAPP_VERIFY_TOKEN",
+                    "app_secret_env": "WHATSAPP_APP_SECRET"
+                })],
+                extra: serde_json::json!({}),
+            },
+        ),
+        5 => (
+            "signal",
+            ChannelConfig {
+                enabled: true,
+                accounts: vec![serde_json::json!({
+                    "base_url_env": "SIGNAL_BASE_URL",
+                    "account_env": "SIGNAL_ACCOUNT"
+                })],
+                extra: serde_json::json!({}),
+            },
+        ),
+        _ => unreachable!(),
+    };
+
+    // --- Gateway port ---
+    println!();
+    let port_input = prompt_line("Gateway port (default: 18789)")?;
+    let port: u16 = if port_input.is_empty() {
+        18789
+    } else {
+        port_input
+            .parse()
+            .context("invalid port number")?
+    };
+
+    // --- Session encryption ---
+    println!();
+    let encrypt = prompt_yes_no("Enable session encryption?", true)?;
+
+    // --- Build config ---
+    let gateway_token = frankclaw_crypto::generate_token();
+    let mut config = frankclaw_core::config::FrankClawConfig::default();
+    config.gateway.port = port;
+    config.gateway.auth = AuthMode::Token {
+        token: Some(secrecy::SecretString::from(gateway_token.clone())),
+    };
+    config.models.providers = vec![ProviderConfig {
+        id: provider_id.into(),
+        api: provider_api.into(),
+        base_url,
+        api_key_ref,
+        models: vec![model.clone()],
+        cooldown_secs: 30,
+    }];
+    config.models.default_model = Some(model);
+    config.channels.insert(ChannelId::new(channel_id), channel_config);
+    config.security.encrypt_sessions = encrypt;
+
+    // --- Write config ---
+    std::fs::create_dir_all(config_path.parent().unwrap_or(state_dir))?;
+    let json = serde_json::to_string_pretty(&config)?;
+    std::fs::write(&config_path, &json)?;
+    restrict_file_permissions(&config_path);
+
+    println!();
+    println!("Configuration written to: {}", config_path.display());
+    println!("Gateway auth token: {gateway_token}");
+    if encrypt {
+        println!();
+        println!("Session encryption is ON. Set the master key:");
+        println!("  export FRANKCLAW_MASTER_KEY=$(frankclaw gen-token)");
+    }
+    println!();
+    println!("Next steps:");
+    if needs_key {
+        println!(
+            "  1. Export your API key:  export {}=<your-key>",
+            config.models.providers[0]
+                .api_key_ref
+                .as_deref()
+                .unwrap_or("API_KEY")
+        );
+    }
+    if channel_id != "web" {
+        println!("  2. Export channel credentials (see config for env var names).");
+    }
+    println!("  3. Verify config:        frankclaw doctor");
+    println!("  4. Start the gateway:    frankclaw gateway");
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // Doctor: comprehensive diagnostics
 // ---------------------------------------------------------------------------
 
@@ -2201,6 +2487,89 @@ mod tests {
         let version = rustc_version();
         assert!(!version.is_empty());
         assert!(version.contains("rustc") || version == "unknown");
+    }
+
+    // --- Setup wizard tests ---
+
+    #[test]
+    fn setup_writes_valid_config_file() {
+        use frankclaw_core::config::FrankClawConfig;
+
+        let dir = std::env::temp_dir().join(format!(
+            "frankclaw-setup-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time should be after epoch")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).expect("should create temp dir");
+        let config_path = dir.join("frankclaw.json");
+
+        // Build a config the same way setup does
+        let mut config = FrankClawConfig::default();
+        config.gateway.auth = frankclaw_core::auth::AuthMode::Token {
+            token: Some(secrecy::SecretString::from("test-token".to_string())),
+        };
+        config.models.providers = vec![ProviderConfig {
+            id: "openai".into(),
+            api: "openai".into(),
+            base_url: None,
+            api_key_ref: Some("OPENAI_API_KEY".into()),
+            models: vec!["gpt-4o-mini".into()],
+            cooldown_secs: 30,
+        }];
+        config.models.default_model = Some("gpt-4o-mini".into());
+        config.channels.insert(
+            ChannelId::new("web"),
+            ChannelConfig {
+                enabled: true,
+                accounts: Vec::new(),
+                extra: serde_json::json!({ "dm_policy": "open" }),
+            },
+        );
+
+        let json = serde_json::to_string_pretty(&config).expect("should serialize");
+        std::fs::write(&config_path, &json).expect("should write");
+
+        // Verify it can be loaded back
+        let loaded = FrankClawConfig::load_from_path(&config_path)
+            .expect("should load config");
+        loaded.validate().expect("should validate");
+        assert_eq!(loaded.gateway.port, 18789);
+        assert_eq!(loaded.models.providers.len(), 1);
+        assert_eq!(loaded.models.providers[0].id, "openai");
+        assert!(loaded.channels.contains_key(&ChannelId::new("web")));
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn setup_anthropic_provider_config_is_valid() {
+        let config = ProviderConfig {
+            id: "anthropic".into(),
+            api: "anthropic".into(),
+            base_url: None,
+            api_key_ref: Some("ANTHROPIC_API_KEY".into()),
+            models: vec!["claude-sonnet-4-6-20250514".into()],
+            cooldown_secs: 30,
+        };
+        assert_eq!(config.api, "anthropic");
+        assert!(config.api_key_ref.is_some());
+    }
+
+    #[test]
+    fn setup_ollama_provider_has_base_url_and_no_key() {
+        let config = ProviderConfig {
+            id: "ollama".into(),
+            api: "ollama".into(),
+            base_url: Some("http://127.0.0.1:11434".into()),
+            api_key_ref: None,
+            models: vec!["llama3.1".into()],
+            cooldown_secs: 30,
+        };
+        assert!(config.base_url.is_some());
+        assert!(config.api_key_ref.is_none());
     }
 }
 
