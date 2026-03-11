@@ -951,6 +951,8 @@ fn restrict_file_permissions(path: &std::path::Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use frankclaw_core::config::{ChannelConfig, ProviderConfig};
+    use frankclaw_core::types::ChannelId;
 
     #[test]
     fn onboard_whatsapp_profile_uses_env_refs_and_token_auth() {
@@ -985,6 +987,65 @@ mod tests {
 
         assert!(unit.contains("ExecStart=/usr/local/bin/frankclaw gateway --config /etc/frankclaw.json --state-dir /var/lib/frankclaw"));
         assert!(unit.contains("WantedBy=default.target"));
+    }
+
+    #[test]
+    fn collect_doctor_warnings_flags_missing_envs_and_unsigned_whatsapp_webhooks() {
+        let mut config = frankclaw_core::config::FrankClawConfig::default();
+        config.models.providers = vec![ProviderConfig {
+            id: "openai".into(),
+            api: "openai".into(),
+            base_url: None,
+            api_key_ref: Some("FRANKCLAW_TEST_MISSING_OPENAI_KEY".into()),
+            models: vec!["gpt-4o-mini".into()],
+            cooldown_secs: 30,
+        }];
+        config.channels.insert(
+            ChannelId::new("whatsapp"),
+            ChannelConfig {
+                enabled: true,
+                accounts: vec![serde_json::json!({
+                    "access_token_env": "FRANKCLAW_TEST_MISSING_WHATSAPP_TOKEN",
+                    "phone_number_id_env": "FRANKCLAW_TEST_MISSING_WHATSAPP_PHONE",
+                    "verify_token_env": "FRANKCLAW_TEST_MISSING_WHATSAPP_VERIFY"
+                })],
+                extra: serde_json::json!({}),
+            },
+        );
+
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time should be after epoch")
+            .as_nanos();
+        let missing_state_dir = std::env::temp_dir().join(format!(
+            "frankclaw-cli-missing-state-{}-{}",
+            std::process::id(),
+            unique
+        ));
+        let warnings = collect_doctor_warnings(&config, &missing_state_dir)
+            .expect("doctor warnings should collect");
+
+        assert!(warnings
+            .iter()
+            .any(|warning| warning.contains("FRANKCLAW_TEST_MISSING_OPENAI_KEY")));
+        assert!(warnings
+            .iter()
+            .any(|warning| warning.contains("FRANKCLAW_TEST_MISSING_WHATSAPP_TOKEN")));
+        assert!(warnings
+            .iter()
+            .any(|warning| warning.contains("WHATSAPP_APP_SECRET"))
+            || warnings.iter().any(|warning| warning.contains("app_secret configured")));
+        assert!(warnings
+            .iter()
+            .any(|warning| warning.contains("does not exist yet")));
+    }
+
+    #[test]
+    fn build_onboard_config_rejects_unknown_channel_profiles() {
+        let err = build_onboard_config("matrix", "gateway-token")
+            .expect_err("unsupported channel should fail");
+
+        assert!(err.to_string().contains("unsupported onboard channel"));
     }
 }
 

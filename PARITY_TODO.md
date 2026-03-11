@@ -88,11 +88,11 @@ The main remaining gap is feature surface, not the core message-to-model flow.
 ### Test Coverage and Test Quality
 
 - [ ] More integration coverage across supported channels
-- [ ] Better end-to-end coverage for operator flows
+- [x] Better end-to-end coverage for operator flows
 - [ ] External-API contract fixtures for supported channels
-- [ ] More failure-path tests for provider failover and retries
-- [ ] Coverage for Canvas RPC/UI behavior
-- [ ] Coverage for onboarding/install helpers
+- [x] More failure-path tests for provider failover and retries
+- [x] Coverage for Canvas RPC/UI behavior
+- [x] Coverage for onboarding/install helpers
 - [ ] Regression-focused tests for delivery metadata and session rewrites
 
 ### Still Missing OpenClaw Breadth

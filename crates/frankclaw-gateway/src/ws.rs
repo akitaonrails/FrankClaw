@@ -253,3 +253,187 @@ fn redact_config(config: &frankclaw_core::config::FrankClawConfig) -> serde_json
     }
     val
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    use async_trait::async_trait;
+    use frankclaw_channels::ChannelSet;
+    use frankclaw_core::auth::{AuthMode, AuthRole};
+    use frankclaw_core::model::{
+        CompletionRequest, CompletionResponse, FinishReason, InputModality, ModelApi,
+        ModelCompat, ModelCost, ModelDef, ModelProvider, Usage,
+    };
+    use frankclaw_core::protocol::Method;
+    use frankclaw_core::session::SessionStore;
+    use frankclaw_core::types::RequestId;
+    use frankclaw_sessions::SqliteSessionStore;
+    use secrecy::SecretString;
+
+    use crate::pairing::PairingStore;
+
+    use super::*;
+
+    struct MockProvider;
+
+    #[async_trait]
+    impl ModelProvider for MockProvider {
+        fn id(&self) -> &str {
+            "mock"
+        }
+
+        async fn complete(
+            &self,
+            _request: CompletionRequest,
+            _stream_tx: Option<tokio::sync::mpsc::Sender<frankclaw_core::model::StreamDelta>>,
+        ) -> frankclaw_core::error::Result<CompletionResponse> {
+            Ok(CompletionResponse {
+                content: "mock reply".into(),
+                tool_calls: Vec::new(),
+                usage: Usage {
+                    input_tokens: 1,
+                    output_tokens: 1,
+                    cache_read_tokens: None,
+                    cache_write_tokens: None,
+                },
+                finish_reason: FinishReason::Stop,
+            })
+        }
+
+        async fn list_models(&self) -> frankclaw_core::error::Result<Vec<ModelDef>> {
+            Ok(vec![ModelDef {
+                id: "mock-model".into(),
+                name: "mock-model".into(),
+                api: ModelApi::Ollama,
+                reasoning: false,
+                input: vec![InputModality::Text],
+                cost: ModelCost::default(),
+                context_window: 4096,
+                max_output_tokens: 1024,
+                compat: ModelCompat::default(),
+            }])
+        }
+
+        async fn health(&self) -> bool {
+            true
+        }
+    }
+
+    async fn build_test_state(
+        temp_dir: &PathBuf,
+    ) -> Arc<GatewayState> {
+        std::fs::create_dir_all(temp_dir).expect("temp dir should exist");
+
+        let sessions = Arc::new(
+            SqliteSessionStore::open(&temp_dir.join("sessions.db"), None)
+                .expect("sessions should open"),
+        );
+        let pairing = Arc::new(
+            PairingStore::open(&temp_dir.join("pairings.json"))
+                .expect("pairing store should open"),
+        );
+
+        let mut config = frankclaw_core::config::FrankClawConfig::default();
+        config.gateway.auth = AuthMode::Token {
+            token: Some(SecretString::from("super-secret".to_string())),
+        };
+        config.hooks.token = Some("hook-secret".into());
+
+        let runtime = Arc::new(
+            frankclaw_runtime::Runtime::from_providers(
+                &config,
+                sessions.clone() as Arc<dyn SessionStore>,
+                vec![Arc::new(MockProvider)],
+            )
+            .await
+            .expect("runtime should build"),
+        );
+        let channels = Arc::new(ChannelSet::from_parts(HashMap::new(), None, None));
+        GatewayState::new(config, sessions, runtime, channels, pairing)
+    }
+
+    fn test_request(method: Method, params: serde_json::Value) -> RequestFrame {
+        RequestFrame {
+            id: RequestId::Text("1".into()),
+            method,
+            params,
+        }
+    }
+
+    #[tokio::test]
+    async fn dispatch_method_enforces_editor_role_for_canvas_mutations() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "frankclaw-gateway-ws-role-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let state = build_test_state(&temp_dir).await;
+
+        let denied = dispatch_method(
+            &state,
+            frankclaw_core::types::ConnId(1),
+            AuthRole::Viewer,
+            test_request(
+                Method::CanvasSet,
+                serde_json::json!({
+                    "title": "Ops",
+                    "body": "Viewer should not mutate this"
+                }),
+            ),
+        )
+        .await;
+        assert_eq!(denied.error.as_ref().map(|error| error.code), Some(403));
+        assert!(state.canvas.get().await.is_none());
+
+        let allowed = dispatch_method(
+            &state,
+            frankclaw_core::types::ConnId(2),
+            AuthRole::Editor,
+            test_request(
+                Method::CanvasSet,
+                serde_json::json!({
+                    "title": "Ops",
+                    "body": "Editors can update canvas"
+                }),
+            ),
+        )
+        .await;
+        assert!(allowed.error.is_none());
+        assert_eq!(
+            state.canvas.get().await.expect("canvas should exist").body,
+            "Editors can update canvas"
+        );
+
+        let _ = std::fs::remove_file(temp_dir.join("sessions.db"));
+        let _ = std::fs::remove_file(temp_dir.join("pairings.json"));
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[tokio::test]
+    async fn dispatch_method_config_get_redacts_sensitive_fields() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "frankclaw-gateway-ws-config-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let state = build_test_state(&temp_dir).await;
+
+        let response = dispatch_method(
+            &state,
+            frankclaw_core::types::ConnId(1),
+            AuthRole::Viewer,
+            test_request(Method::ConfigGet, serde_json::json!({})),
+        )
+        .await;
+
+        assert!(response.error.is_none());
+        let result = response.result.expect("config_get should return result");
+        assert_eq!(result["gateway"]["auth"]["token"], serde_json::json!("[REDACTED]"));
+        assert_eq!(result["hooks"]["token"], serde_json::json!("[REDACTED]"));
+
+        let _ = std::fs::remove_file(temp_dir.join("sessions.db"));
+        let _ = std::fs::remove_file(temp_dir.join("pairings.json"));
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+}

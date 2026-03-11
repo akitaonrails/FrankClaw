@@ -1001,6 +1001,107 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn runtime_rejects_invalid_model_tool_arguments() {
+        let temp = std::env::temp_dir().join(format!(
+            "frankclaw-runtime-tool-args-{}.db",
+            uuid::Uuid::new_v4()
+        ));
+        let sessions = Arc::new(SqliteSessionStore::open(&temp, None).expect("sessions should open"));
+        let mut config = FrankClawConfig::default();
+        config.agents.agents.get_mut(&AgentId::default_agent()).unwrap().tools =
+            vec!["session.inspect".into()];
+
+        let runtime = Runtime::from_providers(
+            &config,
+            sessions as Arc<dyn SessionStore>,
+            vec![Arc::new(MockProvider::scripted(
+                "primary",
+                "mock-primary",
+                vec![Some(MockResponse {
+                    content: String::new(),
+                    tool_calls: vec![ToolCallResponse {
+                        id: "call-1".into(),
+                        name: "session.inspect".into(),
+                        arguments: "{not-json}".into(),
+                    }],
+                    finish_reason: FinishReason::ToolUse,
+                })],
+            ))],
+        )
+        .await
+        .expect("runtime should build");
+
+        let err = runtime
+            .chat(ChatRequest {
+                agent_id: None,
+                session_key: None,
+                message: "inspect this session".into(),
+                model_id: Some("mock-primary".into()),
+                max_tokens: None,
+                temperature: None,
+            })
+            .await
+            .expect_err("invalid tool args should fail");
+
+        assert!(matches!(err, FrankClawError::AgentRuntime { .. }));
+        assert!(err.to_string().contains("invalid arguments for tool"));
+
+        let _ = std::fs::remove_file(temp);
+    }
+
+    #[tokio::test]
+    async fn runtime_rejects_excessive_model_tool_calls_in_one_turn() {
+        let temp = std::env::temp_dir().join(format!(
+            "frankclaw-runtime-tool-limit-{}.db",
+            uuid::Uuid::new_v4()
+        ));
+        let sessions = Arc::new(SqliteSessionStore::open(&temp, None).expect("sessions should open"));
+        let mut config = FrankClawConfig::default();
+        config.agents.agents.get_mut(&AgentId::default_agent()).unwrap().tools =
+            vec!["session.inspect".into()];
+        let tool_calls = (0..9)
+            .map(|index| ToolCallResponse {
+                id: format!("call-{index}"),
+                name: "session.inspect".into(),
+                arguments: r#"{"limit":1}"#.into(),
+            })
+            .collect();
+
+        let runtime = Runtime::from_providers(
+            &config,
+            sessions as Arc<dyn SessionStore>,
+            vec![Arc::new(MockProvider::scripted(
+                "primary",
+                "mock-primary",
+                vec![Some(MockResponse {
+                    content: String::new(),
+                    tool_calls,
+                    finish_reason: FinishReason::ToolUse,
+                })],
+            ))],
+        )
+        .await
+        .expect("runtime should build");
+
+        let err = runtime
+            .chat(ChatRequest {
+                agent_id: None,
+                session_key: None,
+                message: "inspect this session".into(),
+                model_id: Some("mock-primary".into()),
+                max_tokens: None,
+                temperature: None,
+            })
+            .await
+            .expect_err("too many tool calls should fail");
+
+        assert!(matches!(err, FrankClawError::AgentRuntime { .. }));
+        assert!(err.to_string().contains("too many tool calls"));
+
+        let _ = std::fs::remove_file(temp);
+    }
+
+    #[tokio::test]
     async fn runtime_reports_provider_health() {
         let temp = std::env::temp_dir().join(format!(
             "frankclaw-runtime-health-{}.db",

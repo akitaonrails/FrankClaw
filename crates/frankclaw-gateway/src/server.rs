@@ -1882,4 +1882,98 @@ mod tests {
         let _ = std::fs::remove_file(temp_dir.join("pairings.json"));
         let _ = std::fs::remove_dir_all(temp_dir);
     }
+
+    #[tokio::test]
+    async fn whatsapp_webhook_route_rejects_unsigned_payloads_when_app_secret_is_configured() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "frankclaw-gateway-whatsapp-webhook-auth-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let mut config = FrankClawConfig::default();
+        config.channels.insert(
+            frankclaw_core::types::ChannelId::new("whatsapp"),
+            ChannelConfig {
+                enabled: true,
+                accounts: vec![serde_json::json!({
+                    "access_token": "test-token",
+                    "phone_number_id": "12345",
+                    "verify_token": "verify-me",
+                    "app_secret": "app-secret"
+                })],
+                extra: serde_json::json!({
+                    "dm_policy": "open"
+                }),
+            },
+        );
+
+        let capture = Arc::new(CaptureChannel::new("whatsapp", "WhatsApp"));
+        let whatsapp = Arc::new(WhatsAppChannel::new(
+            secrecy::SecretString::from("test-token".to_string()),
+            "12345".into(),
+            secrecy::SecretString::from("verify-me".to_string()),
+            Some(secrecy::SecretString::from("app-secret".to_string())),
+        ));
+        let mut map: HashMap<
+            frankclaw_core::types::ChannelId,
+            Arc<dyn frankclaw_core::channel::ChannelPlugin>,
+        > = HashMap::new();
+        map.insert(
+            frankclaw_core::types::ChannelId::new("whatsapp"),
+            capture.clone() as Arc<dyn frankclaw_core::channel::ChannelPlugin>,
+        );
+        let channels = Arc::new(ChannelSet::from_parts(map, None, Some(whatsapp)));
+        let (state, sessions) = build_test_state(&temp_dir, config.clone(), channels).await;
+        let app = build_router(
+            state.clone(),
+            Arc::new(AuthRateLimiter::new(config.gateway.rate_limit.clone())),
+        );
+
+        let body = serde_json::json!({
+            "entry": [{
+                "changes": [{
+                    "value": {
+                        "metadata": {
+                            "phone_number_id": "12345"
+                        },
+                        "messages": [{
+                            "from": "15551234567",
+                            "id": "wamid.1",
+                            "timestamp": "1710000000",
+                            "type": "text",
+                            "text": {
+                                "body": "hello from whatsapp"
+                            }
+                        }]
+                    }
+                }]
+            }]
+        })
+        .to_string();
+
+        let response = app
+            .oneshot(
+                Request::post("/api/whatsapp/webhook")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .expect("request should build"),
+            )
+            .await
+            .expect("webhook request should succeed");
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert!(capture.drain().await.is_empty());
+        let transcript = sessions
+            .get_transcript(
+                &frankclaw_core::types::SessionKey::from_raw("default:whatsapp:12345:15551234567"),
+                10,
+                None,
+            )
+            .await
+            .expect("transcript should load");
+        assert!(transcript.is_empty());
+
+        let _ = std::fs::remove_file(temp_dir.join("sessions.db"));
+        let _ = std::fs::remove_file(temp_dir.join("pairings.json"));
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
 }

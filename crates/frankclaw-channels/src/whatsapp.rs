@@ -306,6 +306,7 @@ fn decode_nibble(value: u8) -> Option<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use secrecy::SecretString;
 
     #[test]
     fn parse_webhook_payload_extracts_text_messages() {
@@ -359,5 +360,49 @@ mod tests {
         assert_eq!(body["to"], serde_json::json!("15551234567"));
         assert_eq!(body["text"]["body"], serde_json::json!("hello"));
         assert_eq!(body["context"]["message_id"], serde_json::json!("wamid.1"));
+    }
+
+    #[test]
+    fn verify_signature_accepts_valid_prefixed_header() {
+        let channel = WhatsAppChannel::new(
+            SecretString::from("access-token".to_string()),
+            "12345".into(),
+            SecretString::from("verify-token".to_string()),
+            Some(SecretString::from("app-secret".to_string())),
+        );
+        let body = br#"{"entry":[{"id":"1"}]}"#;
+
+        let mut mac =
+            HmacSha256::new_from_slice(b"app-secret").expect("hmac should initialize");
+        mac.update(body);
+        let bytes = mac.finalize().into_bytes();
+        let signature = format!(
+            "sha256={}",
+            bytes.iter().map(|byte| format!("{byte:02x}")).collect::<String>()
+        );
+
+        channel
+            .verify_signature(body, Some(&signature))
+            .expect("signature should verify");
+    }
+
+    #[test]
+    fn verify_signature_rejects_missing_or_invalid_headers_when_secret_is_configured() {
+        let channel = WhatsAppChannel::new(
+            SecretString::from("access-token".to_string()),
+            "12345".into(),
+            SecretString::from("verify-token".to_string()),
+            Some(SecretString::from("app-secret".to_string())),
+        );
+        let body = br#"{"entry":[{"id":"1"}]}"#;
+
+        assert!(matches!(
+            channel.verify_signature(body, None),
+            Err(FrankClawError::AuthRequired)
+        ));
+        assert!(matches!(
+            channel.verify_signature(body, Some("sha256=deadbeef")),
+            Err(FrankClawError::AuthFailed)
+        ));
     }
 }
