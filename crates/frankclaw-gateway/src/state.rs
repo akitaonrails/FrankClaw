@@ -13,6 +13,7 @@ use frankclaw_runtime::Runtime;
 use frankclaw_sessions::SqliteSessionStore;
 
 use crate::broadcast::BroadcastHandle;
+use crate::canvas::CanvasStore;
 use crate::pairing::PairingStore;
 
 /// Shared gateway state, wrapped in `Arc` for cheap cloning across tasks.
@@ -37,6 +38,9 @@ pub struct GatewayState {
 
     /// Local pairing approvals and pending requests.
     pub pairing: Arc<PairingStore>,
+
+    /// Shared canvas host state for the local console.
+    pub canvas: Arc<CanvasStore>,
 
     /// Monotonic connection counter.
     pub next_conn_id: std::sync::atomic::AtomicU64,
@@ -75,6 +79,7 @@ impl GatewayState {
             runtime,
             channels,
             pairing,
+            canvas: CanvasStore::new(),
             next_conn_id: std::sync::atomic::AtomicU64::new(1),
             broadcast: BroadcastHandle::new(256),
             shutdown: CancellationToken::new(),

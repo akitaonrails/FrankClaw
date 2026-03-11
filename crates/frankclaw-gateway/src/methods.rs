@@ -276,6 +276,85 @@ pub async fn webhooks_test(
     }
 }
 
+/// Handle `canvas.get` method.
+pub async fn canvas_get(
+    state: &Arc<GatewayState>,
+    request: RequestFrame,
+) -> ResponseFrame {
+    let canvas = state.canvas.get().await;
+    ResponseFrame::ok(request.id, serde_json::json!({ "canvas": canvas }))
+}
+
+/// Handle `canvas.set` method.
+pub async fn canvas_set(
+    state: &Arc<GatewayState>,
+    request: RequestFrame,
+) -> ResponseFrame {
+    let title = request
+        .params
+        .get("title")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .unwrap_or_default()
+        .to_string();
+    let body = request
+        .params
+        .get("body")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .unwrap_or_default()
+        .to_string();
+    let session_key = request
+        .params
+        .get("session_key")
+        .and_then(|value| value.as_str())
+        .map(str::to_string);
+
+    if title.is_empty() && body.is_empty() {
+        return ResponseFrame::err(
+            request.id,
+            400,
+            "canvas.set requires a non-empty title or body",
+        );
+    }
+
+    let document = crate::canvas::CanvasDocument {
+        title,
+        body,
+        session_key,
+        updated_at: chrono::Utc::now(),
+    };
+    state.canvas.set(document.clone()).await;
+    broadcast_canvas_update(state, Some(&document));
+
+    ResponseFrame::ok(request.id, serde_json::json!({ "canvas": document }))
+}
+
+/// Handle `canvas.clear` method.
+pub async fn canvas_clear(
+    state: &Arc<GatewayState>,
+    request: RequestFrame,
+) -> ResponseFrame {
+    state.canvas.clear().await;
+    broadcast_canvas_update(state, None);
+    ResponseFrame::ok(request.id, serde_json::json!({ "cleared": true }))
+}
+
+fn broadcast_canvas_update(
+    state: &Arc<GatewayState>,
+    canvas: Option<&crate::canvas::CanvasDocument>,
+) {
+    let event = Frame::Event(EventFrame {
+        event: EventType::CanvasUpdated,
+        payload: serde_json::json!({
+            "canvas": canvas,
+        }),
+    });
+    if let Ok(json) = serde_json::to_string(&event) {
+        let _ = state.broadcast.send(json);
+    }
+}
+
 fn parse_session_key_param(
     request: &RequestFrame,
 ) -> std::result::Result<SessionKey, ResponseFrame> {
@@ -557,6 +636,68 @@ mod tests {
         assert_eq!(transcript.len(), 2);
         assert_eq!(transcript[0].content, "hello from hook");
         assert_eq!(transcript[1].content, "mock reply");
+
+        let _ = std::fs::remove_file(temp_dir.join("sessions.db"));
+        let _ = std::fs::remove_file(temp_dir.join("pairings.json"));
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[tokio::test]
+    async fn canvas_set_and_clear_roundtrip() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "frankclaw-gateway-methods-canvas-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let (state, _sessions) = build_test_state(&temp_dir).await;
+
+        let set_response = canvas_set(
+            &state,
+            RequestFrame {
+                id: RequestId::Text("1".into()),
+                method: Method::CanvasSet,
+                params: serde_json::json!({
+                    "title": "Ops",
+                    "body": "Current deployment summary",
+                    "session_key": "default:web:control",
+                }),
+            },
+        )
+        .await;
+        assert!(set_response.error.is_none());
+        assert_eq!(
+            state.canvas.get().await.expect("canvas should exist").title,
+            "Ops"
+        );
+
+        let get_response = canvas_get(
+            &state,
+            RequestFrame {
+                id: RequestId::Text("2".into()),
+                method: Method::CanvasGet,
+                params: serde_json::json!({}),
+            },
+        )
+        .await;
+        assert!(get_response.error.is_none());
+        assert_eq!(
+            get_response
+                .result
+                .as_ref()
+                .and_then(|value| value["canvas"]["body"].as_str()),
+            Some("Current deployment summary")
+        );
+
+        let clear_response = canvas_clear(
+            &state,
+            RequestFrame {
+                id: RequestId::Text("3".into()),
+                method: Method::CanvasClear,
+                params: serde_json::json!({}),
+            },
+        )
+        .await;
+        assert!(clear_response.error.is_none());
+        assert!(state.canvas.get().await.is_none());
 
         let _ = std::fs::remove_file(temp_dir.join("sessions.db"));
         let _ = std::fs::remove_file(temp_dir.join("pairings.json"));

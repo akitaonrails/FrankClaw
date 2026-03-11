@@ -199,6 +199,33 @@ pub async fn index() -> Html<&'static str> {
       font-size: 0.88rem;
     }
 
+    .canvas-stage {
+      min-height: 180px;
+      background: linear-gradient(160deg, rgba(14,107,80,0.08), rgba(255,255,255,0.92));
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 18px;
+      display: grid;
+      gap: 10px;
+    }
+
+    .canvas-stage h3 {
+      margin: 0;
+      font-size: 1.2rem;
+    }
+
+    .canvas-meta {
+      color: var(--muted);
+      font-size: 0.82rem;
+      font-family: var(--mono);
+    }
+
+    .canvas-body {
+      white-space: pre-wrap;
+      line-height: 1.5;
+      font-size: 0.98rem;
+    }
+
     .feed {
       min-height: 320px;
       display: grid;
@@ -308,6 +335,28 @@ pub async fn index() -> Html<&'static str> {
         </section>
 
         <section class="panel">
+          <h2>Canvas</h2>
+          <div class="grid">
+            <label>Title
+              <input id="canvas-title" placeholder="Optional canvas title">
+            </label>
+            <label>Session key
+              <input id="canvas-session" placeholder="Optional linked session">
+            </label>
+            <label>Body
+              <textarea id="canvas-body-input" placeholder="Write the canvas body shown in the local host"></textarea>
+            </label>
+            <div class="chat-row">
+              <button id="canvas-push-btn">Push Canvas</button>
+              <button id="canvas-clear-btn" class="secondary">Clear Canvas</button>
+            </div>
+            <div id="canvas-stage" class="canvas-stage">
+              <div class="muted">No canvas content yet.</div>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel">
           <h2>Channels</h2>
           <pre id="channels-view">[]</pre>
         </section>
@@ -339,6 +388,12 @@ pub async fn index() -> Html<&'static str> {
       pairings: document.getElementById("pairings-list"),
       models: document.getElementById("models-view"),
       channels: document.getElementById("channels-view"),
+      canvasTitle: document.getElementById("canvas-title"),
+      canvasSession: document.getElementById("canvas-session"),
+      canvasBodyInput: document.getElementById("canvas-body-input"),
+      canvasPushBtn: document.getElementById("canvas-push-btn"),
+      canvasClearBtn: document.getElementById("canvas-clear-btn"),
+      canvasStage: document.getElementById("canvas-stage"),
     };
 
     function setStatus(text, isConnected) {
@@ -402,16 +457,18 @@ pub async fn index() -> Html<&'static str> {
     }
 
     async function refreshPanels() {
-      const [sessions, pairings, models, channels] = await Promise.all([
+      const [sessions, pairings, models, channels, canvas] = await Promise.all([
         rpc("sessions_list", { limit: 30 }),
         apiFetch("/api/pairing/pending"),
         rpc("models_list"),
         rpc("channels_status"),
+        rpc("canvas_get"),
       ]);
       renderSessions(sessions.sessions || []);
       renderPairings(pairings.pending || []);
       els.models.textContent = JSON.stringify(models.models || [], null, 2);
       els.channels.textContent = JSON.stringify(channels.channels || [], null, 2);
+      renderCanvas(canvas.canvas || null);
     }
 
     function renderSessions(items) {
@@ -465,6 +522,34 @@ pub async fn index() -> Html<&'static str> {
       }
     }
 
+    function renderCanvas(canvas) {
+      if (!canvas) {
+        els.canvasStage.innerHTML = `<div class="muted">No canvas content yet.</div>`;
+        els.canvasTitle.value = "";
+        els.canvasSession.value = "";
+        els.canvasBodyInput.value = "";
+        return;
+      }
+
+      els.canvasTitle.value = canvas.title || "";
+      els.canvasSession.value = canvas.session_key || "";
+      els.canvasBodyInput.value = canvas.body || "";
+
+      const title = document.createElement("h3");
+      title.textContent = canvas.title || "Untitled canvas";
+
+      const meta = document.createElement("div");
+      meta.className = "canvas-meta";
+      meta.textContent = [canvas.session_key || "no session", canvas.updated_at || "pending"].join(" · ");
+
+      const body = document.createElement("div");
+      body.className = "canvas-body";
+      body.textContent = canvas.body || "";
+
+      els.canvasStage.innerHTML = "";
+      els.canvasStage.append(title, meta, body);
+    }
+
     function handleMessage(event) {
       const frame = JSON.parse(event.data);
       if (frame.type === "response") {
@@ -483,6 +568,9 @@ pub async fn index() -> Html<&'static str> {
         if (frame.payload?.content) {
           appendBubble("assistant", frame.payload.content);
         }
+      }
+      if (frame.type === "event" && frame.event === "canvas_updated") {
+        renderCanvas(frame.payload?.canvas || null);
       }
       if (frame.type === "event" && frame.event === "session_updated" && state.selectedSession) {
         rpc("chat_history", { session_key: state.selectedSession, limit: 50 })
@@ -546,6 +634,23 @@ pub async fn index() -> Html<&'static str> {
       await rpc("sessions_reset", { session_key: sessionKey });
       els.feed.innerHTML = "";
       await refreshPanels();
+    });
+
+    els.canvasPushBtn.addEventListener("click", async () => {
+      const params = {
+        title: els.canvasTitle.value.trim(),
+        body: els.canvasBodyInput.value.trim(),
+      };
+      if (els.canvasSession.value.trim()) {
+        params.session_key = els.canvasSession.value.trim();
+      }
+      const response = await rpc("canvas_set", params);
+      renderCanvas(response.canvas || null);
+    });
+
+    els.canvasClearBtn.addEventListener("click", async () => {
+      await rpc("canvas_clear");
+      renderCanvas(null);
     });
   </script>
 </body>

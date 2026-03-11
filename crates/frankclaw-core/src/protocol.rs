@@ -77,6 +77,11 @@ pub enum Method {
     // Models
     ModelsList,
 
+    // Canvas
+    CanvasGet,
+    CanvasSet,
+    CanvasClear,
+
     // Webhooks
     WebhooksAdd,
     WebhooksRemove,
@@ -114,6 +119,8 @@ impl Method {
             | Self::CronUpdate
             | Self::CronRemove
             | Self::CronRun
+            | Self::CanvasSet
+            | Self::CanvasClear
             | Self::WebhooksAdd
             | Self::WebhooksRemove
             | Self::WebhooksTest
@@ -137,6 +144,7 @@ pub enum EventType {
     ChannelHealth,
     ConfigChanged,
     SessionUpdated,
+    CanvasUpdated,
     CronRun,
     LogEntry,
     NodePairRequest,

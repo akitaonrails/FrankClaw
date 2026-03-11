@@ -198,6 +198,15 @@ async fn dispatch_method(
             let models = serde_json::to_value(state.runtime.list_models()).unwrap_or_default();
             ResponseFrame::ok(request.id, serde_json::json!({ "models": models }))
         }
+        Method::CanvasGet => {
+            crate::methods::canvas_get(state, request).await
+        }
+        Method::CanvasSet => {
+            crate::methods::canvas_set(state, request).await
+        }
+        Method::CanvasClear => {
+            crate::methods::canvas_clear(state, request).await
+        }
         Method::WebhooksTest => {
             crate::methods::webhooks_test(state, request).await
         }
