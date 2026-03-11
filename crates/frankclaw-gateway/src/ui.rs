@@ -570,6 +570,11 @@ pub async fn index() -> Html<&'static str> {
       return card;
     }
 
+    function transcriptAttachments(entry) {
+      const attachments = entry?.metadata?.attachments;
+      return Array.isArray(attachments) ? attachments : [];
+    }
+
     function appendBubble(label, content, attachments = []) {
       const div = document.createElement("div");
       div.className = "bubble";
@@ -761,7 +766,7 @@ pub async fn index() -> Html<&'static str> {
       const history = await rpc("chat_history", { session_key: sessionKey, limit: 50 });
       els.feed.innerHTML = "";
       for (const entry of history.entries || []) {
-        appendBubble(entry.role, entry.content);
+        appendBubble(entry.role, entry.content, transcriptAttachments(entry));
       }
       const canvas = await rpc("canvas_get", canvasParams());
       renderCanvas(canvas.canvas || null);
@@ -969,7 +974,7 @@ pub async fn index() -> Html<&'static str> {
           .then((history) => {
             els.feed.innerHTML = "";
             for (const entry of history.entries || []) {
-              appendBubble(entry.role, entry.content);
+              appendBubble(entry.role, entry.content, transcriptAttachments(entry));
             }
           })
           .catch(() => {});

@@ -8,7 +8,7 @@ use secrecy::SecretString;
 
 use frankclaw_core::config::{AgentDef, FrankClawConfig, ProviderConfig};
 use frankclaw_core::error::{FrankClawError, Result};
-use frankclaw_core::channel::InboundMessage;
+use frankclaw_core::channel::{InboundAttachment, InboundMessage};
 use frankclaw_core::model::{
     CompletionMessage, CompletionRequest, ModelDef, ModelProvider, StreamDelta, ToolCallResponse,
     Usage,
@@ -36,6 +36,7 @@ pub struct ChatRequest {
     pub agent_id: Option<AgentId>,
     pub session_key: Option<SessionKey>,
     pub message: String,
+    pub attachments: Vec<InboundAttachment>,
     pub model_id: Option<String>,
     pub max_tokens: Option<u32>,
     pub temperature: Option<f32>,
@@ -213,8 +214,19 @@ impl Runtime {
             }))
             .collect();
 
-        self.append_transcript_entry(&session_key, next_seq, Role::User, request.message, None)
-            .await?;
+        let user_metadata = (!request.attachments.is_empty()).then(|| {
+            serde_json::json!({
+                "attachments": request.attachments,
+            })
+        });
+        self.append_transcript_entry(
+            &session_key,
+            next_seq,
+            Role::User,
+            request.message,
+            user_metadata,
+        )
+        .await?;
         next_seq += 1;
 
         let system_prompt = self.build_system_prompt(&agent_id, &agent);
@@ -845,6 +857,7 @@ mod tests {
                 agent_id: None,
                 session_key: None,
                 message: "hello".into(),
+                attachments: Vec::new(),
                 model_id: Some("mock-secondary".into()),
                 max_tokens: None,
                 temperature: None,
@@ -892,6 +905,7 @@ mod tests {
                 agent_id: None,
                 session_key: None,
                 message: "hello".into(),
+                attachments: Vec::new(),
                 model_id: Some("mock-primary".into()),
                 max_tokens: None,
                 temperature: None,
@@ -915,6 +929,61 @@ mod tests {
             tool.output["session"]["key"],
             serde_json::json!(chat.session_key.as_str())
         );
+
+        let _ = std::fs::remove_file(temp);
+    }
+
+    #[tokio::test]
+    async fn runtime_persists_user_attachment_metadata() {
+        let temp = std::env::temp_dir().join(format!(
+            "frankclaw-runtime-attachments-{}.db",
+            uuid::Uuid::new_v4()
+        ));
+        let sessions = Arc::new(SqliteSessionStore::open(&temp, None).expect("sessions should open"));
+        let runtime = Runtime::from_providers(
+            &FrankClawConfig::default(),
+            sessions.clone() as Arc<dyn SessionStore>,
+            vec![Arc::new(MockProvider::reply(
+                "primary",
+                "mock-primary",
+                "reply",
+            ))],
+        )
+        .await
+        .expect("runtime should build");
+
+        let response = runtime
+            .chat(ChatRequest {
+                agent_id: None,
+                session_key: None,
+                message: "here is a screenshot".into(),
+                attachments: vec![InboundAttachment {
+                    media_id: Some(frankclaw_core::types::MediaId::new()),
+                    mime_type: "image/png".into(),
+                    filename: Some("photo.png".into()),
+                    size_bytes: Some(42),
+                    url: Some("/api/media/test-photo".into()),
+                }],
+                model_id: Some("mock-primary".into()),
+                max_tokens: None,
+                temperature: None,
+                stream_tx: None,
+            })
+            .await
+            .expect("chat should succeed");
+
+        let transcript = sessions
+            .get_transcript(&response.session_key, 10, None)
+            .await
+            .expect("transcript should load");
+        let attachments = transcript[0]
+            .metadata
+            .as_ref()
+            .and_then(|metadata| metadata["attachments"].as_array())
+            .expect("user transcript metadata should include attachments");
+        assert_eq!(attachments.len(), 1);
+        assert_eq!(attachments[0]["mime_type"], serde_json::json!("image/png"));
+        assert_eq!(attachments[0]["filename"], serde_json::json!("photo.png"));
 
         let _ = std::fs::remove_file(temp);
     }
@@ -964,6 +1033,7 @@ mod tests {
                 agent_id: None,
                 session_key: None,
                 message: "hello".into(),
+                attachments: Vec::new(),
                 model_id: Some("mock-primary".into()),
                 max_tokens: None,
                 temperature: None,
@@ -1031,6 +1101,7 @@ mod tests {
                 agent_id: None,
                 session_key: None,
                 message: "inspect this session".into(),
+                attachments: Vec::new(),
                 model_id: Some("mock-primary".into()),
                 max_tokens: None,
                 temperature: None,
@@ -1120,6 +1191,7 @@ mod tests {
                 agent_id: None,
                 session_key: None,
                 message: "inspect this session".into(),
+                attachments: Vec::new(),
                 model_id: Some("mock-primary".into()),
                 max_tokens: None,
                 temperature: None,
@@ -1173,6 +1245,7 @@ mod tests {
                 agent_id: None,
                 session_key: None,
                 message: "inspect this session".into(),
+                attachments: Vec::new(),
                 model_id: Some("mock-primary".into()),
                 max_tokens: None,
                 temperature: None,

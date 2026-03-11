@@ -87,6 +87,7 @@ pub async fn execute_request(
             agent_id: request.mapping.agent_id,
             session_key: request.mapping.session_key,
             message: request.message,
+            attachments: Vec::new(),
             model_id: None,
             max_tokens: None,
             temperature: None,

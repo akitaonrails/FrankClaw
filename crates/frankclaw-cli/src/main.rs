@@ -475,6 +475,7 @@ async fn main() -> anyhow::Result<()> {
                     agent_id: agent.map(frankclaw_core::types::AgentId::new),
                     session_key: session.map(frankclaw_core::types::SessionKey::from_raw),
                     message,
+                    attachments: Vec::new(),
                     model_id: model,
                     max_tokens: None,
                     temperature: None,

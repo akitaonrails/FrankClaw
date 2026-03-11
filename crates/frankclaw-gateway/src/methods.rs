@@ -234,6 +234,7 @@ pub async fn chat_send(
             agent_id,
             session_key,
             message,
+            attachments: Vec::new(),
             model_id,
             max_tokens,
             temperature,

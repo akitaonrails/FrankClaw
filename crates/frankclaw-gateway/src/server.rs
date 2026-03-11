@@ -1085,6 +1085,7 @@ async fn process_inbound_message_with_target(
             agent_id,
             session_key: Some(session_key.clone()),
             message: text.to_string(),
+            attachments: inbound.attachments.clone(),
             model_id: None,
             max_tokens: None,
             temperature: None,
@@ -1354,6 +1355,7 @@ async fn start_cron_runtime(
                         agent_id: Some(job.agent_id.clone()),
                         session_key: Some(job.session_key.clone()),
                         message: job.prompt.clone(),
+                        attachments: Vec::new(),
                         model_id: None,
                         max_tokens: None,
                         temperature: None,
@@ -2121,6 +2123,21 @@ mod tests {
             .expect("transcript should load");
         assert_eq!(transcript.len(), 2);
         assert_eq!(transcript[0].content, "here is a screenshot");
+        assert_eq!(
+            transcript[0]
+                .metadata
+                .as_ref()
+                .and_then(|metadata| metadata["attachments"].as_array())
+                .map(|attachments| attachments.len()),
+            Some(1)
+        );
+        assert_eq!(
+            transcript[0]
+                .metadata
+                .as_ref()
+                .and_then(|metadata| metadata["attachments"][0]["filename"].as_str()),
+            Some("photo.png")
+        );
 
         let mut outbound_request =
             Request::get("/api/web/outbound?token=super-secret&recipient_id=console-browser")
