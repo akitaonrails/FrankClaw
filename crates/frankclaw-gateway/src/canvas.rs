@@ -11,6 +11,7 @@ pub enum CanvasBlockKind {
     Checklist,
     Status,
     Metric,
+    Action,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
@@ -240,6 +241,21 @@ fn render_markdown_block(block: &CanvasBlock) -> String {
                 format!("**Metric:** {text} = {value}")
             }
         }
+        CanvasBlockKind::Action => {
+            let action = block
+                .meta
+                .as_ref()
+                .and_then(|meta| meta.get("action"))
+                .and_then(|value| value.as_str())
+                .unwrap_or("noop");
+            let target = block
+                .meta
+                .as_ref()
+                .and_then(|meta| meta.get("target"))
+                .and_then(|value| value.as_str())
+                .unwrap_or_default();
+            format!("**Action ({action})**\n{}\n{}", text, target)
+        }
     }
 }
 
@@ -295,6 +311,14 @@ mod tests {
                     text: "Open sessions".into(),
                     meta: Some(serde_json::json!({ "value": 12 })),
                 },
+                CanvasBlock {
+                    kind: CanvasBlockKind::Action,
+                    text: "Open dashboard".into(),
+                    meta: Some(serde_json::json!({
+                        "action": "open_url",
+                        "target": "https://example.com/dashboard"
+                    })),
+                },
             ],
             revision: 1,
             updated_at: chrono::DateTime::from_timestamp(1_710_000_123, 0).unwrap(),
@@ -303,5 +327,6 @@ mod tests {
         let export = export_document(&document, CanvasExportFormat::Markdown);
         assert!(export.contains("**Status (ok)**"));
         assert!(export.contains("**Metric:** Open sessions = 12"));
+        assert!(export.contains("**Action (open_url)**"));
     }
 }

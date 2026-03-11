@@ -374,6 +374,7 @@ pub async fn index() -> Html<&'static str> {
                   <option value="checklist">Checklist</option>
                   <option value="status">Status</option>
                   <option value="metric">Metric</option>
+                  <option value="action">Action</option>
                 </select>
               </label>
               <label>Block text
@@ -612,20 +613,24 @@ pub async fn index() -> Html<&'static str> {
         button.type = "button";
         button.innerHTML = `<strong>${item.channel} / ${item.account_id}</strong><span>${item.key}</span>`;
         button.addEventListener("click", async () => {
-          state.selectedSession = item.key;
-          els.agent.value = item.agent_id || els.agent.value;
-          els.session.value = item.key;
-          els.canvasSession.value = item.key;
-          const history = await rpc("chat_history", { session_key: item.key, limit: 50 });
-          els.feed.innerHTML = "";
-          for (const entry of history.entries || []) {
-            appendBubble(entry.role, entry.content);
-          }
-          const canvas = await rpc("canvas_get", canvasParams());
-          renderCanvas(canvas.canvas || null);
+          await loadSession(item.key, item.agent_id || null);
         });
         els.sessions.appendChild(button);
       }
+    }
+
+    async function loadSession(sessionKey, agentId = null) {
+      state.selectedSession = sessionKey;
+      if (agentId) els.agent.value = agentId;
+      els.session.value = sessionKey;
+      els.canvasSession.value = sessionKey;
+      const history = await rpc("chat_history", { session_key: sessionKey, limit: 50 });
+      els.feed.innerHTML = "";
+      for (const entry of history.entries || []) {
+        appendBubble(entry.role, entry.content);
+      }
+      const canvas = await rpc("canvas_get", canvasParams());
+      renderCanvas(canvas.canvas || null);
     }
 
     function renderPairings(items) {
@@ -719,9 +724,53 @@ pub async fn index() -> Html<&'static str> {
         return item;
       }
 
+      if (kind === "action") {
+        label.textContent = `action · ${meta.action || "noop"}`;
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "secondary";
+        button.textContent = block.text || meta.label || "Run action";
+        button.addEventListener("click", () => runCanvasAction(meta).catch((error) => appendBubble("error", error.message)));
+        content.replaceWith(button);
+        return item;
+      }
+
       label.textContent = kind;
       content.textContent = block.text || "";
       return item;
+    }
+
+    async function runCanvasAction(meta) {
+      const action = String(meta.action || "").trim();
+      if (action === "open_url") {
+        const raw = String(meta.target || meta.url || "").trim();
+        const url = new URL(raw, location.origin);
+        if (!["http:", "https:"].includes(url.protocol)) {
+          throw new Error("canvas action only allows http/https URLs");
+        }
+        window.open(url.toString(), "_blank", "noopener,noreferrer");
+        return;
+      }
+
+      if (action === "prefill_chat") {
+        if (meta.agent_id) els.agent.value = String(meta.agent_id);
+        if (meta.session_key) {
+          els.session.value = String(meta.session_key);
+          els.canvasSession.value = String(meta.session_key);
+        }
+        els.message.value = String(meta.target || meta.message || "");
+        els.message.focus();
+        return;
+      }
+
+      if (action === "select_session") {
+        const sessionKey = String(meta.session_key || meta.target || "").trim();
+        if (!sessionKey) throw new Error("canvas action requires a session_key");
+        await loadSession(sessionKey, meta.agent_id ? String(meta.agent_id) : null);
+        return;
+      }
+
+      throw new Error(`unsupported canvas action '${action || "noop"}'`);
     }
 
     function handleMessage(event) {
@@ -878,6 +927,8 @@ pub async fn index() -> Html<&'static str> {
       };
       if (els.canvasBlockKind.value === "status") {
         block.meta = { level: "info" };
+      } else if (els.canvasBlockKind.value === "action") {
+        block.meta = { action: "prefill_chat", target: els.canvasBlockText.value.trim() };
       }
       const response = await rpc("canvas_patch", {
         ...canvasParams(),
