@@ -262,6 +262,8 @@ async fn readiness_handler(State(state): State<AppState>) -> StatusCode {
 struct WebInboundRequest {
     sender_id: String,
     message: Option<String>,
+    agent_id: Option<String>,
+    session_key: Option<String>,
     #[serde(default = "default_web_account_id")]
     account_id: String,
     sender_name: Option<String>,
@@ -323,9 +325,28 @@ async fn web_inbound_handler(
         platform_message_id: None,
         timestamp: chrono::Utc::now(),
     };
+    let agent_id = body.agent_id.map(frankclaw_core::types::AgentId::new);
+    let session_key = body
+        .session_key
+        .map(frankclaw_core::types::SessionKey::from_raw);
 
-    match process_inbound_message(state.gateway.clone(), inbound).await {
-        Ok(()) => (
+    match process_inbound_message_with_target(
+        state.gateway.clone(),
+        inbound,
+        agent_id,
+        session_key,
+    )
+    .await
+    {
+        Ok(Some(result)) => (
+            StatusCode::ACCEPTED,
+            Json(serde_json::json!({
+                "status": "accepted",
+                "session_key": result.session_key.as_str(),
+            })),
+        )
+            .into_response(),
+        Ok(None) => (
             StatusCode::ACCEPTED,
             Json(serde_json::json!({ "status": "accepted" })),
         )
@@ -932,6 +953,22 @@ async fn process_inbound_message(
     state: Arc<GatewayState>,
     inbound: InboundMessage,
 ) -> frankclaw_core::error::Result<()> {
+    process_inbound_message_with_target(state, inbound, None, None)
+        .await
+        .map(|_| ())
+}
+
+#[derive(Debug, Clone)]
+struct InboundProcessResult {
+    session_key: frankclaw_core::types::SessionKey,
+}
+
+async fn process_inbound_message_with_target(
+    state: Arc<GatewayState>,
+    inbound: InboundMessage,
+    agent_id: Option<frankclaw_core::types::AgentId>,
+    session_key_override: Option<frankclaw_core::types::SessionKey>,
+) -> frankclaw_core::error::Result<Option<InboundProcessResult>> {
     let config = state.current_config();
     let policy = config
         .channels
@@ -962,20 +999,20 @@ async fn process_inbound_message(
     }
 
     if inbound.is_group && policy.require_mention_for_groups && !inbound.is_mention {
-        return Ok(());
+        return Ok(None);
     }
 
     if inbound.is_group && !group_allowed(&policy, &inbound) {
-        return Ok(());
+        return Ok(None);
     }
 
     if !inbound.is_group {
         match policy.dm_policy {
-            ChannelDmPolicy::Disabled => return Ok(()),
+            ChannelDmPolicy::Disabled => return Ok(None),
             ChannelDmPolicy::Open => {}
             ChannelDmPolicy::Allowlist => {
                 if !sender_allowed(&policy, &state, &inbound) {
-                    return Ok(());
+                    return Ok(None);
                 }
             }
             ChannelDmPolicy::Pairing => {
@@ -1010,18 +1047,20 @@ async fn process_inbound_message(
                             "sender_id": inbound.sender_id.clone(),
                         }),
                     );
-                    return Ok(());
+                    return Ok(None);
                 }
             }
         }
     }
 
-    let session_key = state.runtime.session_key_for_inbound(&inbound);
+    let session_key = session_key_override
+        .clone()
+        .unwrap_or_else(|| state.runtime.session_key_for_inbound(&inbound));
 
     let response = state
         .runtime
         .chat(frankclaw_runtime::ChatRequest {
-            agent_id: None,
+            agent_id,
             session_key: Some(session_key.clone()),
             message: text.to_string(),
             model_id: None,
@@ -1066,7 +1105,7 @@ async fn process_inbound_message(
         let _ = state.broadcast.send(json);
     }
 
-    Ok(())
+    Ok(Some(InboundProcessResult { session_key }))
 }
 
 fn log_loaded_skills(state: &Arc<GatewayState>) {
@@ -1800,6 +1839,99 @@ mod tests {
             .await
             .expect("transcript should load");
         assert_eq!(transcript[0].content, "<media:image>");
+
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[tokio::test]
+    async fn web_inbound_http_honors_explicit_session_and_returns_it() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "frankclaw-gateway-web-inbound-http-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let mut config = FrankClawConfig::default();
+        config.gateway.auth = frankclaw_core::auth::AuthMode::Token {
+            token: Some(SecretString::from("super-secret".to_string())),
+        };
+        config.channels.insert(
+            frankclaw_core::types::ChannelId::new("web"),
+            ChannelConfig {
+                enabled: true,
+                accounts: Vec::new(),
+                extra: serde_json::json!({
+                    "dm_policy": "open"
+                }),
+            },
+        );
+        let channels = Arc::new(
+            frankclaw_channels::load_from_config(&config).expect("channels should load"),
+        );
+        let (state, sessions) = build_test_state(&temp_dir, config, channels).await;
+        let app = build_router(state.clone(), Arc::new(AuthRateLimiter::new(
+            state.current_config().gateway.rate_limit.clone(),
+        )));
+        let session_key = frankclaw_core::types::SessionKey::from_raw("default:web:console-demo");
+
+        let mut request = Request::post("/api/web/inbound?token=super-secret")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::json!({
+                    "sender_id": "console-browser",
+                    "sender_name": "Console",
+                    "message": "here is a screenshot",
+                    "agent_id": "default",
+                    "session_key": session_key.as_str(),
+                    "attachments": [{
+                        "media_id": uuid::Uuid::new_v4().to_string(),
+                        "mime_type": "image/png",
+                        "filename": "photo.png",
+                        "size_bytes": 7
+                    }]
+                })
+                .to_string(),
+            ))
+            .expect("request should build");
+        request
+            .extensions_mut()
+            .insert(ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 12345))));
+
+        let response = app
+            .clone()
+            .oneshot(request)
+            .await
+            .expect("request should succeed");
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body should read");
+        let json: serde_json::Value =
+            serde_json::from_slice(&body).expect("response should be json");
+        assert_eq!(json["session_key"], serde_json::json!(session_key.as_str()));
+
+        let transcript = sessions
+            .get_transcript(&session_key, 10, None)
+            .await
+            .expect("transcript should load");
+        assert_eq!(transcript.len(), 2);
+        assert_eq!(transcript[0].content, "here is a screenshot");
+
+        let mut outbound_request = Request::get("/api/web/outbound?token=super-secret")
+            .body(Body::empty())
+            .expect("request should build");
+        outbound_request
+            .extensions_mut()
+            .insert(ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 12345))));
+        let outbound_response = app
+            .oneshot(outbound_request)
+            .await
+            .expect("outbound request should succeed");
+        assert_eq!(outbound_response.status(), StatusCode::OK);
+        let outbound_body = to_bytes(outbound_response.into_body(), usize::MAX)
+            .await
+            .expect("outbound body should read");
+        let outbound_json: serde_json::Value =
+            serde_json::from_slice(&outbound_body).expect("outbound response should be json");
+        assert_eq!(outbound_json["messages"][0]["text"], serde_json::json!("mock reply"));
 
         let _ = std::fs::remove_dir_all(temp_dir);
     }

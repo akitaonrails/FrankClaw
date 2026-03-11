@@ -53,7 +53,7 @@ The main remaining gap is feature surface, not the core message-to-model flow.
 ### Rich Channel Behavior
 
 - [ ] Rich attachment/media handling across supported channels
-  Current slice: authenticated web media upload/download plus attachment-only web inbound turns
+  Current slice: authenticated web media upload/download, console upload flow, and attachment-capable web inbound turns with explicit session targeting
 - [x] Broader edit support beyond Telegram
 - [x] Delete support where platforms allow it
 - [x] Shared outbound text normalization and reply-safe formatting
@@ -95,6 +95,7 @@ The main remaining gap is feature surface, not the core message-to-model flow.
 ### Test Coverage and Test Quality
 
 - [ ] More integration coverage across supported channels
+- [x] Gateway-path coverage for authenticated web media upload/inbound flows
 - [x] Better end-to-end coverage for operator flows
 - [ ] External-API contract fixtures for supported channels
 - [x] More failure-path tests for provider failover and retries

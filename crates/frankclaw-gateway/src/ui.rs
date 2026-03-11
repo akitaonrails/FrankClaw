@@ -298,7 +298,7 @@ pub async fn index() -> Html<&'static str> {
           <div class="grid">
             <div class="chat-row">
               <label>Agent
-                <input id="chat-agent" placeholder="main">
+                <input id="chat-agent" placeholder="default">
               </label>
               <label>Session key
                 <input id="chat-session" placeholder="Optional explicit session">
@@ -308,6 +308,14 @@ pub async fn index() -> Html<&'static str> {
               <label>Message
                 <textarea id="chat-message" placeholder="Ask FrankClaw something"></textarea>
               </label>
+            </div>
+            <div class="chat-row single">
+              <label>Attachments
+                <input id="chat-attachments" type="file" multiple>
+              </label>
+            </div>
+            <div id="chat-uploads" class="list">
+              <div class="muted">No attachments queued.</div>
             </div>
             <div class="chat-row">
               <button id="send-btn">Send</button>
@@ -390,6 +398,7 @@ pub async fn index() -> Html<&'static str> {
       pending: new Map(),
       selectedSession: "",
       currentCanvas: null,
+      pendingAttachments: [],
     };
 
     const els = {
@@ -402,6 +411,8 @@ pub async fn index() -> Html<&'static str> {
       resetBtn: document.getElementById("reset-session-btn"),
       feed: document.getElementById("chat-feed"),
       message: document.getElementById("chat-message"),
+      attachments: document.getElementById("chat-attachments"),
+      uploads: document.getElementById("chat-uploads"),
       agent: document.getElementById("chat-agent"),
       session: document.getElementById("chat-session"),
       sessions: document.getElementById("sessions-list"),
@@ -451,11 +462,20 @@ pub async fn index() -> Html<&'static str> {
       if (els.password.value.trim()) url.searchParams.set("password", els.password.value.trim());
     }
 
-    async function apiFetch(path, options = {}) {
+    function buildApiUrl(path) {
       const url = new URL(path, location.origin);
       appendAuthQuery(url);
+      return url;
+    }
+
+    async function apiFetch(path, options = {}) {
+      const url = buildApiUrl(path);
+      const headers = new Headers(options.headers || {});
+      if (!headers.has("content-type") && typeof options.body === "string") {
+        headers.set("content-type", "application/json");
+      }
       const response = await fetch(url, {
-        headers: { "content-type": "application/json", ...(options.headers || {}) },
+        headers,
         ...options,
       });
       const body = await response.json().catch(() => ({}));
@@ -463,6 +483,64 @@ pub async fn index() -> Html<&'static str> {
         throw new Error(body.error || `HTTP ${response.status}`);
       }
       return body;
+    }
+
+    function sleep(ms) {
+      return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+
+    function renderPendingAttachments() {
+      els.uploads.innerHTML = "";
+      if (!state.pendingAttachments.length) {
+        els.uploads.innerHTML = `<div class="muted">No attachments queued.</div>`;
+        return;
+      }
+
+      for (const attachment of state.pendingAttachments) {
+        const item = document.createElement("div");
+        item.className = "bubble";
+        item.innerHTML = `<small>${attachment.mime_type || "application/octet-stream"}</small><div></div>`;
+        const label = attachment.filename || attachment.media_id;
+        const suffix = attachment.size_bytes ? ` · ${attachment.size_bytes} bytes` : "";
+        item.querySelector("div").textContent = `${label}${suffix}`;
+        els.uploads.appendChild(item);
+      }
+    }
+
+    async function uploadSelectedAttachments(files) {
+      for (const file of files) {
+        const response = await fetch(buildApiUrl("/api/media/upload"), {
+          method: "POST",
+          headers: {
+            "content-type": file.type || "application/octet-stream",
+            "x-file-name": file.name,
+          },
+          body: file,
+        });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(body.error || `HTTP ${response.status}`);
+        }
+        state.pendingAttachments.push({
+          media_id: body.media_id,
+          mime_type: body.mime_type || file.type || "application/octet-stream",
+          filename: body.filename || file.name,
+          size_bytes: body.size_bytes || file.size || null,
+        });
+      }
+      renderPendingAttachments();
+    }
+
+    async function drainWebOutbound(maxAttempts = 12) {
+      for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+        const response = await apiFetch("/api/web/outbound");
+        const messages = response.messages || [];
+        if (messages.length) {
+          return messages;
+        }
+        await sleep(150);
+      }
+      return [];
     }
 
     function rpc(method, params = {}) {
@@ -515,6 +593,7 @@ pub async fn index() -> Html<&'static str> {
         button.innerHTML = `<strong>${item.channel} / ${item.account_id}</strong><span>${item.key}</span>`;
         button.addEventListener("click", async () => {
           state.selectedSession = item.key;
+          els.agent.value = item.agent_id || els.agent.value;
           els.session.value = item.key;
           els.canvasSession.value = item.key;
           const history = await rpc("chat_history", { session_key: item.key, limit: 50 });
@@ -664,22 +743,67 @@ pub async fn index() -> Html<&'static str> {
 
     els.connectBtn.addEventListener("click", () => connect().catch((error) => appendBubble("error", error.message)));
     els.refreshBtn.addEventListener("click", () => refreshPanels().catch((error) => appendBubble("error", error.message)));
+    els.attachments.addEventListener("change", async () => {
+      const files = Array.from(els.attachments.files || []);
+      if (!files.length) return;
+      try {
+        await uploadSelectedAttachments(files);
+        appendBubble("system", `Uploaded ${files.length} attachment${files.length === 1 ? "" : "s"}`);
+      } catch (error) {
+        appendBubble("error", error.message);
+      } finally {
+        els.attachments.value = "";
+      }
+    });
     els.sendBtn.addEventListener("click", async () => {
       const message = els.message.value.trim();
-      if (!message) return;
-      appendBubble("user", message);
-      const params = { message };
-      if (els.agent.value.trim()) params.agent_id = els.agent.value.trim();
-      if (els.session.value.trim()) params.session_key = els.session.value.trim();
-      const response = await rpc("chat_send", params);
-      if (response.session_key) {
-        state.selectedSession = response.session_key;
-        els.session.value = response.session_key;
-      }
-      if (response.content) {
-        appendBubble("assistant", response.content);
+      const attachments = [...state.pendingAttachments];
+      if (!message && !attachments.length) return;
+
+      const uploadSummary = attachments.map((attachment) => attachment.filename || attachment.media_id).join(", ");
+      const userPreview = [message, uploadSummary].filter(Boolean).join("\n");
+      appendBubble("user", userPreview || "<attachment>");
+
+      if (attachments.length) {
+        const body = {
+          sender_id: "console-browser",
+          sender_name: "FrankClaw Console",
+          message: message || null,
+          attachments,
+        };
+        if (els.agent.value.trim()) body.agent_id = els.agent.value.trim();
+        if (els.session.value.trim()) body.session_key = els.session.value.trim();
+
+        const response = await apiFetch("/api/web/inbound", {
+          method: "POST",
+          body: JSON.stringify(body),
+        });
+        if (response.session_key) {
+          state.selectedSession = response.session_key;
+          els.session.value = response.session_key;
+        }
+        const outbound = await drainWebOutbound();
+        for (const item of outbound) {
+          if (item.text) {
+            appendBubble("assistant", item.text);
+          }
+        }
+      } else {
+        const params = { message };
+        if (els.agent.value.trim()) params.agent_id = els.agent.value.trim();
+        if (els.session.value.trim()) params.session_key = els.session.value.trim();
+        const response = await rpc("chat_send", params);
+        if (response.session_key) {
+          state.selectedSession = response.session_key;
+          els.session.value = response.session_key;
+        }
+        if (response.content) {
+          appendBubble("assistant", response.content);
+        }
       }
       els.message.value = "";
+      state.pendingAttachments = [];
+      renderPendingAttachments();
       await refreshPanels();
     });
 
@@ -719,6 +843,8 @@ pub async fn index() -> Html<&'static str> {
       await rpc("canvas_clear", canvasParams());
       renderCanvas(null);
     });
+
+    renderPendingAttachments();
   </script>
 </body>
 </html>"#,
