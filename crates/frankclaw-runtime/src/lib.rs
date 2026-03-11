@@ -15,7 +15,7 @@ use frankclaw_core::model::{
 use frankclaw_core::session::{SessionEntry, SessionStore, TranscriptEntry};
 use frankclaw_core::types::{AgentId, ChannelId, Role, SessionKey};
 use frankclaw_models::{
-    AnthropicProvider, FailoverChain, OllamaProvider, OpenAiProvider,
+    AnthropicProvider, FailoverChain, OllamaProvider, OpenAiProvider, ProviderHealth,
 };
 use frankclaw_plugin_sdk::{SkillManifest, load_workspace_skills};
 use frankclaw_tools::{ToolContext, ToolOutput, ToolRegistry};
@@ -117,6 +117,10 @@ impl Runtime {
 
     pub fn list_models(&self) -> &[ModelDef] {
         &self.model_defs
+    }
+
+    pub async fn provider_health(&self) -> Vec<ProviderHealth> {
+        self.models.health().await
     }
 
     pub fn list_channels(&self) -> &[ChannelId] {
@@ -992,6 +996,30 @@ mod tests {
             .messages
             .iter()
             .any(|message| message.role == Role::Tool && message.content.contains("\"entries\"")));
+
+        let _ = std::fs::remove_file(temp);
+    }
+
+    #[tokio::test]
+    async fn runtime_reports_provider_health() {
+        let temp = std::env::temp_dir().join(format!(
+            "frankclaw-runtime-health-{}.db",
+            uuid::Uuid::new_v4()
+        ));
+        let sessions = Arc::new(SqliteSessionStore::open(&temp, None).expect("sessions should open"));
+        let provider = Arc::new(MockProvider::reply("primary", "mock-primary", "reply"));
+        let runtime = Runtime::from_providers(
+            &FrankClawConfig::default(),
+            sessions as Arc<dyn SessionStore>,
+            vec![provider],
+        )
+        .await
+        .expect("runtime should build");
+
+        let health = runtime.provider_health().await;
+        assert_eq!(health.len(), 1);
+        assert_eq!(health[0].provider_id, "primary");
+        assert!(health[0].healthy);
 
         let _ = std::fs::remove_file(temp);
     }

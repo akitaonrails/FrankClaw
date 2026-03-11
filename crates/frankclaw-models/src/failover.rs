@@ -9,6 +9,12 @@ use frankclaw_core::model::{
     CompletionRequest, CompletionResponse, ModelDef, ModelProvider, StreamDelta,
 };
 
+#[derive(Debug, Clone)]
+pub struct ProviderHealth {
+    pub provider_id: String,
+    pub healthy: bool,
+}
+
 /// Failover chain that tries providers in order, with cooldowns on failure.
 pub struct FailoverChain {
     providers: Vec<Arc<dyn ModelProvider>>,
@@ -72,5 +78,16 @@ impl FailoverChain {
             }
         }
         Ok(all)
+    }
+
+    pub async fn health(&self) -> Vec<ProviderHealth> {
+        let mut health = Vec::with_capacity(self.providers.len());
+        for provider in &self.providers {
+            health.push(ProviderHealth {
+                provider_id: provider.id().to_string(),
+                healthy: provider.health().await,
+            });
+        }
+        health
     }
 }

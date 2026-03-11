@@ -55,6 +55,9 @@ enum Command {
     /// Show resolved configuration (secrets redacted).
     Config,
 
+    /// Show runtime and exposure status for the configured gateway.
+    Status,
+
     /// Send a message through the local runtime.
     MessageSend {
         /// Message text to send.
@@ -303,6 +306,32 @@ async fn main() -> anyhow::Result<()> {
             let config = load_config(cli.config.as_deref(), &state_dir)?;
             let json = serde_json::to_string_pretty(&redact_config(&config))?;
             println!("{json}");
+        }
+
+        Command::Status => {
+            let config = load_config(cli.config.as_deref(), &state_dir)?;
+            config.validate()?;
+            let sessions = open_sessions(&state_dir)?;
+            let runtime = build_runtime(&config, sessions).await?;
+            let channels = frankclaw_channels::load_from_config(&config)
+                .context("failed to load configured channels")?;
+            let exposure = frankclaw_gateway::auth::assess_exposure(&config)?;
+
+            print_exposure_report(&exposure);
+            println!();
+            println!("Providers:");
+            for provider in runtime.provider_health().await {
+                println!(
+                    "  {}  {}",
+                    provider.provider_id,
+                    if provider.healthy { "healthy" } else { "unhealthy" }
+                );
+            }
+            println!();
+            println!("Channels:");
+            for (channel_id, channel) in channels.channels() {
+                println!("  {}  {:?}", channel_id, channel.health().await);
+            }
         }
 
         Command::MessageSend {
