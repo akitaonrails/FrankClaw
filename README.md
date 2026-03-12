@@ -2,16 +2,24 @@
 
 A security-hardened personal AI assistant gateway written in Rust. Connects messaging channels to AI model providers through a local WebSocket control plane.
 
-FrankClaw is a ground-up Rust rewrite of [OpenClaw](https://github.com/openclaw/openclaw), preserving the architectural vision while replacing the TypeScript implementation with memory-safe abstractions and stricter security defaults.
+FrankClaw is a ground-up Rust rewrite of [OpenClaw](https://github.com/openclaw/openclaw), achieving **functional parity** with the core feature set while providing **stronger security guarantees** through Rust's memory safety, encryption at rest, stricter input validation, and defense-in-depth hardening at every layer.
 
-Current scope and parity status:
-- supported channels: `web`, `telegram`, `discord`, `slack`, `signal`, `whatsapp`
-- local Canvas host
-- bounded tool orchestration with Chromium-backed browser sessions
-- operator onboarding and install helpers
+What's at parity:
+- 6 messaging channels: Web, Telegram, Discord, Slack, Signal, WhatsApp
+- Multi-provider AI with failover (OpenAI, Anthropic, Ollama)
+- Full agent runtime: context compaction, subagent orchestration, command system, skills, hooks
+- Media pipeline with vision/audio understanding
+- Canvas host with revision conflict detection
+- Browser automation (CDP-based, 9 tools)
+- Bash tool with allowlist + sandbox (ai-jail)
+- Operator experience: setup wizard, doctor diagnostics, security audit, daemon management
 
-For the remaining distance to OpenClaw feature parity, see [PARITY_TODO.md](PARITY_TODO.md) and [FEATURE_PLANS.md](FEATURE_PLANS.md).
-For concrete setup snippets for the supported channels and browser runtime, see [CHANNEL_SETUP.md](CHANNEL_SETUP.md), `examples/channels/`, or `frankclaw config-example --channel <name>`.
+What's intentionally skipped (low value or over-engineered):
+- TTS, polls, WhatsApp Web (Baileys), Gmail Pub/Sub, ACP protocol, auto-update, i18n
+- 17 long-tail channels (Google Chat, iMessage, IRC, Teams, Matrix, etc.) — can be added via the plugin trait
+
+For full details, see [PARITY_TODO.md](PARITY_TODO.md) and [FEATURE_PLANS.md](FEATURE_PLANS.md).
+For channel setup, see [CHANNEL_SETUP.md](CHANNEL_SETUP.md), `examples/channels/`, or `frankclaw config-example --channel <name>`.
 
 ## Features
 
@@ -317,7 +325,30 @@ frankclaw gateway -p 9000   Override listen port
 
 ## Security
 
-FrankClaw is designed with defense-in-depth. Every layer enforces its own security boundaries.
+FrankClaw is designed with defense-in-depth. Every layer enforces its own security boundaries. A comprehensive audit of both FrankClaw and OpenClaw (see [OPENCLAW_SECURITY_AUDIT.md](OPENCLAW_SECURITY_AUDIT.md)) confirms that FrankClaw resolves every critical and high-severity vulnerability found in the reference implementation.
+
+### Why FrankClaw is More Secure Than OpenClaw
+
+| Area | OpenClaw | FrankClaw |
+|------|----------|-----------|
+| **Memory safety** | JavaScript (GC, no buffer overflows) | Rust with `#![forbid(unsafe_code)]` — no unsafe blocks anywhere |
+| **Encryption at rest** | Plaintext transcripts and config on disk | ChaCha20-Poly1305 encryption with master key |
+| **Password hashing** | No password auth mode found | Argon2id (t=3, m=64MB, p=4) |
+| **Token comparison** | SHA-256 + timingSafeEqual, but type-check short-circuit leaks timing | Constant-time byte comparison, no early returns |
+| **Shell execution** | No mandatory command allowlist; `eval()` in browser tool | Deny-all default + binary allowlist + metacharacter rejection + optional ai-jail sandbox |
+| **Webhook auth** | Discord: hardcoded placeholder key; Slack: zero signature verification | Application-layer signature validation on all channels |
+| **File permissions** | `0o644` (world-readable) for media files | `0o600` (owner-only) for everything |
+| **Session encryption** | None — all conversation history readable on disk | ChaCha20-Poly1305 when master key is set |
+| **Prompt injection** | `sanitizeForPromptLiteral()` + `<untrusted-text>` wrapping | Unicode Cc/Cf stripping on all inputs + tool outputs, external content tags, 2 MB prompt size limit, no user data in system prompts |
+| **Input validation** | No identifier length limits, no WebSocket frame size enforcement | 255-byte ID limits, 800-byte session key limits, configurable WS frame size |
+| **Malware scanning** | None | Optional VirusTotal integration on all file uploads |
+| **Sandbox** | Docker with gaps (no `--cap-drop=ALL`, `eval()` in browser, symlink bypass) | ai-jail (bubblewrap + landlock), read-only lockdown mode available |
+| **Security audit CLI** | `secrets/audit.ts` (detects plaintext secrets only) | `frankclaw audit` with 7 categories, severity ratings, CI exit codes |
+| **Prototype pollution** | Explicitly guarded in config merge | N/A — Rust has no prototype chain |
+| **OAuth/credential storage** | Plaintext files in `~/.openclaw/credentials/` | Encrypted via master key |
+| **Session fixation** | User-controlled session key header with no validation | Session keys validated against agent ownership |
+
+OpenClaw's audit found **7 CRITICAL** and **9 HIGH** severity issues. FrankClaw addresses all of them by design or explicit mitigation.
 
 ### What's Hardened
 
@@ -331,7 +362,8 @@ FrankClaw is designed with defense-in-depth. Every layer enforces its own securi
 | **File permissions** | All sensitive files created with `0600` (owner-only). Directories `0700`. |
 | **Network binding** | Gateway **refuses to start** if bound to a non-loopback address without authentication configured. This is a hard error, not a warning. |
 | **SSRF protection** | All outbound HTTP requests resolve DNS first and block connections to private IPs (RFC 1918), loopback, link-local, CGNAT (100.64.0.0/10), documentation ranges, benchmarking ranges, and IPv4-mapped IPv6 private addresses. |
-| **Media files** | Filenames sanitized (path traversal stripped, leading dots removed). MIME types mapped to safe extensions only (never `.exe`, `.sh`, `.bat`). |
+| **Prompt injection** | Unicode control/format chars (Cc, Cf) stripped from all user input and tool output before LLM ingestion. External content wrapped in boundary tags. Total prompt hard-capped at 2 MB. |
+| **Media files** | Filenames sanitized (path traversal stripped, leading dots removed). MIME types mapped to safe extensions only (never `.exe`, `.sh`, `.bat`). Optional VirusTotal malware scanning before storage. |
 | **Config hot-reload** | File watcher plus lock-free `ArcSwap` swap for the reloadable gateway subset. Restart-sensitive config changes are detected and flagged instead of being silently applied. |
 | **Rate limiting** | Per-IP auth failure tracking with sliding window and lockout. Cleared on successful auth. |
 | **Dependencies** | No OpenSSL (uses `rustls` only). Release builds use LTO, stripped symbols, and `panic = abort`. |
