@@ -5,13 +5,14 @@ A security-hardened personal AI assistant gateway written in Rust. Connects mess
 FrankClaw is a ground-up Rust rewrite of [OpenClaw](https://github.com/openclaw/openclaw), achieving **functional parity** with the core feature set while providing **stronger security guarantees** through Rust's memory safety, encryption at rest, stricter input validation, and defense-in-depth hardening at every layer.
 
 What's at parity:
-- 6 messaging channels: Web, Telegram, Discord, Slack, Signal, WhatsApp
+- 7 messaging channels: Web, Telegram, Discord, Slack, Signal, WhatsApp, Email (IMAP/SMTP)
 - Multi-provider AI with failover (OpenAI, Anthropic, Ollama)
 - Full agent runtime: context compaction, subagent orchestration, command system, skills, hooks
 - Media pipeline with vision/audio understanding
 - Canvas host with revision conflict detection
 - Browser automation (CDP-based, 9 tools)
 - Bash tool with allowlist + sandbox (ai-jail)
+- 3-tier tool risk levels (ReadOnly → Mutating → Destructive) with per-tool approval overrides
 - Operator experience: setup wizard, doctor diagnostics, security audit, daemon management
 
 What's intentionally skipped (low value or over-engineered):
@@ -23,12 +24,13 @@ For channel setup, see [CHANNEL_SETUP.md](CHANNEL_SETUP.md), `examples/channels/
 
 ## Features
 
-- **Multi-channel messaging** — Web, Telegram, Discord, Slack, Signal, WhatsApp
+- **Multi-channel messaging** — Web, Telegram, Discord, Slack, Signal, WhatsApp, Email (IMAP/SMTP)
 - **Multi-provider AI** — OpenAI, Anthropic, Ollama with automatic failover
 - **Encrypted sessions** — SQLite-backed with ChaCha20-Poly1305 encryption at rest
 - **Scheduled jobs** — Cron-based task scheduling with agent delivery
 - **Canvas host** — local authenticated visual workspace surface
 - **Bounded tools** — session inspection plus Chromium-backed `browser.open`, `browser.extract`, `browser.snapshot`, `browser.click`, `browser.type`, `browser.wait`, `browser.press`, `browser.sessions`, and `browser.close`
+- **3-tier tool risk levels** — Tools are classified as ReadOnly, Mutating, or Destructive. Approval gates are controlled via `FRANKCLAW_TOOL_APPROVAL` with per-tool overrides.
 - **Bash tool** — Shell command execution with timeout, output truncation, and configurable security policy (deny-all, allowlist, or allow-all)
 - **Optional sandbox** — [ai-jail](https://github.com/akitaonrails/ai-jail) integration (bubblewrap + landlock) for OS-level command isolation, complementary to the bash allowlist
 - **Operator support** — interactive setup wizard, doctor diagnostics, security audit with severity ratings, process management (start/stop daemon), status, remote exposure checks, onboarding, and systemd unit generation
@@ -76,7 +78,7 @@ For channel setup, see [CHANNEL_SETUP.md](CHANNEL_SETUP.md), `examples/channels/
 | `frankclaw-gateway` | Axum WebSocket + HTTP server, auth, rate limiting, config hot-reload |
 | `frankclaw-sessions` | SQLite session store with optional encrypted transcripts |
 | `frankclaw-models` | AI provider adapters (OpenAI, Anthropic, Ollama) with failover chain |
-| `frankclaw-channels` | Messaging channel adapters (Web, Telegram, Discord, Slack, Signal, WhatsApp) |
+| `frankclaw-channels` | Messaging channel adapters (Web, Telegram, Discord, Slack, Signal, WhatsApp, Email) |
 | `frankclaw-runtime` | Agent runtime, prompt templates, subagent orchestration, context compaction |
 | `frankclaw-tools` | Tool registry, bash execution (with optional ai-jail sandbox), browser tools |
 | `frankclaw-memory` | Vector search traits for long-term memory |
@@ -110,7 +112,7 @@ The binary is at `target/release/frankclaw`.
 ```
 
 This creates `~/.local/share/frankclaw/frankclaw.json` with secure defaults and `0600` file permissions.
-Use `--channel telegram`, `--channel whatsapp`, `--channel slack`, `--channel discord`, or `--channel signal` to start from a channel-specific profile.
+Use `--channel telegram`, `--channel whatsapp`, `--channel slack`, `--channel discord`, `--channel signal`, or `--channel email` to start from a channel-specific profile.
 
 ### 3. Generate an Auth Token
 
@@ -264,18 +266,18 @@ Example use:
 frankclaw tools invoke --tool browser.open --session default:web:control --args '{"url":"https://example.com"}'
 frankclaw tools invoke --tool browser.extract --session default:web:control
 frankclaw tools invoke --tool browser.snapshot --session default:web:control
-FRANKCLAW_ALLOW_BROWSER_MUTATIONS=1 \
+FRANKCLAW_TOOL_APPROVAL=mutating \
 frankclaw tools invoke --tool browser.type --session default:web:control --args '{"selector":"input[name=q]","text":"frankclaw"}'
-FRANKCLAW_ALLOW_BROWSER_MUTATIONS=1 \
+FRANKCLAW_TOOL_APPROVAL=mutating \
 frankclaw tools invoke --tool browser.click --session default:web:control --args '{"selector":"button[type=submit]"}'
 frankclaw tools invoke --tool browser.wait --session default:web:control --args '{"selector":"#results","timeout_ms":2000}'
-FRANKCLAW_ALLOW_BROWSER_MUTATIONS=1 \
+FRANKCLAW_TOOL_APPROVAL=mutating \
 frankclaw tools invoke --tool browser.press --session default:web:control --args '{"selector":"input[name=q]","key":"Enter"}'
 frankclaw tools invoke --tool browser.sessions --session default:web:control
 frankclaw tools invoke --tool browser.close --session default:web:control
 ```
 
-`browser.click`, `browser.type`, and `browser.press` are treated as mutating actions and stay gated until `FRANKCLAW_ALLOW_BROWSER_MUTATIONS=1` is set.
+`browser.click`, `browser.type`, `browser.press`, and `browser.select_option` are classified as **Mutating** tools and require `FRANKCLAW_TOOL_APPROVAL=mutating` (or the legacy `FRANKCLAW_ALLOW_BROWSER_MUTATIONS=1`).
 
 Live regression check against a real local Chromium instance:
 
@@ -410,6 +412,31 @@ The config file and `.env` may contain API keys and tokens. **Mitigation:** `060
 6. **Keep Rust updated** — Run `rustup update` to get security fixes in the compiler and standard library.
 7. **Audit dependencies** — Run `cargo audit` before deploying. Add `cargo-deny` to CI.
 
+## FrankClaw vs IronClaw
+
+[IronClaw](https://github.com/nearai/ironclaw) (NEAR AI) is another Rust rewrite of OpenClaw. The two projects share the same ancestor but make fundamentally different design choices. They are complementary, not competing.
+
+| Dimension | IronClaw | FrankClaw |
+|-----------|----------|-----------|
+| **Deployment** | Requires PostgreSQL 15+ with pgvector | Single binary, embedded SQLite — zero external dependencies |
+| **Sandbox model** | WASM (wasmtime) — tools run inside a WebAssembly VM | OS-level (bubblewrap + landlock via ai-jail) — processes run in a Linux namespace jail |
+| **Channel adapters** | WASM-based plugin channels | 7 native compiled-in adapters (Web, Telegram, Discord, Slack, Signal, WhatsApp, Email) |
+| **Tool approval** | Capability-based permissions per workspace | 3-tier risk levels (ReadOnly/Mutating/Destructive) with per-tool overrides |
+| **Encryption at rest** | AES-256-GCM credential vault | ChaCha20-Poly1305 for sessions, config, and credentials |
+| **Memory / search** | PostgreSQL pgvector + FTS with reciprocal rank fusion | Vector search trait (LanceDB backend planned), SQLite FTS |
+| **Default AI provider** | NEAR AI (with OpenRouter, Together, Fireworks, Ollama) | Any OpenAI-compatible API, Anthropic, Ollama |
+| **Streaming** | SSE + WebSocket web gateway | WebSocket control protocol |
+| **Routines** | Built-in cron + event-driven + webhook routines engine | Cron scheduler with agent delivery |
+| **Operator CLI** | Basic CLI | Full CLI: setup wizard, doctor, audit (severity-rated), daemon, systemd, onboarding |
+| **Prompt injection defense** | Not documented | Unicode Cc/Cf stripping, external content boundary tags, 2 MB prompt limit |
+| **Malware scanning** | Not documented | Optional VirusTotal integration on file uploads |
+
+### When to choose which
+
+**Choose IronClaw** if you want WASM-based tool sandboxing, need PostgreSQL-backed vector search today, or are building on the NEAR AI ecosystem.
+
+**Choose FrankClaw** if you want a single-binary deployment with no database server, need native channel adapters that work out of the box, want OS-level sandboxing via bubblewrap/landlock, or need defense-in-depth security hardening (encryption at rest, prompt injection defense, audit CLI, malware scanning).
+
 ## Configuration Reference
 
 FrankClaw uses a single JSON config file. All fields have secure defaults.
@@ -511,7 +538,8 @@ FrankClaw uses a single JSON config file. All fields have secure defaults.
 | `TELEGRAM_BOT_TOKEN` | Telegram bot token |
 | `FRANKCLAW_BASH_POLICY` | Bash tool policy: `deny-all` (default), `allow-all`, or comma-separated binary allowlist |
 | `FRANKCLAW_SANDBOX` | Optional sandbox: `ai-jail` or `ai-jail-lockdown` (requires [ai-jail](https://github.com/akitaonrails/ai-jail)) |
-| `FRANKCLAW_ALLOW_BROWSER_MUTATIONS` | Set to `1` to enable browser click/type/press tools |
+| `FRANKCLAW_TOOL_APPROVAL` | Tool approval level: `readonly` (default), `mutating`, or `destructive` |
+| `FRANKCLAW_ALLOW_BROWSER_MUTATIONS` | Legacy — set to `1` to enable mutating tools (use `FRANKCLAW_TOOL_APPROVAL` instead) |
 | `FRANKCLAW_BROWSER_DEVTOOLS_URL` | Chromium DevTools endpoint (default: `http://127.0.0.1:9222/`) |
 | `VIRUSTOTAL_API_KEY` | Optional VirusTotal API key — enables malware scanning on all file uploads |
 
