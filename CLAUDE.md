@@ -88,6 +88,62 @@ The binary is at `target/debug/frankclaw` (or `target/release/frankclaw`).
 | `FRANKCLAW_ALLOW_BROWSER_MUTATIONS` | `1` to enable browser click/type/press |
 | `FRANKCLAW_BROWSER_DEVTOOLS_URL` | Chromium DevTools endpoint |
 
+## Input Validation & Injection Prevention
+
+Every feature in FrankClaw must follow these rules to keep the security posture intact. **Read this before writing any code that handles external data.**
+
+### Rule 1: All user-facing identifiers must be length-bounded
+
+`AgentId`, `ChannelId`, `SessionKey`, sender IDs, account IDs — any string that arrives from an HTTP request, WebSocket message, or webhook payload must be clamped to a safe maximum (255 bytes for IDs, 800 for composite keys). This is enforced in `frankclaw-core/src/types.rs` via `clamp_id()`. Never create a new identifier type without a length limit.
+
+### Rule 2: All text inputs must be size-checked before processing
+
+User messages, canvas content, webhook bodies — every text payload must be validated against a maximum size before being stored, forwarded to an LLM, or processed. The `max_webhook_body_bytes` config (default 1MB) is the canonical limit. WebSocket `chat_send()` enforces this too. If you add a new input path, add a size check.
+
+### Rule 3: Never pass user data to `sh -c` without metacharacter filtering
+
+The bash tool's allowlist rejects commands containing shell metacharacters (`;`, `|`, `&`, `` ` ``, `$`, `()`, `{}`, `<>`, `!`, newlines). This prevents allowlist bypass attacks like `echo; rm -rf /`. If you modify the bash tool or add a new command execution path, **never** rely solely on first-word extraction — always reject metacharacters in allowlist mode.
+
+### Rule 4: Never interpolate user data into system prompts
+
+System prompts are built from config values and static templates only (`crates/frankclaw-runtime/src/prompts.rs`). The `render()` function replaces `{placeholder}` with values — **all values must come from trusted sources** (config, computed metadata). User messages must only appear in `Role::User` message slots, never concatenated into the system prompt string. If you add new prompt templates, verify that no user-controlled data flows into `render()` vars.
+
+### Rule 5: Tool arguments are untrusted (they come from the LLM)
+
+When the LLM returns tool calls, the tool name and arguments are attacker-influenced. Tool names are validated against the agent's allowlist before invocation. Tool arguments are JSON-parsed and passed to tool implementations. Each tool must validate its own arguments defensively — never trust shape, size, or content of LLM-generated tool args.
+
+### Rule 6: Subagent task/label are truncated
+
+Subagent spawn requests include `task` and `label` strings that get embedded in the subagent's system prompt context. These are truncated to 2000 chars in `build_subagent_context()`. If you add new fields to `SpawnRequest` that flow into prompts, apply the same truncation.
+
+### Rule 7: All SQL queries must use parameterized statements
+
+Every query in `frankclaw-sessions` uses `rusqlite::params![]` bindings. Never concatenate user data into SQL strings. This is already clean — keep it that way.
+
+### Rule 8: All outbound HTTP must go through SSRF protection
+
+Any URL fetched on behalf of a user must go through `SafeFetcher::fetch()` or `validate_url_ssrf()` from `frankclaw-media`. This blocks private IPs, loopback, CGNAT, link-local, and documentation ranges. Never use raw `reqwest::get()` on user-provided URLs.
+
+### Rule 9: Media filenames must be sanitized
+
+File uploads go through `sanitize_filename()` in `frankclaw-media/src/store.rs` which strips path separators, leading dots, and limits length to 60 chars. If you add a new file storage path, use the same sanitizer.
+
+### Rule 10: Canvas HTML is stripped on export
+
+Canvas content is stored as-is but `strip_html_tags()` runs on export to prevent XSS. If you add a new output path for canvas content (API endpoint, channel message), ensure HTML stripping runs before output.
+
+### Checklist for new features
+
+When adding any feature that handles external data, verify:
+- [ ] All string inputs have length limits
+- [ ] Text payloads are size-checked against config limits
+- [ ] No user data flows into system prompts or template vars
+- [ ] No user data is concatenated into shell commands or SQL
+- [ ] URLs from users go through SSRF validation
+- [ ] File names from users go through sanitization
+- [ ] Tool arguments are validated defensively
+- [ ] Tests cover rejection of oversized/malicious inputs
+
 ## Adding a New Channel
 
 1. Create `crates/frankclaw-channels/src/<channel>.rs`

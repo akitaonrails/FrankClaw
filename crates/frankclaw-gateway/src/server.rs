@@ -160,11 +160,13 @@ async fn ws_handler(
         Ok(role) => {
             let conn_id = state.gateway.alloc_conn_id();
             let gw = state.gateway.clone();
+            let max_msg = config.gateway.max_ws_message_bytes;
 
-            ws.on_upgrade(move |socket| {
-                crate::ws::handle_ws_connection(socket, gw, conn_id, role, Some(addr))
-            })
-            .into_response()
+            ws.max_message_size(max_msg)
+                .on_upgrade(move |socket| {
+                    crate::ws::handle_ws_connection(socket, gw, conn_id, role, Some(addr))
+                })
+                .into_response()
         }
         Err(e) => {
             log_failure(
@@ -311,10 +313,22 @@ async fn web_inbound_handler(
         return response;
     }
 
+    // Clamp identifiers to prevent memory exhaustion from maliciously long strings.
+    let sender_id = if body.sender_id.len() > 255 {
+        body.sender_id[..255].to_string()
+    } else {
+        body.sender_id
+    };
+    let account_id = if body.account_id.len() > 255 {
+        body.account_id[..255].to_string()
+    } else {
+        body.account_id
+    };
+
     let inbound = InboundMessage {
         channel: frankclaw_core::types::ChannelId::new("web"),
-        account_id: body.account_id,
-        sender_id: body.sender_id,
+        account_id,
+        sender_id,
         sender_name: body.sender_name,
         thread_id: body.thread_id,
         is_group: body.is_group,

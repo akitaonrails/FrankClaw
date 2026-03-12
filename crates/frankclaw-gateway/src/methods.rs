@@ -133,8 +133,22 @@ pub async fn chat_send(
     conn_id: ConnId,
     request: RequestFrame,
 ) -> ResponseFrame {
+    let max_message_bytes = state
+        .current_config()
+        .security
+        .max_webhook_body_bytes;
+
     let message = match request.params.get("message").and_then(|value| value.as_str()) {
-        Some(message) if !message.trim().is_empty() => message.to_string(),
+        Some(message) if !message.trim().is_empty() => {
+            if message.len() > max_message_bytes {
+                return ResponseFrame::err(
+                    request.id,
+                    413,
+                    &format!("message exceeds maximum size ({max_message_bytes} bytes)"),
+                );
+            }
+            message.to_string()
+        }
         _ => return ResponseFrame::err(request.id, 400, "message is required"),
     };
 

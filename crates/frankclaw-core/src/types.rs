@@ -1,6 +1,19 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+/// Maximum length for identifiers (agent, channel, account, session key).
+/// Prevents memory exhaustion from maliciously long strings.
+const MAX_ID_LEN: usize = 255;
+
+/// Truncate a string to the maximum identifier length.
+fn clamp_id(s: String) -> String {
+    if s.len() <= MAX_ID_LEN {
+        s
+    } else {
+        s[..MAX_ID_LEN].to_string()
+    }
+}
+
 /// Strongly-typed channel identifier.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -8,7 +21,7 @@ pub struct ChannelId(String);
 
 impl ChannelId {
     pub fn new(id: impl Into<String>) -> Self {
-        Self(id.into())
+        Self(clamp_id(id.into()))
     }
     pub fn as_str(&self) -> &str {
         &self.0
@@ -28,7 +41,7 @@ pub struct AgentId(String);
 
 impl AgentId {
     pub fn new(id: impl Into<String>) -> Self {
-        Self(id.into())
+        Self(clamp_id(id.into()))
     }
     pub fn as_str(&self) -> &str {
         &self.0
@@ -54,8 +67,16 @@ impl SessionKey {
         Self(format!("{}:{}:{}", agent_id, channel, account_id))
     }
 
+    /// Create a session key from a raw string.
+    ///
+    /// The key is clamped to a maximum of 800 bytes (3 components × 255 + separators).
     pub fn from_raw(key: impl Into<String>) -> Self {
-        Self(key.into())
+        let k = key.into();
+        if k.len() > 800 {
+            Self(k[..800].to_string())
+        } else {
+            Self(k)
+        }
     }
 
     pub fn as_str(&self) -> &str {
@@ -134,5 +155,71 @@ impl Default for MediaId {
 impl fmt::Display for MediaId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn agent_id_clamps_long_input() {
+        let long = "x".repeat(1000);
+        let id = AgentId::new(long);
+        assert_eq!(id.as_str().len(), MAX_ID_LEN);
+    }
+
+    #[test]
+    fn agent_id_preserves_normal_input() {
+        let id = AgentId::new("default");
+        assert_eq!(id.as_str(), "default");
+    }
+
+    #[test]
+    fn channel_id_clamps_long_input() {
+        let long = "c".repeat(1000);
+        let id = ChannelId::new(long);
+        assert_eq!(id.as_str().len(), MAX_ID_LEN);
+    }
+
+    #[test]
+    fn session_key_from_raw_clamps_long_input() {
+        let long = "k".repeat(5000);
+        let key = SessionKey::from_raw(long);
+        assert_eq!(key.as_str().len(), 800);
+    }
+
+    #[test]
+    fn session_key_from_raw_preserves_normal_input() {
+        let key = SessionKey::from_raw("agent:web:user123");
+        assert_eq!(key.as_str(), "agent:web:user123");
+    }
+
+    #[test]
+    fn session_key_parse_round_trips() {
+        let agent = AgentId::new("a1");
+        let channel = ChannelId::new("web");
+        let key = SessionKey::new(&agent, &channel, "user42");
+        let (a, c, acct) = key.parse().unwrap();
+        assert_eq!(a.as_str(), "a1");
+        assert_eq!(c.as_str(), "web");
+        assert_eq!(acct, "user42");
+    }
+
+    #[test]
+    fn session_key_parse_rejects_malformed() {
+        let key = SessionKey::from_raw("no-colons");
+        assert!(key.parse().is_none());
+    }
+
+    #[test]
+    fn media_id_parse_rejects_invalid() {
+        assert!(MediaId::parse("not-a-uuid").is_none());
+        assert!(MediaId::parse("").is_none());
+    }
+
+    #[test]
+    fn media_id_parse_accepts_valid_uuid() {
+        assert!(MediaId::parse("550e8400-e29b-41d4-a716-446655440000").is_some());
     }
 }

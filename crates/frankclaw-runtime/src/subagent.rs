@@ -349,11 +349,16 @@ pub fn build_subagent_context(record: &RunRecord, max_depth: u32) -> String {
         ("max_depth", &max_depth_str),
     ]));
 
+    // Truncate task/label to prevent memory abuse and reduce prompt injection
+    // surface — these could originate from LLM-generated spawn requests.
+    const MAX_TASK_LEN: usize = 2000;
     if let Some(ref label) = record.label {
-        parts.push(format!("Task label: {label}"));
+        let safe_label = if label.len() > MAX_TASK_LEN { &label[..MAX_TASK_LEN] } else { label };
+        parts.push(format!("Task label: {safe_label}"));
     }
 
-    parts.push(format!("Task: {}", record.task));
+    let safe_task = if record.task.len() > MAX_TASK_LEN { &record.task[..MAX_TASK_LEN] } else { &record.task };
+    parts.push(format!("Task: {safe_task}"));
 
     let timeout_str = record.timeout_secs.to_string();
     parts.push(prompts::render(prompts::SUBAGENT_TIMEOUT, &[
