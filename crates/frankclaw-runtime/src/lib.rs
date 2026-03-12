@@ -18,7 +18,7 @@ use frankclaw_core::error::{FrankClawError, Result};
 use frankclaw_core::channel::{ChannelCapabilities, InboundAttachment, InboundMessage};
 use frankclaw_core::model::{
     CompletionMessage, CompletionRequest, ImageContent, ModelDef, ModelProvider, StreamDelta,
-    ToolCallResponse, Usage,
+    ToolCallResponse, ToolDef, Usage,
 };
 use frankclaw_core::session::{SessionEntry, SessionStore, TranscriptEntry};
 use frankclaw_core::types::{AgentId, ChannelId, Role, SessionKey};
@@ -39,7 +39,6 @@ pub struct Runtime {
     subagent_registry: Arc<subagent::SubagentRegistry>,
 }
 
-#[derive(Debug, Clone)]
 pub struct ChatRequest {
     pub agent_id: Option<AgentId>,
     pub session_key: Option<SessionKey>,
@@ -55,6 +54,8 @@ pub struct ChatRequest {
     pub channel_id: Option<ChannelId>,
     /// Channel capabilities for prompt hints.
     pub channel_capabilities: Option<ChannelCapabilities>,
+    /// Canvas service for agent canvas tools.
+    pub canvas: Option<Arc<dyn frankclaw_core::canvas::CanvasService>>,
 }
 
 #[derive(Debug, Clone)]
@@ -298,12 +299,11 @@ impl Runtime {
             .collect();
 
         // Build dynamic system prompt with runtime context.
-        let tool_names: Vec<String> = allowed_tools.iter().map(|t| t.name.clone()).collect();
         let system_prompt = self.build_system_prompt(
             &agent_id,
             &agent,
             &model_id,
-            &tool_names,
+            &allowed_tools,
             request.channel_id.as_ref(),
             request.channel_capabilities.as_ref(),
         );
@@ -526,6 +526,7 @@ impl Runtime {
                             agent_id: agent_id.clone(),
                             session_key: Some(session_key.clone()),
                             sessions: self.sessions.clone(),
+                            canvas: request.canvas.clone(),
                         },
                     )
                     .await;
@@ -678,6 +679,7 @@ impl Runtime {
                     agent_id,
                     session_key: request.session_key,
                     sessions: self.sessions.clone(),
+                    canvas: None,
                 },
             )
             .await
@@ -776,6 +778,7 @@ impl Runtime {
                 thinking_budget: None,
                 channel_id: None,
                 channel_capabilities: None,
+                canvas: None,
             })),
         )
         .await;
@@ -840,7 +843,7 @@ impl Runtime {
         agent_id: &AgentId,
         agent: &AgentDef,
         model_id: &str,
-        tool_names: &[String],
+        tools: &[ToolDef],
         channel_id: Option<&ChannelId>,
         channel_capabilities: Option<&ChannelCapabilities>,
     ) -> Option<String> {
@@ -859,11 +862,14 @@ impl Runtime {
             }
         }
 
-        // Section 3: Available tools
-        if !tool_names.is_empty() {
-            let tool_list = tool_names.join(", ");
+        // Section 3: Available tools (with descriptions so the model knows its capabilities)
+        if !tools.is_empty() {
+            let tool_descriptions: Vec<String> = tools
+                .iter()
+                .map(|t| format!("- **{}**: {}", t.name, t.description))
+                .collect();
             sections.push(prompts::render(prompts::AGENT_TOOLS, &[
-                ("tool_list", &tool_list),
+                ("tool_descriptions", &tool_descriptions.join("\n")),
             ]));
         }
 
@@ -887,7 +893,7 @@ impl Runtime {
 
         // Section 6: Runtime context
         let now = Utc::now();
-        let tool_count_str = tool_names.len().to_string();
+        let tool_count_str = tools.len().to_string();
         let date_str = now.format("%Y-%m-%d %H:%M UTC").to_string();
         sections.push(prompts::render(prompts::AGENT_CONTEXT, &[
             ("agent_id", agent_id.as_str()),
@@ -1564,6 +1570,7 @@ mod tests {
                 thinking_budget: None,
                 channel_id: None,
                 channel_capabilities: None,
+                canvas: None,
             })
             .await
             .expect("chat should succeed");
@@ -1615,6 +1622,7 @@ mod tests {
                 thinking_budget: None,
                 channel_id: None,
                 channel_capabilities: None,
+                canvas: None,
             })
             .await
             .expect("chat should succeed");
@@ -1676,6 +1684,7 @@ mod tests {
                 thinking_budget: None,
                 channel_id: None,
                 channel_capabilities: None,
+                canvas: None,
             })
             .await
             .expect("chat should succeed");
@@ -1749,6 +1758,7 @@ mod tests {
                 thinking_budget: None,
                 channel_id: None,
                 channel_capabilities: None,
+                canvas: None,
             })
             .await
             .expect("chat should succeed");
@@ -1820,6 +1830,7 @@ mod tests {
                 thinking_budget: None,
                 channel_id: None,
                 channel_capabilities: None,
+                canvas: None,
             })
             .await
             .expect("chat should succeed");
@@ -1923,6 +1934,7 @@ mod tests {
                 thinking_budget: None,
                 channel_id: None,
                 channel_capabilities: None,
+                canvas: None,
             })
             .await
             .expect("should succeed with error result fed back to model");
@@ -1990,6 +2002,7 @@ mod tests {
                 thinking_budget: None,
                 channel_id: None,
                 channel_capabilities: None,
+                canvas: None,
             })
             .await
             .expect_err("too many tool calls should fail");
@@ -2106,6 +2119,7 @@ mod tests {
                 thinking_budget: None,
                 channel_id: None,
                 channel_capabilities: None,
+                canvas: None,
             })
             .await
             .expect_err("loop should be detected");
@@ -2208,6 +2222,7 @@ mod tests {
                 thinking_budget: None,
                 channel_id: None,
                 channel_capabilities: None,
+                canvas: None,
             })
             .await
             .expect("chat should succeed");
@@ -2292,6 +2307,7 @@ mod tests {
                 thinking_budget: None,
                 channel_id: None,
                 channel_capabilities: None,
+                canvas: None,
             })
             .await
             .expect("chat should succeed");
@@ -2365,6 +2381,7 @@ mod tests {
                 thinking_budget: None,
                 channel_id: None,
                 channel_capabilities: None,
+                canvas: None,
             })
             .await
             .expect("chat should succeed");
@@ -2424,6 +2441,7 @@ mod tests {
                     voice: false,
                     inline_buttons: true,
                 }),
+                canvas: None,
             })
             .await
             .expect("chat should succeed");
@@ -2481,6 +2499,7 @@ mod tests {
                 thinking_budget: None,
                 channel_id: None,
                 channel_capabilities: None,
+                canvas: None,
             })
             .await
             .expect("chat should succeed");

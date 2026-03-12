@@ -2,7 +2,10 @@ use std::sync::Arc;
 
 use std::collections::HashMap;
 
+use async_trait::async_trait;
+use frankclaw_core::canvas as core_canvas;
 use frankclaw_core::error::{FrankClawError, Result};
+use frankclaw_core::protocol::{EventFrame, EventType, Frame};
 
 /// Maximum total document size (title + body + all block text) in bytes.
 const MAX_DOCUMENT_SIZE: usize = 1_024 * 1_024;
@@ -88,14 +91,39 @@ impl CanvasExportFormat {
     }
 }
 
-#[derive(Default)]
 pub struct CanvasStore {
     documents: tokio::sync::RwLock<HashMap<String, CanvasDocument>>,
+    broadcast: Option<tokio::sync::broadcast::Sender<String>>,
 }
 
 impl CanvasStore {
     pub fn new() -> Arc<Self> {
-        Arc::new(Self::default())
+        Arc::new(Self {
+            documents: tokio::sync::RwLock::new(HashMap::new()),
+            broadcast: None,
+        })
+    }
+
+    pub fn with_broadcast(broadcast: tokio::sync::broadcast::Sender<String>) -> Arc<Self> {
+        Arc::new(Self {
+            documents: tokio::sync::RwLock::new(HashMap::new()),
+            broadcast: Some(broadcast),
+        })
+    }
+
+    fn notify(&self, canvas_id: &str, document: Option<&CanvasDocument>) {
+        if let Some(tx) = &self.broadcast {
+            let event = Frame::Event(EventFrame {
+                event: EventType::CanvasUpdated,
+                payload: serde_json::json!({
+                    "canvas_id": canvas_id,
+                    "canvas": document,
+                }),
+            });
+            if let Ok(json) = serde_json::to_string(&event) {
+                let _ = tx.send(json);
+            }
+        }
     }
 
     pub fn key_for(canvas_id: Option<&str>, session_key: Option<&str>) -> String {
@@ -178,6 +206,95 @@ impl CanvasStore {
 
     pub async fn clear(&self, canvas_id: &str) {
         self.documents.write().await.remove(canvas_id);
+    }
+}
+
+// -- Conversions between gateway canvas types and core canvas types --
+
+fn core_block_to_local(block: &core_canvas::CanvasBlock) -> CanvasBlock {
+    let kind: CanvasBlockKind = serde_json::from_value(
+        serde_json::Value::String(block.kind.clone()),
+    )
+    .unwrap_or(CanvasBlockKind::Markdown);
+    CanvasBlock {
+        kind,
+        text: block.text.clone(),
+        meta: block.meta.clone(),
+    }
+}
+
+fn local_block_to_core(block: &CanvasBlock) -> core_canvas::CanvasBlock {
+    let kind_str = serde_json::to_value(&block.kind)
+        .ok()
+        .and_then(|v| v.as_str().map(String::from))
+        .unwrap_or_else(|| "markdown".into());
+    core_canvas::CanvasBlock {
+        kind: kind_str,
+        text: block.text.clone(),
+        meta: block.meta.clone(),
+    }
+}
+
+fn local_doc_to_core(doc: &CanvasDocument) -> core_canvas::CanvasDocument {
+    core_canvas::CanvasDocument {
+        id: doc.id.clone(),
+        title: doc.title.clone(),
+        body: doc.body.clone(),
+        session_key: doc.session_key.clone(),
+        blocks: doc.blocks.iter().map(local_block_to_core).collect(),
+        revision: doc.revision,
+        updated_at: doc.updated_at,
+    }
+}
+
+fn core_doc_to_local(doc: &core_canvas::CanvasDocument) -> CanvasDocument {
+    CanvasDocument {
+        id: doc.id.clone(),
+        title: doc.title.clone(),
+        body: doc.body.clone(),
+        session_key: doc.session_key.clone(),
+        blocks: doc.blocks.iter().map(core_block_to_local).collect(),
+        revision: doc.revision,
+        updated_at: doc.updated_at,
+    }
+}
+
+#[async_trait]
+impl core_canvas::CanvasService for CanvasStore {
+    async fn get(&self, canvas_id: &str) -> Option<core_canvas::CanvasDocument> {
+        self.get(canvas_id).await.as_ref().map(local_doc_to_core)
+    }
+
+    async fn set(&self, document: core_canvas::CanvasDocument) -> Result<core_canvas::CanvasDocument> {
+        let local = core_doc_to_local(&document);
+        let result = self.set(local).await?;
+        self.notify(&result.id, Some(&result));
+        Ok(local_doc_to_core(&result))
+    }
+
+    async fn patch(
+        &self,
+        canvas_id: &str,
+        title: Option<String>,
+        body: Option<String>,
+        append_blocks: Vec<core_canvas::CanvasBlock>,
+    ) -> Result<core_canvas::CanvasDocument> {
+        let local_blocks: Vec<CanvasBlock> = append_blocks.iter().map(core_block_to_local).collect();
+        let patch = CanvasPatch {
+            title,
+            body,
+            session_key: None,
+            append_blocks: local_blocks,
+            expected_revision: None,
+        };
+        let result = self.patch(canvas_id, patch).await?;
+        self.notify(&result.id, Some(&result));
+        Ok(local_doc_to_core(&result))
+    }
+
+    async fn clear(&self, canvas_id: &str) {
+        self.clear(canvas_id).await;
+        self.notify(canvas_id, None);
     }
 }
 

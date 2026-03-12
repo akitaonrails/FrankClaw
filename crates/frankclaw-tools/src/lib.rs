@@ -35,6 +35,7 @@ pub struct ToolContext {
     pub agent_id: AgentId,
     pub session_key: Option<SessionKey>,
     pub sessions: Arc<dyn SessionStore>,
+    pub canvas: Option<Arc<dyn frankclaw_core::canvas::CanvasService>>,
 }
 
 #[derive(Debug, Clone)]
@@ -108,6 +109,10 @@ impl ToolRegistry {
             policy,
         };
         registry.register(Arc::new(SessionInspectTool));
+        registry.register(Arc::new(CanvasGetTool));
+        registry.register(Arc::new(CanvasSetTool));
+        registry.register(Arc::new(CanvasAppendTool));
+        registry.register(Arc::new(CanvasClearTool));
         registry.register(Arc::new(BrowserOpenTool::new(browser.clone())));
         registry.register(Arc::new(BrowserExtractTool::new(browser.clone())));
         registry.register(Arc::new(BrowserSnapshotTool::new(browser.clone())));
@@ -436,6 +441,7 @@ impl BrowserClient {
         let response = self
             .http
             .get(endpoint)
+            .header("Host", self.devtools_host_header())
             .send()
             .await
             .map_err(|err| FrankClawError::AgentRuntime {
@@ -564,6 +570,13 @@ impl BrowserClient {
         self.snapshot_session(&session).await
     }
 
+    /// Build a Host header value that Chromium DevTools will accept.
+    /// DevTools rejects Host headers that aren't IP addresses or "localhost".
+    fn devtools_host_header(&self) -> String {
+        let port = self.base_url.port().unwrap_or(9222);
+        format!("localhost:{port}")
+    }
+
     async fn create_target(&self, url: &str) -> Result<DevtoolsTarget> {
         let mut endpoint = self.base_url.join("json/new").map_err(|err| FrankClawError::Internal {
             msg: format!("invalid browser endpoint: {err}"),
@@ -572,6 +585,7 @@ impl BrowserClient {
         let response = self
             .http
             .put(endpoint)
+            .header("Host", self.devtools_host_header())
             .send()
             .await
             .map_err(|err| FrankClawError::AgentRuntime {
@@ -582,9 +596,20 @@ impl BrowserClient {
                 msg: format!("browser target creation failed with HTTP {}", response.status()),
             });
         }
-        response.json::<DevtoolsTarget>().await.map_err(|err| FrankClawError::AgentRuntime {
+        let mut target = response.json::<DevtoolsTarget>().await.map_err(|err| FrankClawError::AgentRuntime {
             msg: format!("invalid browser target response: {err}"),
-        })
+        })?;
+
+        // Rewrite the WebSocket URL to match our configured base URL.
+        // Chromium returns ws://127.0.0.1:<internal-port>/... but when accessed
+        // via Docker networking we need to replace host:port so the gateway can reach it.
+        if let Ok(mut ws_url) = Url::parse(&target.web_socket_debugger_url) {
+            let _ = ws_url.set_host(self.base_url.host_str());
+            let _ = ws_url.set_port(self.base_url.port());
+            target.web_socket_debugger_url = ws_url.to_string();
+        }
+
+        Ok(target)
     }
 
     async fn navigate_target(&self, session: &BrowserSession, url: &str) -> Result<()> {
@@ -634,7 +659,22 @@ impl BrowserClient {
         &self,
         ws_url: &str,
     ) -> Result<tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>> {
-        let (socket, _) = connect_async(ws_url)
+        use tokio_tungstenite::tungstenite;
+        let request = tungstenite::http::Request::builder()
+            .uri(ws_url)
+            .header("Host", self.devtools_host_header())
+            .header("Connection", "Upgrade")
+            .header("Upgrade", "websocket")
+            .header("Sec-WebSocket-Version", "13")
+            .header(
+                "Sec-WebSocket-Key",
+                tungstenite::handshake::client::generate_key(),
+            )
+            .body(())
+            .map_err(|err| FrankClawError::AgentRuntime {
+                msg: format!("failed to build browser websocket request: {err}"),
+            })?;
+        let (socket, _) = connect_async(request)
             .await
             .map_err(|err| FrankClawError::AgentRuntime {
                 msg: format!("failed to connect to browser page socket: {err}"),
@@ -892,6 +932,191 @@ impl Tool for SessionInspectTool {
             "session": session,
             "entries": entries,
         }))
+    }
+}
+
+// =========================================================================
+// Canvas Tools
+// =========================================================================
+
+struct CanvasGetTool;
+struct CanvasSetTool;
+struct CanvasAppendTool;
+struct CanvasClearTool;
+
+fn canvas_service(ctx: &ToolContext) -> Result<&dyn frankclaw_core::canvas::CanvasService> {
+    ctx.canvas
+        .as_deref()
+        .ok_or_else(|| FrankClawError::AgentRuntime {
+            msg: "canvas service not available".into(),
+        })
+}
+
+fn canvas_id_from_args(args: &serde_json::Value, ctx: &ToolContext) -> String {
+    if let Some(id) = args.get("canvas_id").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+        return id.to_string();
+    }
+    if let Some(sk) = &ctx.session_key {
+        return format!("session:{}", sk.as_str());
+    }
+    "main".to_string()
+}
+
+#[async_trait]
+impl Tool for CanvasGetTool {
+    fn definition(&self) -> ToolDef {
+        ToolDef {
+            name: "canvas.get".into(),
+            description: "Read the current canvas document. Returns the title, body, and structured blocks.".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "canvas_id": {
+                        "type": "string",
+                        "description": "Canvas ID. Defaults to the current session canvas."
+                    }
+                }
+            }),
+            risk_level: ToolRiskLevel::ReadOnly,
+        }
+    }
+
+    async fn invoke(&self, args: serde_json::Value, ctx: ToolContext) -> Result<serde_json::Value> {
+        let canvas = canvas_service(&ctx)?;
+        let id = canvas_id_from_args(&args, &ctx);
+        match canvas.get(&id).await {
+            Some(doc) => Ok(serde_json::to_value(&doc).unwrap_or(serde_json::json!({}))),
+            None => Ok(serde_json::json!({ "canvas_id": id, "status": "empty", "message": "No canvas document exists yet. Use canvas.set to create one." })),
+        }
+    }
+}
+
+#[async_trait]
+impl Tool for CanvasSetTool {
+    fn definition(&self) -> ToolDef {
+        ToolDef {
+            name: "canvas.set".into(),
+            description: "Create or fully replace a canvas document visible in the user's Canvas tab. Use this to write structured content like reports, notes, code, checklists, or drawings (as SVG/HTML in the body). Supports markdown in the body field and typed blocks.".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "required": ["title", "body"],
+                "properties": {
+                    "canvas_id": { "type": "string", "description": "Canvas ID. Defaults to the current session canvas." },
+                    "title": { "type": "string", "description": "Document title." },
+                    "body": { "type": "string", "description": "Main document body (supports markdown)." },
+                    "blocks": {
+                        "type": "array",
+                        "description": "Optional structured blocks.",
+                        "items": {
+                            "type": "object",
+                            "required": ["kind", "text"],
+                            "properties": {
+                                "kind": { "type": "string", "enum": ["markdown", "code", "note", "checklist", "status", "metric", "action"] },
+                                "text": { "type": "string" },
+                                "meta": { "type": "object" }
+                            }
+                        }
+                    }
+                }
+            }),
+            risk_level: ToolRiskLevel::ReadOnly,
+        }
+    }
+
+    async fn invoke(&self, args: serde_json::Value, ctx: ToolContext) -> Result<serde_json::Value> {
+        let canvas = canvas_service(&ctx)?;
+        let id = canvas_id_from_args(&args, &ctx);
+        let title = args.get("title").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let body = args.get("body").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let blocks: Vec<frankclaw_core::canvas::CanvasBlock> = args
+            .get("blocks")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or_default();
+        let doc = frankclaw_core::canvas::CanvasDocument {
+            id,
+            title,
+            body,
+            session_key: ctx.session_key.as_ref().map(|sk| sk.as_str().to_string()),
+            blocks,
+            revision: 0,
+            updated_at: chrono::Utc::now(),
+        };
+        let result = canvas.set(doc).await?;
+        Ok(serde_json::to_value(&result).unwrap_or(serde_json::json!({"status": "ok"})))
+    }
+}
+
+#[async_trait]
+impl Tool for CanvasAppendTool {
+    fn definition(&self) -> ToolDef {
+        ToolDef {
+            name: "canvas.append".into(),
+            description: "Append blocks to an existing canvas or update its title/body without replacing the whole document.".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "canvas_id": { "type": "string", "description": "Canvas ID. Defaults to the current session canvas." },
+                    "title": { "type": "string", "description": "New title (replaces existing)." },
+                    "body": { "type": "string", "description": "New body (replaces existing)." },
+                    "blocks": {
+                        "type": "array",
+                        "description": "Blocks to append.",
+                        "items": {
+                            "type": "object",
+                            "required": ["kind", "text"],
+                            "properties": {
+                                "kind": { "type": "string", "enum": ["markdown", "code", "note", "checklist", "status", "metric", "action"] },
+                                "text": { "type": "string" },
+                                "meta": { "type": "object" }
+                            }
+                        }
+                    }
+                }
+            }),
+            risk_level: ToolRiskLevel::ReadOnly,
+        }
+    }
+
+    async fn invoke(&self, args: serde_json::Value, ctx: ToolContext) -> Result<serde_json::Value> {
+        let canvas = canvas_service(&ctx)?;
+        let id = canvas_id_from_args(&args, &ctx);
+        let title = args.get("title").and_then(|v| v.as_str()).map(String::from);
+        let body = args.get("body").and_then(|v| v.as_str()).map(String::from);
+        let blocks: Vec<frankclaw_core::canvas::CanvasBlock> = args
+            .get("blocks")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or_default();
+        if title.is_none() && body.is_none() && blocks.is_empty() {
+            return Err(FrankClawError::InvalidRequest {
+                msg: "canvas.append requires at least one of: title, body, or blocks".into(),
+            });
+        }
+        let result = canvas.patch(&id, title, body, blocks).await?;
+        Ok(serde_json::to_value(&result).unwrap_or(serde_json::json!({"status": "ok"})))
+    }
+}
+
+#[async_trait]
+impl Tool for CanvasClearTool {
+    fn definition(&self) -> ToolDef {
+        ToolDef {
+            name: "canvas.clear".into(),
+            description: "Delete a canvas document, removing all its content.".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "canvas_id": { "type": "string", "description": "Canvas ID. Defaults to the current session canvas." }
+                }
+            }),
+            risk_level: ToolRiskLevel::ReadOnly,
+        }
+    }
+
+    async fn invoke(&self, args: serde_json::Value, ctx: ToolContext) -> Result<serde_json::Value> {
+        let canvas = canvas_service(&ctx)?;
+        let id = canvas_id_from_args(&args, &ctx);
+        canvas.clear(&id).await;
+        Ok(serde_json::json!({ "canvas_id": id, "status": "cleared" }))
     }
 }
 
@@ -1475,6 +1700,7 @@ mod tests {
                     agent_id: AgentId::default_agent(),
                     session_key: Some(key.clone()),
                     sessions: store as Arc<dyn SessionStore>,
+                    canvas: None,
                 },
             )
             .await
@@ -1497,6 +1723,7 @@ mod tests {
                     agent_id: AgentId::default_agent(),
                     session_key: None,
                     sessions: Arc::new(MockSessionStore::default()),
+                    canvas: None,
                 },
             )
             .await
@@ -1542,6 +1769,7 @@ mod tests {
             agent_id: AgentId::default_agent(),
             session_key: Some(SessionKey::from_raw("default:web:browser-policy")),
             sessions: Arc::new(MockSessionStore::default()),
+            canvas: None,
         };
         let allowed = vec!["browser.open".into(), "browser.click".into()];
 
@@ -1663,6 +1891,7 @@ mod tests {
             agent_id: AgentId::default_agent(),
             session_key: Some(SessionKey::from_raw("default:web:browser")),
             sessions: Arc::new(MockSessionStore::default()),
+            canvas: None,
         };
         let allowed = vec![
             "browser.open".into(),
@@ -1721,6 +1950,7 @@ mod tests {
                     agent_id: AgentId::default_agent(),
                     session_key: Some(SessionKey::from_raw("default:web:browser")),
                     sessions: Arc::new(MockSessionStore::default()),
+                    canvas: None,
                 },
             )
             .await
@@ -1736,6 +1966,7 @@ mod tests {
                     agent_id: AgentId::default_agent(),
                     session_key: Some(SessionKey::from_raw("default:web:browser")),
                     sessions: Arc::new(MockSessionStore::default()),
+                    canvas: None,
                 },
             )
             .await
@@ -1756,6 +1987,7 @@ mod tests {
                     agent_id: AgentId::default_agent(),
                     session_key: Some(SessionKey::from_raw("default:web:browser")),
                     sessions: Arc::new(MockSessionStore::default()),
+                    canvas: None,
                 },
             )
             .await
@@ -1771,6 +2003,7 @@ mod tests {
                     agent_id: AgentId::default_agent(),
                     session_key: Some(SessionKey::from_raw("default:web:browser")),
                     sessions: Arc::new(MockSessionStore::default()),
+                    canvas: None,
                 },
             )
             .await
@@ -1791,6 +2024,7 @@ mod tests {
                     agent_id: AgentId::default_agent(),
                     session_key: Some(SessionKey::from_raw("default:web:browser")),
                     sessions: Arc::new(MockSessionStore::default()),
+                    canvas: None,
                 },
             )
             .await
@@ -1810,6 +2044,7 @@ mod tests {
                     agent_id: AgentId::default_agent(),
                     session_key: Some(SessionKey::from_raw("default:web:browser")),
                     sessions: Arc::new(MockSessionStore::default()),
+                    canvas: None,
                 },
             )
             .await
@@ -1825,6 +2060,7 @@ mod tests {
                     agent_id: AgentId::default_agent(),
                     session_key: Some(SessionKey::from_raw("default:web:browser")),
                     sessions: Arc::new(MockSessionStore::default()),
+                    canvas: None,
                 },
             )
             .await
@@ -1895,6 +2131,7 @@ mod tests {
             agent_id: AgentId::default_agent(),
             session_key: Some(SessionKey::from_raw("default:web:real-browser")),
             sessions: Arc::new(MockSessionStore::default()),
+            canvas: None,
         };
         let allowed = vec![
             "browser.open".into(),

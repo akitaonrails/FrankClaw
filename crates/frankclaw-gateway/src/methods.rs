@@ -256,6 +256,7 @@ pub async fn chat_send(
             thinking_budget: None,
             channel_id: None,
             channel_capabilities: None,
+            canvas: None,
         })
         .await
     {

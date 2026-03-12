@@ -77,6 +77,8 @@ impl GatewayState {
         pairing: Arc<PairingStore>,
         media: Arc<MediaStore>,
     ) -> Arc<Self> {
+        let broadcast = BroadcastHandle::new(256);
+        let canvas = CanvasStore::with_broadcast(broadcast.sender());
         Arc::new(Self {
             config: ArcSwap::new(Arc::new(config)),
             sessions,
@@ -84,10 +86,10 @@ impl GatewayState {
             runtime,
             channels,
             pairing,
-            canvas: CanvasStore::new(),
             media,
             next_conn_id: std::sync::atomic::AtomicU64::new(1),
-            broadcast: BroadcastHandle::new(256),
+            broadcast,
+            canvas,
             shutdown: CancellationToken::new(),
         })
     }

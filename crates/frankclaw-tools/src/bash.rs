@@ -596,6 +596,7 @@ mod tests {
             agent_id: AgentId::new("test"),
             session_key: None,
             sessions: std::sync::Arc::new(NoopStore),
+            canvas: None,
         }
     }
 }

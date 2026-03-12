@@ -99,6 +99,7 @@ pub async fn execute_request(
             thinking_budget: None,
             channel_id: None,
             channel_capabilities: None,
+            canvas: None,
         })
         .await
 }

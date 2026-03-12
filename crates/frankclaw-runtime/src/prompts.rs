@@ -81,7 +81,7 @@ mod tests {
 
     #[test]
     fn agent_tools_template_has_placeholder() {
-        assert!(AGENT_TOOLS.contains("{tool_list}"));
+        assert!(AGENT_TOOLS.contains("{tool_descriptions}"));
     }
 
     #[test]

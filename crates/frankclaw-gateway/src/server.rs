@@ -1243,6 +1243,7 @@ async fn process_inbound_message_with_target(
             thinking_budget: None,
             channel_id: Some(inbound.channel.clone()),
             channel_capabilities: channel_for_stream.as_ref().map(|ch| ch.capabilities()),
+            canvas: Some(state.canvas.clone()),
         })
         .await?;
 
@@ -1530,6 +1531,7 @@ async fn start_cron_runtime(
                         thinking_budget: None,
                         channel_id: None,
                         channel_capabilities: None,
+                        canvas: None,
                     })
                     .await
                 {

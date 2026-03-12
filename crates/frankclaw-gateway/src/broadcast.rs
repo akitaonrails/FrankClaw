@@ -25,4 +25,9 @@ impl BroadcastHandle {
     pub fn subscribe(&self) -> broadcast::Receiver<String> {
         self.tx.subscribe()
     }
+
+    /// Clone the underlying sender for sharing with other components.
+    pub fn sender(&self) -> broadcast::Sender<String> {
+        self.tx.clone()
+    }
 }
