@@ -121,6 +121,21 @@ pub(crate) fn build_request_body(request: &CompletionRequest) -> serde_json::Val
             .collect();
         body["tools"] = serde_json::json!(tools);
     }
+    if let Some(parallel) = request.parallel_tool_calls {
+        body["parallel_tool_calls"] = serde_json::json!(parallel);
+    }
+    if let Some(seed) = request.seed {
+        body["seed"] = serde_json::json!(seed);
+    }
+    if let Some(ref fmt) = request.response_format {
+        body["response_format"] = match fmt {
+            ResponseFormat::Text => serde_json::json!({"type": "text"}),
+            ResponseFormat::JsonObject => serde_json::json!({"type": "json_object"}),
+        };
+    }
+    if let Some(ref effort) = request.reasoning_effort {
+        body["reasoning_effort"] = serde_json::json!(effort);
+    }
 
     body
 }
@@ -437,6 +452,10 @@ mod tests {
             system: None,
             tools: vec![],
             thinking_budget: None,
+            parallel_tool_calls: None,
+            seed: None,
+            response_format: None,
+            reasoning_effort: None,
         };
         let body = build_request_body(&request);
         let msg = &body["messages"][0];
@@ -462,6 +481,10 @@ mod tests {
             system: None,
             tools: vec![],
             thinking_budget: None,
+            parallel_tool_calls: None,
+            seed: None,
+            response_format: None,
+            reasoning_effort: None,
         };
         let body = build_request_body(&request);
         let msg = &body["messages"][0];
@@ -492,6 +515,10 @@ mod tests {
             system: None,
             tools: vec![],
             thinking_budget: None,
+            parallel_tool_calls: None,
+            seed: None,
+            response_format: None,
+            reasoning_effort: None,
         };
         let body = build_request_body(&request);
         let content = body["messages"][0]["content"]
@@ -500,5 +527,103 @@ mod tests {
         assert_eq!(content.len(), 3); // 1 text + 2 images
         assert_eq!(content[1]["image_url"]["url"], "data:image/png;base64,img1data");
         assert_eq!(content[2]["image_url"]["url"], "data:image/jpeg;base64,img2data");
+    }
+
+    #[test]
+    fn build_request_body_includes_parallel_tool_calls() {
+        let request = CompletionRequest {
+            model_id: "gpt-4o".into(),
+            messages: vec![CompletionMessage::text(Role::User, "hello")],
+            max_tokens: None,
+            temperature: None,
+            system: None,
+            tools: vec![],
+            thinking_budget: None,
+            parallel_tool_calls: Some(false),
+            seed: None,
+            response_format: None,
+            reasoning_effort: None,
+        };
+        let body = build_request_body(&request);
+        assert_eq!(body["parallel_tool_calls"], false);
+    }
+
+    #[test]
+    fn build_request_body_includes_seed() {
+        let request = CompletionRequest {
+            model_id: "gpt-4o".into(),
+            messages: vec![CompletionMessage::text(Role::User, "hello")],
+            max_tokens: None,
+            temperature: None,
+            system: None,
+            tools: vec![],
+            thinking_budget: None,
+            parallel_tool_calls: None,
+            seed: Some(42),
+            response_format: None,
+            reasoning_effort: None,
+        };
+        let body = build_request_body(&request);
+        assert_eq!(body["seed"], 42);
+    }
+
+    #[test]
+    fn build_request_body_includes_response_format_json() {
+        let request = CompletionRequest {
+            model_id: "gpt-4o".into(),
+            messages: vec![CompletionMessage::text(Role::User, "hello")],
+            max_tokens: None,
+            temperature: None,
+            system: None,
+            tools: vec![],
+            thinking_budget: None,
+            parallel_tool_calls: None,
+            seed: None,
+            response_format: Some(ResponseFormat::JsonObject),
+            reasoning_effort: None,
+        };
+        let body = build_request_body(&request);
+        assert_eq!(body["response_format"]["type"], "json_object");
+    }
+
+    #[test]
+    fn build_request_body_includes_reasoning_effort() {
+        let request = CompletionRequest {
+            model_id: "o3-mini".into(),
+            messages: vec![CompletionMessage::text(Role::User, "hello")],
+            max_tokens: None,
+            temperature: None,
+            system: None,
+            tools: vec![],
+            thinking_budget: None,
+            parallel_tool_calls: None,
+            seed: None,
+            response_format: None,
+            reasoning_effort: Some("high".into()),
+        };
+        let body = build_request_body(&request);
+        assert_eq!(body["reasoning_effort"], "high");
+    }
+
+    #[test]
+    fn build_request_body_omits_none_advanced_params() {
+        let request = CompletionRequest {
+            model_id: "gpt-4o".into(),
+            messages: vec![CompletionMessage::text(Role::User, "hello")],
+            max_tokens: None,
+            temperature: None,
+            system: None,
+            tools: vec![],
+            thinking_budget: None,
+            parallel_tool_calls: None,
+            seed: None,
+            response_format: None,
+            reasoning_effort: None,
+        };
+        let body = build_request_body(&request);
+        assert!(body.get("parallel_tool_calls").is_none());
+        assert!(body.get("seed").is_none());
+        assert!(body.get("response_format").is_none());
+        assert!(body.get("reasoning_effort").is_none());
     }
 }

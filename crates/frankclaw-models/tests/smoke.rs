@@ -97,6 +97,10 @@ fn simple_request(model: &str, prompt: &str) -> CompletionRequest {
         system: None,
         tools: Vec::new(),
         thinking_budget: None,
+        parallel_tool_calls: None,
+        seed: None,
+        response_format: None,
+        reasoning_effort: None,
     }
 }
 
@@ -300,6 +304,10 @@ async fn anthropic_system_prompt() {
         system: Some("The secret word is 'banana'. Always reply with only the secret word.".into()),
         tools: Vec::new(),
         thinking_budget: None,
+        parallel_tool_calls: None,
+        seed: None,
+        response_format: None,
+        reasoning_effort: None,
     };
 
     let response = provider

@@ -132,6 +132,14 @@ impl CompletionMessage {
     }
 }
 
+/// Response format for structured outputs.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ResponseFormat {
+    Text,
+    JsonObject,
+}
+
 /// Request to a model provider.
 #[derive(Debug, Clone)]
 pub struct CompletionRequest {
@@ -145,6 +153,14 @@ pub struct CompletionRequest {
     /// internal chain-of-thought reasoning before responding.
     /// Supported by Anthropic Claude 3.7+.
     pub thinking_budget: Option<u32>,
+    /// Whether to allow the model to call multiple tools in parallel (OpenAI).
+    pub parallel_tool_calls: Option<bool>,
+    /// Seed for deterministic completions (OpenAI).
+    pub seed: Option<u64>,
+    /// Response format: text or JSON mode (OpenAI).
+    pub response_format: Option<ResponseFormat>,
+    /// Reasoning effort for o1/o3 models: "low", "medium", "high" (OpenAI).
+    pub reasoning_effort: Option<String>,
 }
 
 /// Risk classification for tools. Determines whether operator approval is needed.

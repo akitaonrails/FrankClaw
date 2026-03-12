@@ -354,6 +354,10 @@ impl Runtime {
                         system: system_prompt.clone(),
                         tools: allowed_tools.clone(),
                         thinking_budget: request.thinking_budget,
+                        parallel_tool_calls: None,
+                        seed: None,
+                        response_format: None,
+                        reasoning_effort: None,
                     },
                     request.stream_tx.clone(),
                 )

@@ -714,6 +714,10 @@ mod tests {
             system: None,
             tools: vec![],
             thinking_budget: Some(10000),
+            parallel_tool_calls: None,
+            seed: None,
+            response_format: None,
+            reasoning_effort: None,
         };
         let body = build_request_body(&request);
         assert_eq!(body["thinking"]["type"], "enabled");
@@ -732,6 +736,10 @@ mod tests {
             system: None,
             tools: vec![],
             thinking_budget: None,
+            parallel_tool_calls: None,
+            seed: None,
+            response_format: None,
+            reasoning_effort: None,
         };
         let body = build_request_body(&request);
         assert!(body.get("thinking").is_none());
@@ -757,6 +765,10 @@ mod tests {
             system: None,
             tools: vec![],
             thinking_budget: None,
+            parallel_tool_calls: None,
+            seed: None,
+            response_format: None,
+            reasoning_effort: None,
         };
         let body = build_request_body(&request);
         let msg = &body["messages"][0];
@@ -794,6 +806,10 @@ mod tests {
             system: None,
             tools: vec![],
             thinking_budget: None,
+            parallel_tool_calls: None,
+            seed: None,
+            response_format: None,
+            reasoning_effort: None,
         };
         let body = build_request_body(&request);
         let content = body["messages"][0]["content"]
@@ -814,6 +830,10 @@ mod tests {
             system: None,
             tools: vec![],
             thinking_budget: None,
+            parallel_tool_calls: None,
+            seed: None,
+            response_format: None,
+            reasoning_effort: None,
         };
         let body = build_request_body(&request);
         let msg = &body["messages"][0];

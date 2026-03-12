@@ -226,6 +226,10 @@ mod tests {
             system: None,
             tools: vec![],
             thinking_budget: None,
+            parallel_tool_calls: None,
+            seed: None,
+            response_format: None,
+            reasoning_effort: None,
         }
     }
 
@@ -238,6 +242,10 @@ mod tests {
             system: None,
             tools: vec![],
             thinking_budget: None,
+            parallel_tool_calls: None,
+            seed: None,
+            response_format: None,
+            reasoning_effort: None,
         }
     }
 
@@ -255,6 +263,10 @@ mod tests {
                 risk_level: Default::default(),
             }],
             thinking_budget: None,
+            parallel_tool_calls: None,
+            seed: None,
+            response_format: None,
+            reasoning_effort: None,
         }
     }
 
@@ -400,6 +412,10 @@ mod tests {
             system: None,
             tools: vec![],
             thinking_budget: None,
+            parallel_tool_calls: None,
+            seed: None,
+            response_format: None,
+            reasoning_effort: None,
         };
         cache.store(&third, &resp);
         assert_eq!(cache.len(), 2);

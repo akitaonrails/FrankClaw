@@ -74,6 +74,10 @@ fn simple_request(model: &str, prompt: &str) -> CompletionRequest {
         system: None,
         tools: Vec::new(),
         thinking_budget: None,
+        parallel_tool_calls: None,
+        seed: None,
+        response_format: None,
+        reasoning_effort: None,
     }
 }
 
@@ -420,6 +424,10 @@ async fn anthropic_streaming_with_system_prompt() {
         system: Some("You must always reply in exactly one word.".into()),
         tools: Vec::new(),
         thinking_budget: None,
+        parallel_tool_calls: None,
+        seed: None,
+        response_format: None,
+        reasoning_effort: None,
     };
 
     let (tx, mut rx) = tokio::sync::mpsc::channel::<StreamDelta>(64);

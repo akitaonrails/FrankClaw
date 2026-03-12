@@ -1,0 +1,12 @@
+# ai-jail sandbox configuration
+# https://github.com/akitaonrails/ai-jail
+# Edit freely. Regenerate with: ai-jail --clean --init
+
+command = [
+    "sh",
+    "-c",
+    "echo sandboxed",
+]
+rw_maps = []
+ro_maps = []
+no_display = true

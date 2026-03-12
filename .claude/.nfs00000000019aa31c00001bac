@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git init:*)",
+      "Bash(./target/debug/frankclaw:*)",
+      "Bash(git commit:*)",
+      "Bash(grep:*)",
+      "Bash(cargo test:*)",
+      "Bash(source:*)"
+    ]
+  }
+}

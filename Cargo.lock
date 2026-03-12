@@ -1159,8 +1159,10 @@ name = "frankclaw-runtime"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "base64",
  "chrono",
  "frankclaw-core",
+ "frankclaw-media",
  "frankclaw-models",
  "frankclaw-plugin-sdk",
  "frankclaw-sessions",
@@ -1170,6 +1172,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
+ "url",
  "uuid",
 ]
 
