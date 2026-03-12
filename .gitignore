@@ -1,4 +1,6 @@
 openclaw/
 target/
 .env
+.env.*
+!.env.smoke.example
 *.swp

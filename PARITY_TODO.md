@@ -196,7 +196,7 @@ These are the core "brain" features that make OpenClaw's agent loop sophisticate
 - [x] Coverage for Canvas RPC/UI behavior
 - [x] Coverage for onboarding/install helpers
 - [x] Regression-focused tests for delivery metadata and session rewrites
-- [ ] Live smoke coverage against real external platforms
+- [x] Live smoke coverage against real external platforms (`frankclaw-models/tests/smoke.rs`)
 - [x] Media-specific failure-path coverage for partial multi-attachment delivery
 
 ### Still Missing OpenClaw Channel Breadth
