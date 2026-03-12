@@ -6,13 +6,23 @@ FrankClaw is a ground-up Rust rewrite of [OpenClaw](https://github.com/openclaw/
 
 What's at parity:
 - 7 messaging channels: Web, Telegram, Discord, Slack, Signal, WhatsApp, Email (IMAP/SMTP)
-- Multi-provider AI with failover (OpenAI, Anthropic, Ollama)
+- Multi-provider AI with failover, circuit breaker, retry with exponential backoff
 - Full agent runtime: context compaction, subagent orchestration, command system, skills, hooks
+- Smart model routing: 13-dimension complexity scorer routes simple queries to cheaper models
+- MCP (Model Context Protocol) client: stdio and HTTP transports for tool ecosystem integration
+- Response caching: SHA-256 keyed LRU cache with TTL
+- Cost tracking with daily budget guards
+- Credential leak detection (12 patterns scanned in all LLM/tool output)
+- Extended thinking support for Claude 3.7+ and o1-style models
 - Media pipeline with vision/audio understanding
 - Canvas host with revision conflict detection
 - Browser automation (CDP-based, 9 tools)
 - Bash tool with allowlist + sandbox (ai-jail)
 - 3-tier tool risk levels (ReadOnly → Mutating → Destructive) with per-tool approval overrides
+- Tunnel support: Cloudflare Tunnel, ngrok, and custom commands for webhook exposure
+- Job state machine with self-repair for background tasks
+- Event-driven routine triggers (cron, message pattern, system events, manual)
+- Interactive REPL (`frankclaw chat`) with streaming, slash commands, and tab completion
 - Operator experience: setup wizard, doctor diagnostics, security audit, daemon management
 
 What's intentionally skipped (low value or over-engineered):
@@ -25,9 +35,17 @@ For channel setup, see [CHANNEL_SETUP.md](docs/CHANNEL_SETUP.md), `examples/chan
 ## Features
 
 - **Multi-channel messaging** — Web, Telegram, Discord, Slack, Signal, WhatsApp, Email (IMAP/SMTP)
-- **Multi-provider AI** — OpenAI, Anthropic, Ollama with automatic failover
+- **Multi-provider AI** — OpenAI, Anthropic, Ollama with automatic failover, circuit breaker, and retry with exponential backoff + jitter
+- **Smart model routing** — 13-dimension complexity scorer routes simple queries to cheaper/faster models, saving cost without sacrificing quality
+- **MCP integration** — Model Context Protocol client (stdio + HTTP transports) connects any MCP server as a tool source
+- **Response caching** — SHA-256 keyed LRU cache with configurable TTL avoids redundant API calls
+- **Cost tracking** — Per-model token cost tables with configurable daily budget guards (warn at 80%, block at 100%)
+- **Credential leak detection** — 12 regex patterns scan all LLM and tool output for accidentally exposed API keys, tokens, and secrets
+- **Extended thinking** — Supports Claude 3.7+ and o1-style extended reasoning with configurable thinking budget
 - **Encrypted sessions** — SQLite-backed with ChaCha20-Poly1305 encryption at rest
-- **Scheduled jobs** — Cron-based task scheduling with agent delivery
+- **Scheduled jobs** — Cron, event triggers (message pattern, system events), manual invocation with guardrails (cooldown, max concurrent, dedup)
+- **Job state machine** — Full lifecycle tracking (Pending→InProgress→Completed→Accepted) with stuck detection and self-repair
+- **Interactive REPL** — `frankclaw chat` with streaming responses, slash commands, tab completion, and history persistence
 - **Canvas host** — local authenticated visual workspace surface
 - **Bounded tools** — session inspection plus Chromium-backed `browser.open`, `browser.extract`, `browser.snapshot`, `browser.click`, `browser.type`, `browser.wait`, `browser.press`, `browser.sessions`, and `browser.close`
 - **3-tier tool risk levels** — Tools are classified as ReadOnly, Mutating, or Destructive. Approval gates are controlled via `FRANKCLAW_TOOL_APPROVAL` with per-tool overrides.
@@ -76,14 +94,14 @@ For channel setup, see [CHANNEL_SETUP.md](docs/CHANNEL_SETUP.md), `examples/chan
 |-------|-------------|
 | `frankclaw-core` | Shared types, traits, error hierarchy, SSRF IP blocklist |
 | `frankclaw-crypto` | ChaCha20-Poly1305 encryption, Argon2id hashing, HMAC-SHA256 key derivation |
-| `frankclaw-gateway` | Axum WebSocket + HTTP server, auth, rate limiting, config hot-reload |
+| `frankclaw-gateway` | Axum WebSocket + HTTP server, auth, rate limiting, config hot-reload, tunnel support |
 | `frankclaw-sessions` | SQLite session store with optional encrypted transcripts |
-| `frankclaw-models` | AI provider adapters (OpenAI, Anthropic, Ollama) with failover chain |
+| `frankclaw-models` | AI provider adapters (OpenAI, Anthropic, Ollama) with failover, circuit breaker, caching, cost tracking, smart routing |
 | `frankclaw-channels` | Messaging channel adapters (Web, Telegram, Discord, Slack, Signal, WhatsApp, Email) |
 | `frankclaw-runtime` | Agent runtime, prompt templates, subagent orchestration, context compaction |
-| `frankclaw-tools` | Tool registry, bash execution (with optional ai-jail sandbox), browser tools |
+| `frankclaw-tools` | Tool registry, bash execution (with optional ai-jail sandbox), browser tools, MCP client |
 | `frankclaw-memory` | Vector search traits for long-term memory |
-| `frankclaw-cron` | Scheduled job service |
+| `frankclaw-cron` | Scheduled jobs with event triggers, job state machine, and self-repair |
 | `frankclaw-media` | File storage with SSRF-safe HTTP fetcher and optional VirusTotal malware scanning |
 | `frankclaw-plugin-sdk` | Plugin registry for extending channels and tools |
 | `frankclaw-cli` | CLI binary with all subcommands |
@@ -290,6 +308,7 @@ FRANKCLAW_BROWSER_DEVTOOLS_URL=http://127.0.0.1:9223/ \
 ## CLI Reference
 
 ```
+frankclaw chat            Interactive REPL chat (streaming, slash commands, tab completion)
 frankclaw gateway         Start the gateway server
 frankclaw gen-token       Generate a 256-bit auth token
 frankclaw hash-password   Hash a password with Argon2id for config
@@ -425,11 +444,15 @@ The config file and `.env` may contain API keys and tokens. **Mitigation:** `060
 | **Tool approval** | Capability-based permissions per workspace | 3-tier risk levels (ReadOnly/Mutating/Destructive) with per-tool overrides |
 | **Encryption at rest** | AES-256-GCM credential vault | ChaCha20-Poly1305 for sessions, config, and credentials |
 | **Memory / search** | PostgreSQL pgvector + FTS with reciprocal rank fusion | Vector search trait (LanceDB backend planned), SQLite FTS |
+| **LLM resilience** | Circuit breaker + retry + smart routing | Circuit breaker + retry with exponential backoff + jitter, smart routing (13-dimension complexity scorer), response caching, cost tracking with budget guards |
+| **MCP integration** | JSON-RPC client (stdio, HTTP, Unix socket) | JSON-RPC 2.0 client (stdio, HTTP) with tool wrapping and risk level mapping |
 | **Default AI provider** | NEAR AI (with OpenRouter, Together, Fireworks, Ollama) | Any OpenAI-compatible API, Anthropic, Ollama |
 | **Streaming** | SSE + WebSocket web gateway | WebSocket control protocol |
-| **Routines** | Built-in cron + event-driven + webhook routines engine | Cron scheduler with agent delivery |
-| **Operator CLI** | Basic CLI | Full CLI: setup wizard, doctor, audit (severity-rated), daemon, systemd, onboarding |
+| **Routines** | Built-in cron + event-driven + webhook routines engine | Cron + event triggers (message pattern, system events) + manual, with guardrails and job state machine |
+| **Operator CLI** | Basic CLI | Full CLI: setup wizard, doctor, audit (severity-rated), daemon, systemd, onboarding, interactive REPL |
+| **Tunnel support** | Cloudflare Tunnel, ngrok, Tailscale funnel, custom | Cloudflare Tunnel, ngrok, custom commands with URL extraction |
 | **Prompt injection defense** | Not documented | Unicode Cc/Cf stripping, external content boundary tags, 2 MB prompt limit |
+| **Credential leak detection** | Scans outputs for API keys | 12 regex patterns scan all LLM and tool output |
 | **Malware scanning** | Not documented | Optional VirusTotal integration on file uploads |
 
 ### When to choose which
@@ -544,6 +567,13 @@ FrankClaw uses a single JSON config file. All fields have secure defaults.
 | `FRANKCLAW_BROWSER_DEVTOOLS_URL` | Chromium DevTools endpoint (default: `http://127.0.0.1:9222/`) |
 | `FRANKCLAW_LANG` | UI language: `en`, `pt-BR`, `pt-PT`, `es`, `fr`, `de`, `it`, `ja`, `ko` |
 | `VIRUSTOTAL_API_KEY` | Optional VirusTotal API key — enables malware scanning on all file uploads |
+| `FRANKCLAW_DAILY_BUDGET` | Optional daily spend limit (e.g. `5.00` for $5/day) |
+| `FRANKCLAW_TUNNEL` | Tunnel provider: `cloudflare`, `ngrok`, or `custom` |
+| `FRANKCLAW_TUNNEL_CF_TOKEN` | Cloudflare Tunnel token (when `FRANKCLAW_TUNNEL=cloudflare`) |
+| `FRANKCLAW_TUNNEL_NGROK_TOKEN` | ngrok auth token (when `FRANKCLAW_TUNNEL=ngrok`) |
+| `FRANKCLAW_TUNNEL_NGROK_DOMAIN` | Optional ngrok custom domain |
+| `FRANKCLAW_TUNNEL_COMMAND` | Custom tunnel command with `{host}` and `{port}` placeholders |
+| `FRANKCLAW_TUNNEL_URL_PATTERN` | URL pattern to extract from custom tunnel output |
 
 ## Development
 
@@ -609,10 +639,20 @@ frankclaw/
 
 See [PARITY_TODO.md](docs/PARITY_TODO.md) for the current parity tracker.
 
-- [ ] Long-tail attachment/media edge cases on supported channels
 - [x] Streaming SSE response handling for OpenAI/Anthropic model providers
 - [x] Agent runtime with optional ai-jail sandbox (bubblewrap + landlock)
+- [x] Circuit breaker + retry with exponential backoff for LLM providers
+- [x] Smart model routing (13-dimension complexity scorer)
+- [x] MCP client integration (stdio + HTTP transports)
+- [x] Response caching and cost tracking with budget guards
+- [x] Credential leak detection in tool/LLM output
+- [x] Extended thinking support for reasoning models
+- [x] Interactive REPL (`frankclaw chat`)
+- [x] Tunnel support (Cloudflare, ngrok, custom)
+- [x] Job state machine with self-repair
+- [x] Event-driven routine triggers
 - [ ] LanceDB vector memory backend
+- [ ] Long-tail attachment/media edge cases on supported channels
 - [ ] Companion nodes and apps
 - [ ] Voice
 

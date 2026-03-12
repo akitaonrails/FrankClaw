@@ -24,16 +24,18 @@ Ship a security-hardened Rust assistant gateway that delivers the core OpenClaw 
   - transcript encryption with master key support
   - no exec/browser/tool runtime in v1
 
-## Non-Goals
+## Non-Goals (Original v1)
 
-- Canvas
+Many original non-goals were subsequently implemented:
+
+- ~~Canvas~~ — ✅ Implemented (structured document model with revision conflict detection)
 - companion mobile / desktop nodes
-- browser automation
-- wide channel parity
+- ~~browser automation~~ — ✅ Implemented (CDP-based, 9 tools)
+- wide channel parity (7 native channels is sufficient)
 - dynamic plugin loading
-- onboarding wizard parity
-- webhook ecosystem
-- skills runtime
+- ~~onboarding wizard parity~~ — ✅ Implemented (`frankclaw setup`, `onboard`, `doctor`)
+- ~~webhook ecosystem~~ — ✅ Implemented (signed webhook ingestion with replay protection)
+- ~~skills runtime~~ — ✅ Implemented (workspace-loaded skill manifests)
 
 ## Milestones
 

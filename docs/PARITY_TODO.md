@@ -3,8 +3,9 @@
 This file tracks the remaining distance between FrankClaw and the broader OpenClaw feature surface.
 It should stay current as features land, are deferred, or are explicitly dropped.
 
-**Last verified**: 2026-03-11 — systematic directory-by-directory audit of OpenClaw `src/` (~192k LOC
-across ~2,864 non-test TypeScript files) against FrankClaw (~27k LOC across 13 Rust crates).
+**Last verified**: 2026-03-12 — systematic directory-by-directory audit of OpenClaw `src/` (~192k LOC
+across ~2,864 non-test TypeScript files) against FrankClaw (~30k LOC across 13 Rust crates).
+IronClaw feature adoption complete (12 features across 4 phases).
 
 ## Current Position
 
@@ -14,7 +15,17 @@ It now has a working hardened core with:
 
 - inbound/outbound assistant loop
 - session persistence and optional transcript encryption
-- provider failover
+- provider failover with circuit breaker, retry with exponential backoff + jitter
+- smart model routing (13-dimension complexity scorer)
+- response caching (SHA-256 keyed LRU with TTL)
+- cost tracking with daily budget guards
+- credential leak detection (12 patterns)
+- extended thinking for reasoning models
+- MCP client (stdio + HTTP transports)
+- tunnel support (Cloudflare, ngrok, custom)
+- event-driven routine triggers (cron, message pattern, system events, manual)
+- job state machine with self-repair
+- interactive REPL (`frankclaw chat`)
 - DM pairing and stricter channel defaults
 - local console UI
 - cron reuse
@@ -262,7 +273,43 @@ These are the core "brain" features that make OpenClaw's agent loop sophisticate
 - ~~Device pairing~~ — Bonjour/mDNS/Tailscale discovery is over-engineered for a self-hosted tool
 - ~~Auto-update~~ — users can use their package manager or pull from git
 - ~~Markdown IR~~ — channel-specific rendering can be added per-channel as needed
-- ~~i18n~~ — English-first; translations can be contributed later without infrastructure now
+- ~~i18n~~ — ✅ Implemented: 9 locales via `FRANKCLAW_LANG` (en, pt-BR, pt-PT, es, fr, de, it, ja, ko)
+
+### IronClaw-Derived Features (Adopted)
+
+These features were adopted from [IronClaw](https://github.com/nearai/ironclaw) (MIT OR Apache-2.0)
+in 4 phases. See the plan file for full analysis of 18 IronClaw features, 12 adopted, 6 skipped.
+
+- [x] **Circuit breaker + retry** — Per-provider health tracking (Closed→Open→HalfOpen),
+  exponential backoff with jitter, configurable thresholds. (`frankclaw-models/src/circuit_breaker.rs`, `retry.rs`)
+- [x] **Credential leak detection** — 12 regex patterns scan LLM and tool output for API keys,
+  tokens, and secrets. (`frankclaw-models/src/leak_detector.rs`)
+- [x] **LLM response caching** — In-memory SHA-256 keyed LRU cache with configurable TTL,
+  bypassed for streaming. (`frankclaw-models/src/cache.rs`)
+- [x] **Cost tracking & budget guards** — Per-model token cost tables, daily budget with
+  warn-at-80%/block-at-100%. (`frankclaw-models/src/costs.rs`, `cost_guard.rs`)
+- [x] **Extended thinking** — `thinking_budget` on CompletionRequest, Anthropic provider support.
+- [x] **REPL channel** — `frankclaw chat` with rustyline, streaming, slash commands, tab completion,
+  history persistence, i18n. (`frankclaw-cli/src/repl.rs`)
+- [x] **Smart model routing** — 13-dimension complexity scorer with pattern overrides, tier hints,
+  multi-dimensional boost. (`frankclaw-models/src/routing.rs`)
+- [x] **MCP client** — JSON-RPC 2.0 client with stdio/HTTP transports, tool wrapping, risk level
+  mapping from MCP annotations. (`frankclaw-tools/src/mcp/`)
+- [x] **Lifecycle hooks** — Already existed in FrankClaw with 5 event categories. SKIPPED.
+- [x] **Tunnel support** — Cloudflare Tunnel, ngrok, custom commands with URL extraction from
+  process output, env-based configuration. (`frankclaw-gateway/src/tunnel.rs`)
+- [x] **Job state machine** — 8 states with validated transitions, self-repair with max attempts,
+  token budget tracking. (`frankclaw-cron/src/job.rs`)
+- [x] **Event trigger system** — 4 trigger types (Cron/Event/SystemEvent/Manual), guardrails
+  (cooldown, max concurrent, dedup), lightweight vs full-job actions. (`frankclaw-cron/src/triggers.rs`)
+
+Skipped IronClaw features (don't fit architecture or lower priority):
+- WASM tool sandbox (ai-jail covers this)
+- Docker container execution (contradicts zero-external-deps philosophy)
+- Full web dashboard UI (backend-first approach)
+- OS keychain integration (encrypted config is sufficient)
+- Session threading (flat transcript model is simpler)
+- Workspace-based memory (LanceDB integration planned separately)
 
 ### Deferred / Lower Priority
 
