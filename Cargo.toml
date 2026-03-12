@@ -117,6 +117,9 @@ webpki-roots = "0.26"
 # Async trait
 async-trait = "0.1"
 
+# Internationalization
+rust-i18n = "3"
+
 # Internal crates
 frankclaw-core = { path = "crates/frankclaw-core" }
 frankclaw-crypto = { path = "crates/frankclaw-crypto" }

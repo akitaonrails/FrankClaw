@@ -1,0 +1,265 @@
+_version: 1
+audit.auth.disabled: 게이트웨이 인증이 비활성화되어 있습니다 — 네트워크 접근 권한이 있는 누구나 연결할 수 있습니다
+audit.auth.disabled_fix: "gateway.auth를 토큰 또는 비밀번호 모드로 설정하세요. 실행: frankclaw gen-token"
+audit.auth.password_empty: 비밀번호 인증이 설정되어 있지만 비밀번호 해시가 비어 있습니다
+audit.auth.password_empty_fix: "비밀번호 해시를 설정하세요: frankclaw hash-password"
+audit.auth.token_short: 게이트웨이 토큰이 16자 미만입니다
+audit.auth.token_short_fix: "더 강력한 토큰을 생성하세요: frankclaw gen-token"
+audit.channels.invalid_policy: "채널 '%{channel}'의 보안 정책이 잘못되었습니다"
+audit.channels.invalid_policy_fix: 채널의 추가 설정에서 유효한 정책 필드를 확인하세요
+audit.channels.open_groups: "채널 '%{channel}'이 멘션 게이팅이나 허용 목록 없이 모든 그룹 메시지에 응답합니다"
+audit.channels.open_groups_fix: "'%{channel}'에 extra.require_mention_for_groups=true를 설정하거나 extra.allowed_groups를 구성하세요"
+audit.channels.whatsapp_no_secret: WhatsApp 채널에 app_secret가 없습니다 — 웹훅 서명이 검증되지 않습니다
+audit.channels.whatsapp_no_secret_fix: WhatsApp 계정 설정에 app_secret_env를 설정하세요
+audit.clean: 보안 문제가 발견되지 않았습니다. 설정이 양호합니다.
+audit.encrypt.media_off: 미디어 파일 암호화가 비활성화되어 있습니다
+audit.encrypt.media_off_fix: 미디어 파일에 민감한 내용이 포함되어 있으면 security.encrypt_media를 true로 설정하세요
+audit.encrypt.no_master_key: 세션 암호화가 활성화되어 있지만 FRANKCLAW_MASTER_KEY가 설정되지 않았습니다 — 세션이 실패합니다
+audit.encrypt.no_master_key_fix: "생성 및 내보내기: export FRANKCLAW_MASTER_KEY=$(frankclaw gen-token)"
+audit.encrypt.sessions_off: 세션 기록 암호화가 비활성화되어 있습니다 — 기록이 평문으로 저장됩니다
+audit.encrypt.sessions_off_fix: security.encrypt_sessions를 true로 설정하고 FRANKCLAW_MASTER_KEY를 내보내세요
+audit.failed: 감사 실패 — 배포 전에 CRIT/HIGH 문제를 수정하세요.
+audit.fix_label: "조치: %{remediation}"
+audit.fs.config_world_readable: "설정 파일의 권한이 %{mode}입니다 — 다른 사용자가 읽을 수 있습니다"
+audit.fs.config_world_readable_fix: "chmod 600 %{path}"
+audit.fs.db_world_readable: "세션 데이터베이스의 권한이 %{mode}입니다 — 다른 사용자가 읽을 수 있습니다"
+audit.fs.db_world_readable_fix: "chmod 600 %{path}"
+audit.fs.state_world_readable: "상태 디렉터리의 권한이 %{mode}입니다 — 다른 사용자가 접근할 수 있습니다"
+audit.fs.state_world_readable_fix: "chmod 700 %{path}"
+audit.media.scanning_off: 파일 검사 서비스가 설정되지 않았습니다 — 파일이 악성코드 검사 없이 저장됩니다
+audit.media.scanning_off_fix: VirusTotal 검사를 활성화하려면 VIRUSTOTAL_API_KEY 환경 변수를 설정하세요
+audit.media.scanning_on: VirusTotal 파일 검사가 활성화되어 있습니다 — 파일이 저장 전에 악성코드 검사를 받습니다
+audit.media.scanning_on_fix: 조치가 필요하지 않습니다
+audit.network.exposed_no_auth: 게이트웨이가 인증 없이 네트워크에 노출되어 있습니다
+audit.network.exposed_no_auth_fix: "루프백에만 바인드하거나 인증을 설정하세요: frankclaw gen-token"
+audit.network.no_tls: 게이트웨이가 TLS 없이 네트워크에 노출되어 있습니다 — 자격 증명이 평문으로 전송됩니다
+audit.network.no_tls_fix: TLS를 설정하거나, TLS 종료가 가능한 리버스 프록시를 사용하거나, Tailscale 네트워크로 제한하세요
+audit.network.ssrf_off: SSRF 보호가 비활성화되어 있습니다 — 아웃바운드 요청이 사설 네트워크에 도달할 수 있습니다
+audit.network.ssrf_off_fix: security.ssrf_protection을 true로 설정하세요
+audit.passed: 감사 통과 (경고 있음).
+audit.secrets.channel_missing_env: "채널 '%{channel}'이 설정되지 않은 환경 변수 '%{env}'를 (%{key}를 통해) 참조하고 있습니다"
+audit.secrets.channel_missing_env_fix: "내보내기: export %{env}=<value>"
+audit.secrets.inline: "채널 '%{channel}'의 '%{key}'가 설정 파일에 인라인으로 저장되어 있습니다"
+audit.secrets.inline_fix: "환경 변수로 이동하세요: '%{key}'를 '%{env_key}'로 변경하고 환경에서 값을 설정하세요"
+audit.secrets.missing_env: "프로바이더 '%{id}'가 설정되지 않은 환경 변수 '%{env}'를 참조하고 있습니다"
+audit.secrets.missing_env_fix: "API 키를 내보내세요: export %{env}=<your-key>"
+audit.secrets.no_key_ref: "프로바이더 '%{id}'에 api_key_ref가 없습니다 — API 키가 누락되었거나 다른 곳에 하드코딩되어 있을 수 있습니다"
+audit.secrets.no_key_ref_fix: "models.providers[%{id}].api_key_ref를 환경 변수 이름으로 설정하세요"
+audit.secrets.token_inline: 게이트웨이 인증 토큰이 설정 파일에 인라인으로 저장되어 있습니다
+audit.secrets.token_inline_fix: 설정 파일 권한을 0600(소유자 전용)으로 설정하세요. 지원되는 경우 FRANKCLAW_AUTH_TOKEN 환경 변수 사용을 고려하세요.
+audit.separator: ========================
+audit.summary: "요약: %{crit} CRIT, %{high} HIGH, %{med} MED, %{low} LOW, %{info} INFO"
+audit.title: FrankClaw 보안 감사
+audit.tools.approval_level: "도구 승인 수준: %{level}"
+audit.tools.approval_level_fix: "FRANKCLAW_TOOL_APPROVAL=readonly|mutating|destructive로 제어하세요"
+audit.tools.bash_allow_all: Bash 도구 정책이 allow-all입니다 — 에이전트가 모든 셸 명령을 실행할 수 있습니다
+audit.tools.bash_allow_all_fix: FRANKCLAW_BASH_POLICY를 허용된 바이너리의 쉼표 구분 목록으로 설정하거나 deny-all로 설정하세요
+audit.tools.bash_allowlist: "Bash 도구 허용 목록에 %{count}개 명령이 허용되어 있습니다: %{commands}"
+audit.tools.bash_allowlist_fix: 허용 목록을 검토하고 불필요한 명령을 제거하세요
+audit.tools.bash_deny_all: Bash 도구가 에이전트용으로 설정되어 있지만 정책이 deny-all입니다 (안전한 기본값)
+audit.tools.bash_deny_all_fix: Bash 실행이 필요하면 FRANKCLAW_BASH_POLICY를 허용 목록으로 설정하세요
+audit.tools.destructive_approved: 파괴적 도구가 승인되었습니다 — 에이전트가 되돌릴 수 없는 작업을 수행할 수 있습니다
+audit.tools.destructive_approved_fix: 파괴적 작업이 의도된 것이 아니라면 FRANKCLAW_TOOL_APPROVAL=mutating 또는 readonly로 설정하세요
+audit.tools.mutating_approved: 변경 도구가 승인되었습니다 — 에이전트가 클릭, 입력 및 셸 명령을 실행할 수 있습니다
+audit.tools.mutating_approved_fix: 변경이 필요하지 않으면 FRANKCLAW_TOOL_APPROVAL=readonly로 설정하세요
+audit.tools.no_sandbox: Bash 도구에 샌드박스가 없습니다 — 명령이 호스트에서 직접 실행됩니다
+audit.tools.no_sandbox_fix: OS 수준 격리를 위해 FRANKCLAW_SANDBOX=ai-jail 또는 ai-jail-lockdown을 설정하세요 (ai-jail 필요)
+audit.tools.sandbox_aijail: "Bash 도구 샌드박스: ai-jail (bubblewrap + landlock, 네트워크 허용)"
+audit.tools.sandbox_aijail_fix: 더 엄격한 격리를 위해 FRANKCLAW_SANDBOX=ai-jail-lockdown을 사용하세요
+audit.tools.sandbox_lockdown: "Bash 도구 샌드박스: ai-jail lockdown (읽기 전용 파일시스템, 네트워크 차단)"
+audit.tools.sandbox_lockdown_fix: 가장 엄격한 샌드박스 모드입니다
+audit.tools.sandbox_missing: "FRANKCLAW_SANDBOX=%{mode}가 설정되어 있지만 ai-jail 바이너리가 PATH에 없습니다"
+audit.tools.sandbox_missing_fix: ai-jail을 설치하거나 FRANKCLAW_SANDBOX 설정을 해제하세요
+browser.invalid_url: "브라우저 도구가 활성화되어 있지만 FRANKCLAW_BROWSER_DEVTOOLS_URL이 유효하지 않습니다: %{error}"
+browser.mutations_blocked: 브라우저 변경 도구가 설정되어 있지만 차단되었습니다 — 활성화하려면 FRANKCLAW_TOOL_APPROVAL=mutating (또는 FRANKCLAW_ALLOW_BROWSER_MUTATIONS=1)을 설정하세요
+browser.no_host: 브라우저 도구 엔드포인트에 호스트가 없습니다
+browser.non_loopback: "브라우저 도구가 비루프백 호스트 '%{host}'를 가리키고 있습니다; Chromium DevTools는 로컬에서만 사용하세요"
+browser.unreachable: "브라우저 도구가 활성화되어 있지만 %{endpoint}에서 Chromium DevTools에 접근할 수 없습니다; 로컬에서 시작하거나 `docker compose up -d chromium`을 실행하세요"
+cmd.check.auth: "  인증 방식: %{mode}"
+cmd.check.channels: "  채널: %{count}"
+cmd.check.port: "  게이트웨이 포트: %{port}"
+cmd.check.providers: "  프로바이더: %{count}"
+cmd.check.valid: 설정이 유효합니다.
+cmd.config_example.unsupported: "지원하지 않는 채널 예제 '%{channel}'; web, telegram, discord, slack, signal, whatsapp, 또는 email 중 하나를 선택하세요"
+cmd.hash_password.prompt: "비밀번호를 입력하세요: "
+cmd.init.created: "설정 파일이 생성되었습니다: %{path}"
+cmd.init.exists: "설정 파일이 이미 %{path}에 존재합니다. 덮어쓰려면 --force를 사용하세요."
+cmd.init.next: "다음 단계:"
+cmd.init.step1: "  1. 인증 토큰 생성:       frankclaw gen-token"
+cmd.init.step2: "  2. 설정 파일 편집:       $EDITOR %{path}"
+cmd.init.step3: "  3. 게이트웨이 시작:      frankclaw gateway"
+cmd.message.deleted: "세션 %{key}의 마지막 응답을 삭제했습니다."
+cmd.message.edited: "세션 %{key}의 마지막 응답을 수정했습니다."
+cmd.message.editing_chunked_unsupported: 청크 분할된 응답의 수정은 아직 지원되지 않습니다
+cmd.message.model: "모델:   %{id}"
+cmd.message.no_assistant_turn: 세션에 다시 작성할 어시스턴트 턴이 없습니다
+cmd.message.session: "세션: %{key}"
+cmd.onboard.created: "기본 설정 파일이 생성되었습니다: %{path}"
+cmd.onboard.exists: "설정 파일이 이미 %{path}에 존재합니다. 덮어쓰려면 --force를 사용하세요."
+cmd.onboard.next: "다음 단계:"
+cmd.onboard.step1: "  1. 설정에 참조된 프로바이더 환경 변수를 설정하세요."
+cmd.onboard.step2: "  2. 채널별 환경 변수가 필요하면 해당 변수도 내보내세요."
+cmd.onboard.step3: "  3. 로컬에서 시작: frankclaw gateway --config %{path}"
+cmd.onboard.token: "게이트웨이 토큰: %{token}"
+cmd.onboard.unsupported: "지원하지 않는 온보딩 채널 '%{channel}'; web, telegram, whatsapp, slack, discord, signal, 또는 email 중 하나를 선택하세요"
+cmd.pairing.approved: "발신자 %{sender}를 %{channel}/%{account}에서 승인했습니다"
+cmd.remote.not_public: 게이트웨이 설정이 직접 공개 노출에 적합하지 않습니다
+cmd.remote.not_remote: 게이트웨이 설정이 원격 노출에 적합하지 않습니다
+cmd.sessions.cleared: 세션 기록이 삭제되었습니다.
+cmd.start.already_running: "게이트웨이가 이미 실행 중입니다 (PID %{pid})."
+cmd.start.log: "  로그: %{path}"
+cmd.start.pid_file: "  PID 파일: %{path}"
+cmd.start.started: "게이트웨이가 시작되었습니다 (PID %{pid})."
+cmd.start.stop_hint: "중지하려면: frankclaw stop"
+cmd.status.agents: "에이전트:"
+cmd.status.browser: "브라우저:"
+cmd.status.channels: "채널:"
+cmd.status.daemon: "데몬:"
+cmd.status.healthy: 정상
+cmd.status.mutations_enabled: 변경 작업 허용됨
+cmd.status.mutations_gated: 변경 작업 제한됨
+cmd.status.providers: "프로바이더:"
+cmd.status.read_only: 읽기 전용
+cmd.status.unhealthy: 비정상
+cmd.status.unset: "<미설정>"
+cmd.stop.not_found: 실행 중인 게이트웨이를 찾을 수 없습니다 (PID 파일 없음).
+cmd.stop.not_running_stale: "게이트웨이가 실행되고 있지 않습니다 (오래된 PID %{pid})."
+cmd.stop.stopped: "게이트웨이가 중지되었습니다 (PID %{pid})."
+cmd.tools.no_activity: 도구 활동 내역이 없습니다.
+ctx.channel_not_configured: "채널 '%{channel}'이 설정되지 않았습니다"
+ctx.failed_clone_log: 로그 파일 핸들을 복제하지 못했습니다
+ctx.failed_hash_password: 비밀번호 해싱에 실패했습니다
+ctx.failed_init_runtime: 런타임 초기화에 실패했습니다
+ctx.failed_load_channels: 설정된 채널을 로드하지 못했습니다
+ctx.failed_locate_binary: frankclaw 바이너리를 찾지 못했습니다
+ctx.failed_open_log: 로그 파일을 열지 못했습니다
+ctx.failed_open_media: 미디어 저장소를 열지 못했습니다
+ctx.failed_open_sessions: 세션 저장소를 열지 못했습니다
+ctx.failed_read_input: 입력을 읽지 못했습니다
+ctx.failed_read_password: 비밀번호를 읽지 못했습니다
+ctx.failed_run_kill: kill 실행에 실패했습니다
+ctx.failed_sigterm: "PID %{pid}에 SIGTERM 전송에 실패했습니다"
+ctx.failed_start_gateway: 게이트웨이 프로세스를 시작하지 못했습니다
+ctx.failed_update_metadata: 전달 메타데이터 업데이트에 실패했습니다
+ctx.missing_platform_id: 추적된 응답에 platform_message_id가 없습니다
+ctx.missing_platform_ids: 추적된 응답에 platform message id가 없습니다
+ctx.no_delivery_metadata: 세션에 추적된 전달 메타데이터가 없습니다
+ctx.session_not_found: 세션을 찾을 수 없습니다
+ctx.tool_args_invalid: 도구 인수는 유효한 JSON 객체여야 합니다
+daemon.not_running: "실행되고 있지 않음 (오래된 PID 파일, PID %{pid})"
+daemon.running: "실행 중 (PID %{pid})"
+doctor.channel.disabled: "채널 '%{id}' 비활성화됨"
+doctor.channel.enabled: "채널 '%{id}' 활성화됨 (%{count}개 계정)"
+doctor.channel.none: 설정된 채널이 없습니다
+doctor.config.critical_issues: 진단에서 치명적인 문제가 발견되었습니다. 설정을 수정한 후 다시 실행하세요.
+doctor.config.load_failed: "설정 로드 실패: %{error}"
+doctor.config.no_misconfig: 잘못된 설정이 감지되지 않았습니다
+doctor.config.valid: 설정 스키마가 유효합니다
+doctor.config.validation_failed: "설정 검증 실패: %{error}"
+doctor.db.error: "sessions.db: %{error}"
+doctor.db.missing: sessions.db가 아직 존재하지 않습니다 (첫 세션에서 생성됩니다)
+doctor.db.valid: sessions.db를 읽을 수 있으며 유효합니다
+doctor.info.arch: "arch %{arch}"
+doctor.info.exposure: "노출 상태: %{summary}"
+doctor.info.os: "os %{os}"
+doctor.info.rust: "rust %{version}"
+doctor.info.state_dir: "상태 디렉터리: %{path}"
+doctor.info.version: "frankclaw %{version}"
+doctor.port.available: "포트 %{port}를 사용할 수 있습니다"
+doctor.port.check_error: "포트 %{port} 확인 불가: %{error}"
+doctor.port.in_use: "포트 %{port}가 이미 사용 중입니다 (게이트웨이가 이미 실행 중이거나 다른 서비스가 사용 중일 수 있습니다)"
+doctor.provider.no_key: "프로바이더 '%{id}' (%{api}) — API 키를 사용할 수 없습니다"
+doctor.provider.none: 설정된 모델 프로바이더가 없습니다
+doctor.provider.ok: "프로바이더 '%{id}' (%{api}) — API 키 확인됨, %{count}개 모델 설정됨"
+doctor.provider.reachable: "  %{url}에 접근할 수 있습니다"
+doctor.provider.unreachable: "  %{url}에 접근할 수 없습니다: %{error}"
+doctor.section.channels: 채널
+doctor.section.configuration: 설정
+doctor.section.database: 데이터베이스
+doctor.section.network: 네트워크
+doctor.section.providers: 프로바이더
+doctor.section.security: 보안
+doctor.section.state_directory: 상태 디렉터리
+doctor.section.system: 시스템
+doctor.security.auth_none: 게이트웨이 인증이 비활성화되어 있습니다
+doctor.security.auth_password: 게이트웨이가 비밀번호 인증을 사용합니다
+doctor.security.auth_proxy: 게이트웨이가 신뢰할 수 있는 프록시 인증을 사용합니다
+doctor.security.auth_tailscale: 게이트웨이가 Tailscale 인증을 사용합니다
+doctor.security.auth_token: 게이트웨이가 토큰 인증을 사용합니다
+doctor.security.encrypt_no_key: 세션 암호화가 활성화되어 있지만 FRANKCLAW_MASTER_KEY가 설정되지 않았습니다
+doctor.security.encrypt_off: 세션 암호화가 비활성화되어 있습니다
+doctor.security.encrypt_ok: 세션 암호화가 활성화되어 있으며 마스터 키가 설정되어 있습니다
+doctor.separator: ================
+doctor.state.exists: 상태 디렉터리가 존재합니다
+doctor.state.missing: "상태 디렉터리 '%{path}'가 아직 존재하지 않습니다 (첫 실행 시 생성됩니다)"
+doctor.summary.critical: "진단 결과: %{fails}개 치명적 문제, %{warns}개 경고가 발견되었습니다."
+doctor.summary.ok: 진단 통과. 모든 검사 항목이 정상입니다.
+doctor.summary.warnings: "진단 통과: %{warns}개 경고가 있습니다."
+doctor.title: FrankClaw 진단
+exposure.auth: "인증:   %{mode}"
+exposure.bind: "바인드: %{surface}"
+exposure.not_ready: 준비되지 않음
+exposure.public: "공개:   %{status}"
+exposure.ready: 준비됨
+exposure.remote: "원격:   %{status}"
+exposure.summary_label: "요약:   %{summary}"
+exposure.warnings: "경고:"
+lang.de: 독일어
+lang.en: 영어
+lang.es: 스페인어
+lang.fr: 프랑스어
+lang.it: 이탈리아어
+lang.ja: 일본어
+lang.ko: 한국어
+lang.pt-BR: 브라질 포르투갈어
+lang.pt-PT: 유럽 포르투갈어
+perms.dir_ok: "%{label} 권한 %{mode} (소유자 전용)"
+perms.dir_warn: "%{label}의 권한이 %{mode}입니다 — 0700(소유자 전용)이어야 합니다"
+perms.file_ok: "%{label} 권한 %{mode} (소유자 전용)"
+perms.file_warn: "%{label}의 권한이 %{mode}입니다 — 0600(소유자 전용)이어야 합니다"
+prompt.respond_in: "중요: 항상 %{language}로 응답하세요. 모든 답변은 반드시 %{language}로 작성해야 합니다."
+setup.api_key_env: "API 키 환경 변수 이름 (기본값: %{default})"
+setup.cancelled: 설정이 취소되었습니다.
+setup.channel.discord: Discord
+setup.channel.signal: Signal
+setup.channel.slack: Slack
+setup.channel.telegram: Telegram
+setup.channel.web: 웹 (브라우저 UI)
+setup.channel.whatsapp: WhatsApp (Cloud API)
+setup.choose: "[1-%{max}] 중 선택하세요"
+setup.config_exists: "설정 파일이 이미 %{path}에 존재합니다."
+setup.config_written: "설정이 저장되었습니다: %{path}"
+setup.default_marker: (기본값)
+setup.default_model: "기본 모델 (기본값: %{model})"
+setup.encrypt_sessions: 세션 암호화를 활성화하시겠습니까?
+setup.encryption_cmd: "  export FRANKCLAW_MASTER_KEY=$(frankclaw gen-token)"
+setup.encryption_on: "세션 암호화가 활성화되었습니다. 마스터 키를 설정하세요:"
+setup.export_channel: "  2. 채널 자격 증명을 내보내세요 (환경 변수 이름은 설정 파일을 참조하세요)."
+setup.export_key: "  1. API 키 내보내기:     export %{env}=<your-key>"
+setup.gateway_port: "게이트웨이 포트 (기본값: 18789)"
+setup.gateway_token: "게이트웨이 인증 토큰: %{token}"
+setup.invalid_choice: 잘못된 선택입니다. 기본값을 사용합니다.
+setup.invalid_port: 잘못된 포트 번호입니다
+setup.next_steps: "다음 단계:"
+setup.ollama_url: "Ollama 기본 URL (기본값: http://127.0.0.1:11434)"
+setup.overwrite: 덮어쓰시겠습니까?
+setup.primary_channel: 기본 채널은 무엇입니까?
+setup.provider.anthropic: Anthropic
+setup.provider.ollama: Ollama (로컬)
+setup.provider.openai: OpenAI
+setup.separator: ===============
+setup.start_gateway: "  4. 게이트웨이 시작:      frankclaw gateway"
+setup.title: FrankClaw 설정
+setup.verify_config: "  3. 설정 확인:            frankclaw doctor"
+setup.which_provider: 어떤 AI 프로바이더를 사용하시겠습니까?
+warn.channel_inline_secret: "채널 '%{channel}'이 '%{key}'를 인라인으로 저장하고 있습니다; 보안을 위해 '%{env_key}' 환경 변수 참조를 사용하세요"
+warn.channel_missing_env: "채널 '%{channel}'이 존재하지 않는 환경 변수 '%{env}'를 %{key}를 통해 참조하고 있습니다"
+warn.channel_open_groups: "채널 '%{channel}'이 멘션 게이팅이나 그룹 허용 목록 없이 그룹 메시지를 수락합니다"
+warn.encrypt_no_key: 세션 암호화가 활성화되어 있지만 FRANKCLAW_MASTER_KEY가 설정되지 않았습니다
+warn.encrypt_off: 세션 암호화가 비활성화되어 있습니다
+warn.invalid_channel_policy: "채널 '%{channel}'의 보안 정책이 잘못되었습니다"
+warn.missing_env: "프로바이더 '%{id}'가 존재하지 않는 환경 변수 '%{env}'를 참조하고 있습니다"
+warn.no_channels: 설정된 채널이 없습니다
+warn.no_providers: 설정된 모델 프로바이더가 없습니다
+warn.state_missing: "상태 디렉터리 '%{path}'가 아직 존재하지 않습니다"
+warn.whatsapp_no_secret: WhatsApp 채널에 app_secret가 설정되지 않았습니다; 인바운드 웹훅 서명이 검증되지 않습니다

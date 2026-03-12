@@ -16,11 +16,11 @@ What's at parity:
 - Operator experience: setup wizard, doctor diagnostics, security audit, daemon management
 
 What's intentionally skipped (low value or over-engineered):
-- TTS, polls, WhatsApp Web (Baileys), Gmail Pub/Sub, ACP protocol, auto-update, i18n
+- TTS, polls, WhatsApp Web (Baileys), Gmail Pub/Sub, ACP protocol, auto-update
 - 17 long-tail channels (Google Chat, iMessage, IRC, Teams, Matrix, etc.) — can be added via the plugin trait
 
-For full details, see [PARITY_TODO.md](PARITY_TODO.md) and [FEATURE_PLANS.md](FEATURE_PLANS.md).
-For channel setup, see [CHANNEL_SETUP.md](CHANNEL_SETUP.md), `examples/channels/`, or `frankclaw config-example --channel <name>`.
+For full details, see [PARITY_TODO.md](docs/PARITY_TODO.md) and [FEATURE_PLANS.md](docs/FEATURE_PLANS.md).
+For channel setup, see [CHANNEL_SETUP.md](docs/CHANNEL_SETUP.md), `examples/channels/`, or `frankclaw config-example --channel <name>`.
 
 ## Features
 
@@ -37,6 +37,7 @@ For channel setup, see [CHANNEL_SETUP.md](CHANNEL_SETUP.md), `examples/channels/
 - **Docker runtime** — `docker compose up gateway chromium` starts the gateway plus a local DevTools endpoint for browser tools
 - **Prompt templates** — All LLM-facing text lives in editable markdown files, embedded at compile time
 - **Media pipeline** — File handling with SSRF protection, filename sanitization, and optional VirusTotal malware scanning
+- **Internationalized CLI** — 9 locales (en, pt-BR, pt-PT, es, fr, de, it, ja, ko) via `FRANKCLAW_LANG`
 - **Plugin system** — Trait-based channel and provider adapters
 - **Zero unsafe code** — `#![forbid(unsafe_code)]` on every crate
 
@@ -327,7 +328,7 @@ frankclaw gateway -p 9000   Override listen port
 
 ## Security
 
-FrankClaw is designed with defense-in-depth. Every layer enforces its own security boundaries. A comprehensive audit of both FrankClaw and OpenClaw (see [OPENCLAW_SECURITY_AUDIT.md](OPENCLAW_SECURITY_AUDIT.md)) confirms that FrankClaw resolves every critical and high-severity vulnerability found in the reference implementation.
+FrankClaw is designed with defense-in-depth. Every layer enforces its own security boundaries. A comprehensive audit of both FrankClaw and OpenClaw (see [OPENCLAW_SECURITY_AUDIT.md](docs/OPENCLAW_SECURITY_AUDIT.md)) confirms that FrankClaw resolves every critical and high-severity vulnerability found in the reference implementation.
 
 ### Why FrankClaw is More Secure Than OpenClaw
 
@@ -541,6 +542,7 @@ FrankClaw uses a single JSON config file. All fields have secure defaults.
 | `FRANKCLAW_TOOL_APPROVAL` | Tool approval level: `readonly` (default), `mutating`, or `destructive` |
 | `FRANKCLAW_ALLOW_BROWSER_MUTATIONS` | Legacy — set to `1` to enable mutating tools (use `FRANKCLAW_TOOL_APPROVAL` instead) |
 | `FRANKCLAW_BROWSER_DEVTOOLS_URL` | Chromium DevTools endpoint (default: `http://127.0.0.1:9222/`) |
+| `FRANKCLAW_LANG` | UI language: `en`, `pt-BR`, `pt-PT`, `es`, `fr`, `de`, `it`, `ja`, `ko` |
 | `VIRUSTOTAL_API_KEY` | Optional VirusTotal API key — enables malware scanning on all file uploads |
 
 ## Development
@@ -566,7 +568,14 @@ cargo test -p frankclaw-media
 frankclaw/
 ├── Cargo.toml                 # Workspace root
 ├── CLAUDE.md                  # AI assistant development guide
-├── OPENCLAW_ANALYSIS.md       # Original OpenClaw analysis & rewrite plan
+├── docs/                      # Project documentation
+│   ├── AUDIT_PLAN.md
+│   ├── CHANNEL_SETUP.md
+│   ├── FEATURE_PLANS.md
+│   ├── OPENCLAW_ANALYSIS.md
+│   ├── OPENCLAW_SECURITY_AUDIT.md
+│   ├── PARITY_TODO.md
+│   └── ROADMAP.md
 ├── crates/
 │   ├── frankclaw-core/        # Shared types and traits
 │   ├── frankclaw-crypto/      # Cryptographic primitives
@@ -598,7 +607,7 @@ frankclaw/
 
 ## Roadmap
 
-See [PARITY_TODO.md](PARITY_TODO.md) for the current parity tracker.
+See [PARITY_TODO.md](docs/PARITY_TODO.md) for the current parity tracker.
 
 - [ ] Long-tail attachment/media edge cases on supported channels
 - [x] Streaming SSE response handling for OpenAI/Anthropic model providers

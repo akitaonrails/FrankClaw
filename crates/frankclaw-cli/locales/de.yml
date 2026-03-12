@@ -1,0 +1,265 @@
+_version: 1
+audit.auth.disabled: Gateway-Authentifizierung ist deaktiviert — jeder mit Netzwerkzugang kann sich verbinden
+audit.auth.disabled_fix: "Setzen Sie gateway.auth auf Token- oder Passwort-Modus. Ausführen: frankclaw gen-token"
+audit.auth.password_empty: Passwort-Authentifizierung ist konfiguriert, aber Passwort-Hash ist leer
+audit.auth.password_empty_fix: "Setzen Sie einen Passwort-Hash: frankclaw hash-password"
+audit.auth.token_short: Gateway-Token ist kürzer als 16 Zeichen
+audit.auth.token_short_fix: "Generieren Sie ein stärkeres Token: frankclaw gen-token"
+audit.channels.invalid_policy: "Kanal '%{channel}' hat eine ungültige Sicherheitsrichtlinie"
+audit.channels.invalid_policy_fix: Überprüfen Sie die zusätzliche Konfiguration des Kanals auf gültige Richtlinienfelder
+audit.channels.open_groups: "Kanal '%{channel}' antwortet auf alle Gruppennachrichten ohne Erwähnungs-Gating oder Erlaubnisliste"
+audit.channels.open_groups_fix: "Setzen Sie extra.require_mention_for_groups=true oder konfigurieren Sie extra.allowed_groups für '%{channel}'"
+audit.channels.whatsapp_no_secret: WhatsApp-Kanal hat kein app_secret — Webhook-Signaturen werden nicht verifiziert
+audit.channels.whatsapp_no_secret_fix: Setzen Sie app_secret_env in der WhatsApp-Kontokonfiguration
+audit.clean: Keine Sicherheitsprobleme gefunden. Konfiguration sieht gut aus.
+audit.encrypt.media_off: Mediendatei-Verschlüsselung ist deaktiviert
+audit.encrypt.media_off_fix: Setzen Sie security.encrypt_media auf true, wenn Mediendateien sensible Inhalte enthalten
+audit.encrypt.no_master_key: Sitzungsverschlüsselung ist aktiviert, aber FRANKCLAW_MASTER_KEY ist nicht gesetzt — Sitzungen werden fehlschlagen
+audit.encrypt.no_master_key_fix: "Generieren und exportieren: export FRANKCLAW_MASTER_KEY=$(frankclaw gen-token)"
+audit.encrypt.sessions_off: Sitzungsprotokoll-Verschlüsselung ist deaktiviert — Protokolle werden im Klartext gespeichert
+audit.encrypt.sessions_off_fix: Setzen Sie security.encrypt_sessions auf true und exportieren Sie FRANKCLAW_MASTER_KEY
+audit.failed: Prüfung FEHLGESCHLAGEN — beheben Sie kritische/hohe Probleme vor dem Deployment.
+audit.fix_label: "Behebung: %{remediation}"
+audit.fs.config_world_readable: "Konfigurationsdatei hat Berechtigungen %{mode} — von anderen Benutzern lesbar"
+audit.fs.config_world_readable_fix: "chmod 600 %{path}"
+audit.fs.db_world_readable: "Sitzungsdatenbank hat Berechtigungen %{mode} — von anderen Benutzern lesbar"
+audit.fs.db_world_readable_fix: "chmod 600 %{path}"
+audit.fs.state_world_readable: "Statusverzeichnis hat Berechtigungen %{mode} — für andere Benutzer zugänglich"
+audit.fs.state_world_readable_fix: "chmod 700 %{path}"
+audit.media.scanning_off: Kein Dateiscanning-Dienst konfiguriert — Dateien werden ohne Malware-Prüfung gespeichert
+audit.media.scanning_off_fix: Setzen Sie die VIRUSTOTAL_API_KEY Umgebungsvariable, um VirusTotal-Scanning zu aktivieren
+audit.media.scanning_on: VirusTotal-Dateiscanning ist aktiviert — Dateien werden vor der Speicherung auf Malware geprüft
+audit.media.scanning_on_fix: Keine Aktion erforderlich
+audit.network.exposed_no_auth: Gateway ist netzwerkweit erreichbar ohne Authentifizierung
+audit.network.exposed_no_auth_fix: "Entweder nur an Loopback binden oder Authentifizierung konfigurieren: frankclaw gen-token"
+audit.network.no_tls: Gateway ist netzwerkweit erreichbar ohne TLS — Zugangsdaten werden im Klartext gesendet
+audit.network.no_tls_fix: TLS konfigurieren, einen Reverse-Proxy mit TLS-Terminierung verwenden oder auf ein Tailscale-Netzwerk beschränken
+audit.network.ssrf_off: SSRF-Schutz ist deaktiviert — ausgehende Anfragen können private Netzwerke erreichen
+audit.network.ssrf_off_fix: Setzen Sie security.ssrf_protection auf true
+audit.passed: Prüfung bestanden mit Warnungen.
+audit.secrets.channel_missing_env: "Kanal '%{channel}' referenziert Umgebungsvariable '%{env}' (über %{key}), die nicht gesetzt ist"
+audit.secrets.channel_missing_env_fix: "Exportieren: export %{env}=<Wert>"
+audit.secrets.inline: "Kanal '%{channel}' hat '%{key}' direkt in der Konfigurationsdatei gespeichert"
+audit.secrets.inline_fix: "In Umgebungsvariable verschieben: '%{key}' in '%{env_key}' umbenennen und den Wert in der Umgebung setzen"
+audit.secrets.missing_env: "Anbieter '%{id}' referenziert Umgebungsvariable '%{env}', die nicht gesetzt ist"
+audit.secrets.missing_env_fix: "API-Schlüssel exportieren: export %{env}=<Ihr-Schlüssel>"
+audit.secrets.no_key_ref: "Anbieter '%{id}' hat keine api_key_ref — API-Schlüssel fehlt möglicherweise oder ist anderweitig hartcodiert"
+audit.secrets.no_key_ref_fix: "Setzen Sie models.providers[%{id}].api_key_ref auf den Namen einer Umgebungsvariable"
+audit.secrets.token_inline: Gateway-Authentifizierungstoken ist direkt in der Konfigurationsdatei gespeichert
+audit.secrets.token_inline_fix: Stellen Sie sicher, dass die Konfigurationsdatei Berechtigungen 0600 hat (nur Eigentümer). Erwägen Sie die Verwendung der FRANKCLAW_AUTH_TOKEN Umgebungsvariable.
+audit.separator: ============================
+audit.summary: "Zusammenfassung: %{crit} kritisch, %{high} hoch, %{med} mittel, %{low} niedrig, %{info} info"
+audit.title: FrankClaw Sicherheitsprüfung
+audit.tools.approval_level: "Werkzeug-Genehmigungsstufe: %{level}"
+audit.tools.approval_level_fix: "Setzen Sie FRANKCLAW_TOOL_APPROVAL=readonly|mutating|destructive zur Steuerung"
+audit.tools.bash_allow_all: Bash-Werkzeugrichtlinie ist allow-all — Agenten können beliebige Shell-Befehle ausführen
+audit.tools.bash_allow_all_fix: Setzen Sie FRANKCLAW_BASH_POLICY auf eine kommagetrennte Erlaubnisliste erlaubter Programme oder deny-all
+audit.tools.bash_allowlist: "Bash-Werkzeug-Erlaubnisliste erlaubt %{count} Befehl(e): %{commands}"
+audit.tools.bash_allowlist_fix: Überprüfen Sie die Erlaubnisliste und entfernen Sie unnötige Befehle
+audit.tools.bash_deny_all: Bash-Werkzeug ist für Agenten konfiguriert, aber Richtlinie ist deny-all (sichere Standardeinstellung)
+audit.tools.bash_deny_all_fix: Falls Bash-Ausführung benötigt wird, setzen Sie FRANKCLAW_BASH_POLICY auf eine Erlaubnisliste
+audit.tools.destructive_approved: Destruktive Werkzeuge sind genehmigt — Agenten können irreversible Operationen ausführen
+audit.tools.destructive_approved_fix: Setzen Sie FRANKCLAW_TOOL_APPROVAL=mutating oder readonly, es sei denn, destruktive Operationen sind beabsichtigt
+audit.tools.mutating_approved: Mutierende Werkzeuge sind genehmigt — Agenten können klicken, tippen und Shell-Befehle ausführen
+audit.tools.mutating_approved_fix: Setzen Sie FRANKCLAW_TOOL_APPROVAL=readonly, wenn Mutationen nicht benötigt werden
+audit.tools.no_sandbox: Bash-Werkzeug hat keine Sandbox — Befehle werden direkt auf dem Host ausgeführt
+audit.tools.no_sandbox_fix: Setzen Sie FRANKCLAW_SANDBOX=ai-jail oder ai-jail-lockdown für Betriebssystem-Isolation (erfordert ai-jail)
+audit.tools.sandbox_aijail: "Bash-Werkzeug-Sandbox: ai-jail (bubblewrap + landlock, Netzwerk erlaubt)"
+audit.tools.sandbox_aijail_fix: Für strengere Isolation verwenden Sie FRANKCLAW_SANDBOX=ai-jail-lockdown
+audit.tools.sandbox_lockdown: "Bash-Werkzeug-Sandbox: ai-jail lockdown (schreibgeschütztes Dateisystem, kein Netzwerk)"
+audit.tools.sandbox_lockdown_fix: Dies ist der restriktivste Sandbox-Modus
+audit.tools.sandbox_missing: "FRANKCLAW_SANDBOX=%{mode} ist gesetzt, aber ai-jail-Binary wurde nicht im PATH gefunden"
+audit.tools.sandbox_missing_fix: Installieren Sie ai-jail oder entfernen Sie FRANKCLAW_SANDBOX
+browser.invalid_url: "Browser-Werkzeuge sind aktiviert, aber FRANKCLAW_BROWSER_DEVTOOLS_URL ist ungültig: %{error}"
+browser.mutations_blocked: Browser-Mutationswerkzeuge sind konfiguriert, aber blockiert — setzen Sie FRANKCLAW_TOOL_APPROVAL=mutating (oder FRANKCLAW_ALLOW_BROWSER_MUTATIONS=1) zum Aktivieren
+browser.no_host: Browser-Werkzeuge-Endpunkt hat keinen Host
+browser.non_loopback: "Browser-Werkzeuge zeigen auf nicht-lokalen Host '%{host}'; halten Sie Chromium DevTools lokal"
+browser.unreachable: "Browser-Werkzeuge sind aktiviert, aber Chromium DevTools ist nicht erreichbar unter %{endpoint}; starten Sie es lokal oder führen Sie `docker compose up -d chromium` aus"
+cmd.check.auth: "  Authentifizierungsmodus: %{mode}"
+cmd.check.channels: "  Kanäle: %{count}"
+cmd.check.port: "  Gateway-Port: %{port}"
+cmd.check.providers: "  Anbieter: %{count}"
+cmd.check.valid: Konfiguration ist gültig.
+cmd.config_example.unsupported: "Nicht unterstütztes Kanal-Beispiel '%{channel}'; erwartet web, telegram, discord, slack, signal, whatsapp oder email"
+cmd.hash_password.prompt: "Passwort eingeben: "
+cmd.init.created: "Konfiguration erstellt unter: %{path}"
+cmd.init.exists: "Konfiguration existiert bereits unter %{path}. Verwenden Sie --force zum Überschreiben."
+cmd.init.next: "Nächste Schritte:"
+cmd.init.step1: "  1. Authentifizierungstoken generieren:  frankclaw gen-token"
+cmd.init.step2: "  2. Konfiguration bearbeiten:            $EDITOR %{path}"
+cmd.init.step3: "  3. Gateway starten:                     frankclaw gateway"
+cmd.message.deleted: "Letzte Antwort für Sitzung %{key} gelöscht."
+cmd.message.edited: "Letzte Antwort für Sitzung %{key} bearbeitet."
+cmd.message.editing_chunked_unsupported: Bearbeitung von aufgeteilten Antworten wird noch nicht unterstützt
+cmd.message.model: "Modell:  %{id}"
+cmd.message.no_assistant_turn: Sitzung hat keinen Assistenten-Beitrag zum Umschreiben
+cmd.message.session: "Sitzung: %{key}"
+cmd.onboard.created: "Startkonfiguration erstellt unter: %{path}"
+cmd.onboard.exists: "Konfiguration existiert bereits unter %{path}. Verwenden Sie --force zum Überschreiben."
+cmd.onboard.next: "Nächste Schritte:"
+cmd.onboard.step1: "  1. Füllen Sie die in der Konfiguration referenzierten Anbieter-Umgebungsvariablen aus."
+cmd.onboard.step2: "  2. Falls kanalspezifische Umgebungsvariablen verwendet werden, exportieren Sie diese ebenfalls."
+cmd.onboard.step3: "  3. Lokal starten: frankclaw gateway --config %{path}"
+cmd.onboard.token: "Gateway-Token: %{token}"
+cmd.onboard.unsupported: "Nicht unterstützter Onboard-Kanal '%{channel}'; erwartet web, telegram, whatsapp, slack, discord, signal oder email"
+cmd.pairing.approved: "Absender %{sender} auf %{channel}/%{account} genehmigt"
+cmd.remote.not_public: Gateway-Konfiguration ist nicht bereit für direkte öffentliche Erreichbarkeit
+cmd.remote.not_remote: Gateway-Konfiguration ist nicht bereit für Remote-Zugriff
+cmd.sessions.cleared: Sitzungsprotokoll gelöscht.
+cmd.start.already_running: "Gateway läuft bereits (PID %{pid})."
+cmd.start.log: "  Log: %{path}"
+cmd.start.pid_file: "  PID-Datei: %{path}"
+cmd.start.started: "Gateway gestartet (PID %{pid})."
+cmd.start.stop_hint: "Stoppen mit: frankclaw stop"
+cmd.status.agents: "Agenten:"
+cmd.status.browser: "Browser:"
+cmd.status.channels: "Kanäle:"
+cmd.status.daemon: "Daemon:"
+cmd.status.healthy: fehlerfrei
+cmd.status.mutations_enabled: Mutationen aktiviert
+cmd.status.mutations_gated: Mutationen eingeschränkt
+cmd.status.providers: "Anbieter:"
+cmd.status.read_only: schreibgeschützt
+cmd.status.unhealthy: fehlerhaft
+cmd.status.unset: "<nicht gesetzt>"
+cmd.stop.not_found: Kein laufendes Gateway gefunden (keine PID-Datei).
+cmd.stop.not_running_stale: "Gateway läuft nicht (veraltete PID %{pid})."
+cmd.stop.stopped: "Gateway gestoppt (PID %{pid})."
+cmd.tools.no_activity: Keine Werkzeugaktivität gefunden.
+ctx.channel_not_configured: "Kanal '%{channel}' ist nicht konfiguriert"
+ctx.failed_clone_log: Logdatei-Handle konnte nicht geklont werden
+ctx.failed_hash_password: Passwort konnte nicht gehasht werden
+ctx.failed_init_runtime: Laufzeitumgebung konnte nicht initialisiert werden
+ctx.failed_load_channels: Konfigurierte Kanäle konnten nicht geladen werden
+ctx.failed_locate_binary: frankclaw-Binary konnte nicht gefunden werden
+ctx.failed_open_log: Logdatei konnte nicht geöffnet werden
+ctx.failed_open_media: Medienspeicher konnte nicht geöffnet werden
+ctx.failed_open_sessions: Sitzungsspeicher konnte nicht geöffnet werden
+ctx.failed_read_input: Eingabe konnte nicht gelesen werden
+ctx.failed_read_password: Passwort konnte nicht gelesen werden
+ctx.failed_run_kill: kill konnte nicht ausgeführt werden
+ctx.failed_sigterm: "SIGTERM konnte nicht an PID %{pid} gesendet werden"
+ctx.failed_start_gateway: Gateway-Prozess konnte nicht gestartet werden
+ctx.failed_update_metadata: Zustellungsmetadaten konnten nicht aktualisiert werden
+ctx.missing_platform_id: Verfolgte Antwort hat keine platform_message_id
+ctx.missing_platform_ids: Verfolgte Antwort hat keine Plattform-Nachrichten-IDs
+ctx.no_delivery_metadata: Sitzung hat keine verfolgten Zustellungsmetadaten
+ctx.session_not_found: Sitzung nicht gefunden
+ctx.tool_args_invalid: Werkzeug-Argumente müssen ein gültiges JSON-Objekt sein
+daemon.not_running: "läuft nicht (veraltete PID-Datei, PID %{pid})"
+daemon.running: "läuft (PID %{pid})"
+doctor.channel.disabled: "Kanal '%{id}' deaktiviert"
+doctor.channel.enabled: "Kanal '%{id}' aktiviert (%{count} Konto/Konten)"
+doctor.channel.none: Keine Kanäle konfiguriert
+doctor.config.critical_issues: Diagnose hat kritische Probleme gefunden. Konfiguration korrigieren und erneut ausführen.
+doctor.config.load_failed: "Konfiguration konnte nicht geladen werden: %{error}"
+doctor.config.no_misconfig: Keine Fehlkonfigurationen erkannt
+doctor.config.valid: Konfigurationsschema ist gültig
+doctor.config.validation_failed: "Konfigurationsvalidierung fehlgeschlagen: %{error}"
+doctor.db.error: "sessions.db: %{error}"
+doctor.db.missing: sessions.db existiert noch nicht (wird bei der ersten Sitzung erstellt)
+doctor.db.valid: sessions.db ist lesbar und gültig
+doctor.info.arch: "arch %{arch}"
+doctor.info.exposure: "Erreichbarkeit: %{summary}"
+doctor.info.os: "os %{os}"
+doctor.info.rust: "rust %{version}"
+doctor.info.state_dir: "Statusverzeichnis: %{path}"
+doctor.info.version: "frankclaw %{version}"
+doctor.port.available: "Port %{port} ist verfügbar"
+doctor.port.check_error: "Port %{port} konnte nicht geprüft werden: %{error}"
+doctor.port.in_use: "Port %{port} ist bereits belegt (Gateway läuft möglicherweise bereits oder ein anderer Dienst verwendet ihn)"
+doctor.provider.no_key: "Anbieter '%{id}' (%{api}) — API-Schlüssel nicht verfügbar"
+doctor.provider.none: Keine Modellanbieter konfiguriert
+doctor.provider.ok: "Anbieter '%{id}' (%{api}) — API-Schlüssel vorhanden, %{count} Modell(e) konfiguriert"
+doctor.provider.reachable: "  %{url} ist erreichbar"
+doctor.provider.unreachable: "  %{url} ist nicht erreichbar: %{error}"
+doctor.section.channels: Kanäle
+doctor.section.configuration: Konfiguration
+doctor.section.database: Datenbank
+doctor.section.network: Netzwerk
+doctor.section.providers: Anbieter
+doctor.section.security: Sicherheit
+doctor.section.state_directory: Statusverzeichnis
+doctor.section.system: System
+doctor.security.auth_none: Gateway-Authentifizierung ist deaktiviert
+doctor.security.auth_password: Gateway verwendet Passwort-Authentifizierung
+doctor.security.auth_proxy: Gateway verwendet vertrauenswürdige Proxy-Authentifizierung
+doctor.security.auth_tailscale: Gateway verwendet Tailscale-Authentifizierung
+doctor.security.auth_token: Gateway verwendet Token-Authentifizierung
+doctor.security.encrypt_no_key: Sitzungsverschlüsselung aktiviert, aber FRANKCLAW_MASTER_KEY ist nicht gesetzt
+doctor.security.encrypt_off: Sitzungsverschlüsselung ist deaktiviert
+doctor.security.encrypt_ok: Sitzungsverschlüsselung aktiviert und Master-Schlüssel gesetzt
+doctor.separator: ==================
+doctor.state.exists: Statusverzeichnis existiert
+doctor.state.missing: "Statusverzeichnis '%{path}' existiert noch nicht (wird beim ersten Start erstellt)"
+doctor.summary.critical: "Diagnose hat %{fails} kritische(s) Problem(e) und %{warns} Warnung(en) gefunden."
+doctor.summary.ok: Diagnose bestanden. Alle Prüfungen OK.
+doctor.summary.warnings: "Diagnose bestanden mit %{warns} Warnung(en)."
+doctor.title: FrankClaw Diagnose
+exposure.auth: "Auth:            %{mode}"
+exposure.bind: "Bindung:         %{surface}"
+exposure.not_ready: nicht bereit
+exposure.public: "Öffentlich:      %{status}"
+exposure.ready: bereit
+exposure.remote: "Remote:          %{status}"
+exposure.summary_label: "Zusammenfassung: %{summary}"
+exposure.warnings: "Warnungen:"
+lang.de: Deutsch
+lang.en: Englisch
+lang.es: Spanisch
+lang.fr: Französisch
+lang.it: Italienisch
+lang.ja: Japanisch
+lang.ko: Koreanisch
+lang.pt-BR: Brasilianisches Portugiesisch
+lang.pt-PT: Europäisches Portugiesisch
+perms.dir_ok: "%{label} Berechtigungen %{mode} (nur Eigentümer)"
+perms.dir_warn: "%{label} hat Berechtigungen %{mode} — sollte 0700 sein (nur Eigentümer)"
+perms.file_ok: "%{label} Berechtigungen %{mode} (nur Eigentümer)"
+perms.file_warn: "%{label} hat Berechtigungen %{mode} — sollte 0600 sein (nur Eigentümer)"
+prompt.respond_in: "WICHTIG: Antworte immer auf %{language}. Alle deine Antworten müssen auf %{language} sein."
+setup.api_key_env: "Name der API-Schlüssel-Umgebungsvariable (Standard: %{default})"
+setup.cancelled: Einrichtung abgebrochen.
+setup.channel.discord: Discord
+setup.channel.signal: Signal
+setup.channel.slack: Slack
+setup.channel.telegram: Telegram
+setup.channel.web: Web (Browser-Oberfläche)
+setup.channel.whatsapp: WhatsApp (Cloud API)
+setup.choose: "Wählen Sie [1-%{max}]"
+setup.config_exists: "Konfiguration existiert bereits unter %{path}."
+setup.config_written: "Konfiguration geschrieben nach: %{path}"
+setup.default_marker: (Standard)
+setup.default_model: "Standardmodell (Standard: %{model})"
+setup.encrypt_sessions: Sitzungsverschlüsselung aktivieren?
+setup.encryption_cmd: "  export FRANKCLAW_MASTER_KEY=$(frankclaw gen-token)"
+setup.encryption_on: "Sitzungsverschlüsselung ist AN. Setzen Sie den Master-Schlüssel:"
+setup.export_channel: "  2. Kanal-Zugangsdaten exportieren (siehe Konfiguration für Umgebungsvariablen-Namen)."
+setup.export_key: "  1. API-Schlüssel exportieren:  export %{env}=<Ihr-Schlüssel>"
+setup.gateway_port: "Gateway-Port (Standard: 18789)"
+setup.gateway_token: "Gateway-Authentifizierungstoken: %{token}"
+setup.invalid_choice: Ungültige Auswahl, verwende Standardwert.
+setup.invalid_port: Ungültige Portnummer
+setup.next_steps: "Nächste Schritte:"
+setup.ollama_url: "Ollama Basis-URL (Standard: http://127.0.0.1:11434)"
+setup.overwrite: Überschreiben?
+setup.primary_channel: Primärer Kanal?
+setup.provider.anthropic: Anthropic
+setup.provider.ollama: Ollama (lokal)
+setup.provider.openai: OpenAI
+setup.separator: ====================
+setup.start_gateway: "  4. Gateway starten:           frankclaw gateway"
+setup.title: FrankClaw Einrichtung
+setup.verify_config: "  3. Konfiguration prüfen:      frankclaw doctor"
+setup.which_provider: Welchen KI-Anbieter?
+warn.channel_inline_secret: "Kanal '%{channel}' speichert '%{key}' direkt; bevorzugen Sie '%{env_key}'-Umgebungsreferenzen für Geheimnisse"
+warn.channel_missing_env: "Kanal '%{channel}' referenziert fehlende Umgebungsvariable '%{env}' über %{key}"
+warn.channel_open_groups: "Kanal '%{channel}' akzeptiert Gruppennachrichten ohne Erwähnungs-Gating und ohne Gruppen-Erlaubnisliste"
+warn.encrypt_no_key: Sitzungsverschlüsselung ist aktiviert, aber FRANKCLAW_MASTER_KEY ist nicht gesetzt
+warn.encrypt_off: Sitzungsverschlüsselung ist deaktiviert
+warn.invalid_channel_policy: "Ungültige Sicherheitsrichtlinie für Kanal '%{channel}'"
+warn.missing_env: "Anbieter '%{id}' referenziert fehlende Umgebungsvariable '%{env}'"
+warn.no_channels: Keine Kanäle konfiguriert
+warn.no_providers: Keine Modellanbieter konfiguriert
+warn.state_missing: "Statusverzeichnis '%{path}' existiert noch nicht"
+warn.whatsapp_no_secret: WhatsApp-Kanal hat kein app_secret konfiguriert; eingehende Webhook-Signaturen werden nicht verifiziert

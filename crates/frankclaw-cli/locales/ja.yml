@@ -1,0 +1,265 @@
+_version: 1
+audit.auth.disabled: ゲートウェイ認証が無効です — ネットワークアクセスできる誰でも接続可能です
+audit.auth.disabled_fix: "gateway.auth をトークンまたはパスワードモードに設定してください。実行: frankclaw gen-token"
+audit.auth.password_empty: パスワード認証が設定されていますが、パスワードハッシュが空です
+audit.auth.password_empty_fix: "パスワードハッシュを設定してください: frankclaw hash-password"
+audit.auth.token_short: ゲートウェイトークンが16文字未満です
+audit.auth.token_short_fix: "より強力なトークンを生成してください: frankclaw gen-token"
+audit.channels.invalid_policy: "チャンネル '%{channel}' のセキュリティポリシーが無効です"
+audit.channels.invalid_policy_fix: チャンネルの追加設定で有効なポリシーフィールドを確認してください
+audit.channels.open_groups: "チャンネル '%{channel}' がメンション制限や許可リストなしですべてのグループメッセージに応答します"
+audit.channels.open_groups_fix: "'%{channel}' に extra.require_mention_for_groups=true を設定するか、extra.allowed_groups を設定してください"
+audit.channels.whatsapp_no_secret: WhatsAppチャンネルに app_secret がありません — Webhook署名が検証されません
+audit.channels.whatsapp_no_secret_fix: WhatsAppアカウント設定で app_secret_env を設定してください
+audit.clean: セキュリティ上の問題は見つかりませんでした。設定は適切です。
+audit.encrypt.media_off: メディアファイルの暗号化が無効です
+audit.encrypt.media_off_fix: メディアファイルに機密情報が含まれる場合は security.encrypt_media を true に設定してください
+audit.encrypt.no_master_key: セッション暗号化は有効ですが FRANKCLAW_MASTER_KEY が未設定です — セッションが失敗します
+audit.encrypt.no_master_key_fix: "生成してエクスポート: export FRANKCLAW_MASTER_KEY=$(frankclaw gen-token)"
+audit.encrypt.sessions_off: セッション暗号化が無効です — 会話履歴が平文で保存されます
+audit.encrypt.sessions_off_fix: security.encrypt_sessions を true に設定し、FRANKCLAW_MASTER_KEY をエクスポートしてください
+audit.failed: 監査に不合格 — デプロイ前にCRIT/HIGHの問題を修正してください。
+audit.fix_label: "修正方法: %{remediation}"
+audit.fs.config_world_readable: "設定ファイルのパーミッションが %{mode} です — 他のユーザーが読み取り可能です"
+audit.fs.config_world_readable_fix: "chmod 600 %{path}"
+audit.fs.db_world_readable: "セッションデータベースのパーミッションが %{mode} です — 他のユーザーが読み取り可能です"
+audit.fs.db_world_readable_fix: "chmod 600 %{path}"
+audit.fs.state_world_readable: "ステートディレクトリのパーミッションが %{mode} です — 他のユーザーがアクセス可能です"
+audit.fs.state_world_readable_fix: "chmod 700 %{path}"
+audit.media.scanning_off: ファイルスキャンサービスが設定されていません — ファイルがマルウェアチェックなしで保存されます
+audit.media.scanning_off_fix: VirusTotalスキャンを有効にするには VIRUSTOTAL_API_KEY 環境変数を設定してください
+audit.media.scanning_on: VirusTotalファイルスキャンが有効です — ファイルは保存前にマルウェアスキャンされます
+audit.media.scanning_on_fix: 対応不要です
+audit.network.exposed_no_auth: ゲートウェイが認証なしでネットワークに公開されています
+audit.network.exposed_no_auth_fix: "ループバックのみにバインドするか、認証を設定してください: frankclaw gen-token"
+audit.network.no_tls: ゲートウェイがTLSなしでネットワークに公開されています — 認証情報が平文で送信されます
+audit.network.no_tls_fix: TLSを設定するか、TLS終端付きのリバースプロキシを使用するか、Tailscaleネットワークに制限してください
+audit.network.ssrf_off: SSRF保護が無効です — 送信リクエストがプライベートネットワークに到達可能です
+audit.network.ssrf_off_fix: security.ssrf_protection を true に設定してください
+audit.passed: 監査は警告付きで合格しました。
+audit.secrets.channel_missing_env: "チャンネル '%{channel}' が参照する環境変数 '%{env}' (%{key} 経由) が設定されていません"
+audit.secrets.channel_missing_env_fix: "エクスポートしてください: export %{env}=<value>"
+audit.secrets.inline: "チャンネル '%{channel}' の '%{key}' が設定ファイルに直接記述されています"
+audit.secrets.inline_fix: "環境変数に移行してください: '%{key}' を '%{env_key}' にリネームし、値を環境変数に設定"
+audit.secrets.missing_env: "プロバイダ '%{id}' が参照する環境変数 '%{env}' が設定されていません"
+audit.secrets.missing_env_fix: "APIキーをエクスポートしてください: export %{env}=<your-key>"
+audit.secrets.no_key_ref: "プロバイダ '%{id}' に api_key_ref がありません — APIキーが未設定またはハードコードされている可能性があります"
+audit.secrets.no_key_ref_fix: "models.providers[%{id}].api_key_ref を環境変数名に設定してください"
+audit.secrets.token_inline: ゲートウェイ認証トークンが設定ファイルに直接記述されています
+audit.secrets.token_inline_fix: 設定ファイルのパーミッションを 0600 (所有者のみ) にしてください。FRANKCLAW_AUTH_TOKEN 環境変数の使用も検討してください。
+audit.separator: ========================
+audit.summary: "概要: %{crit} CRIT, %{high} HIGH, %{med} MED, %{low} LOW, %{info} INFO"
+audit.title: FrankClaw セキュリティ監査
+audit.tools.approval_level: "ツール承認レベル: %{level}"
+audit.tools.approval_level_fix: "FRANKCLAW_TOOL_APPROVAL=readonly|mutating|destructive で制御してください"
+audit.tools.bash_allow_all: Bashツールのポリシーがallow-allです — エージェントが任意のシェルコマンドを実行できます
+audit.tools.bash_allow_all_fix: FRANKCLAW_BASH_POLICY を許可するバイナリのカンマ区切りリスト、またはdeny-allに設定してください
+audit.tools.bash_allowlist: "Bashツールの許可リストに %{count} 個のコマンドが許可されています: %{commands}"
+audit.tools.bash_allowlist_fix: 許可リストを確認し、不要なコマンドを削除してください
+audit.tools.bash_deny_all: Bashツールがエージェント用に設定されていますが、ポリシーはdeny-allです (安全なデフォルト)
+audit.tools.bash_deny_all_fix: Bash実行が必要な場合は、FRANKCLAW_BASH_POLICY を許可リストに設定してください
+audit.tools.destructive_approved: 破壊的ツールが承認済みです — エージェントが不可逆な操作を実行できます
+audit.tools.destructive_approved_fix: 破壊的操作が意図的でない限り、FRANKCLAW_TOOL_APPROVAL=mutating または readonly を設定してください
+audit.tools.mutating_approved: 変更ツールが承認済みです — エージェントがクリック、入力、シェルコマンド実行を行えます
+audit.tools.mutating_approved_fix: 変更操作が不要な場合は FRANKCLAW_TOOL_APPROVAL=readonly を設定してください
+audit.tools.no_sandbox: Bashツールにサンドボックスがありません — コマンドがホスト上で直接実行されます
+audit.tools.no_sandbox_fix: OS レベルの分離のために FRANKCLAW_SANDBOX=ai-jail または ai-jail-lockdown を設定してください (ai-jail が必要)
+audit.tools.sandbox_aijail: "Bashツールサンドボックス: ai-jail (bubblewrap + landlock, ネットワーク許可)"
+audit.tools.sandbox_aijail_fix: より厳格な分離には FRANKCLAW_SANDBOX=ai-jail-lockdown を使用してください
+audit.tools.sandbox_lockdown: "Bashツールサンドボックス: ai-jail lockdown (読み取り専用ファイルシステム, ネットワーク不可)"
+audit.tools.sandbox_lockdown_fix: これは最も制限の厳しいサンドボックスモードです
+audit.tools.sandbox_missing: "FRANKCLAW_SANDBOX=%{mode} が設定されていますが、ai-jail バイナリがPATH上に見つかりません"
+audit.tools.sandbox_missing_fix: ai-jail をインストールするか、FRANKCLAW_SANDBOX の設定を解除してください
+browser.invalid_url: "ブラウザツールは有効ですが、FRANKCLAW_BROWSER_DEVTOOLS_URL が無効です: %{error}"
+browser.mutations_blocked: ブラウザ変更ツールは設定されていますがブロックされています — 有効にするには FRANKCLAW_TOOL_APPROVAL=mutating (または FRANKCLAW_ALLOW_BROWSER_MUTATIONS=1) を設定してください
+browser.no_host: ブラウザツールのエンドポイントにホストが指定されていません
+browser.non_loopback: "ブラウザツールが非ループバックホスト '%{host}' を指しています。Chromium DevToolsはローカルのみで使用してください"
+browser.unreachable: "ブラウザツールは有効ですが、%{endpoint} のChromium DevToolsに到達できません。ローカルで起動するか `docker compose up -d chromium` を実行してください"
+cmd.check.auth: "  認証モード: %{mode}"
+cmd.check.channels: "  チャンネル数: %{count}"
+cmd.check.port: "  ゲートウェイポート: %{port}"
+cmd.check.providers: "  プロバイダ数: %{count}"
+cmd.check.valid: 設定は有効です。
+cmd.config_example.unsupported: "未対応のチャンネル例 '%{channel}'; web, telegram, discord, slack, signal, whatsapp, email のいずれかを指定してください"
+cmd.hash_password.prompt: "パスワードを入力してください: "
+cmd.init.created: "設定ファイルを作成しました: %{path}"
+cmd.init.exists: "設定ファイルは既に %{path} に存在します。上書きするには --force を指定してください。"
+cmd.init.next: "次のステップ:"
+cmd.init.step1: "  1. 認証トークンを生成:  frankclaw gen-token"
+cmd.init.step2: "  2. 設定ファイルを編集:  $EDITOR %{path}"
+cmd.init.step3: "  3. ゲートウェイを起動:  frankclaw gateway"
+cmd.message.deleted: "セッション %{key} の最後の返信を削除しました。"
+cmd.message.edited: "セッション %{key} の最後の返信を編集しました。"
+cmd.message.editing_chunked_unsupported: チャンク分割された返信の編集はまだサポートされていません
+cmd.message.model: "モデル:     %{id}"
+cmd.message.no_assistant_turn: セッションに書き換え可能なアシスタントの応答がありません
+cmd.message.session: "セッション: %{key}"
+cmd.onboard.created: "初期設定ファイルを作成しました: %{path}"
+cmd.onboard.exists: "設定ファイルは既に %{path} に存在します。上書きするには --force を指定してください。"
+cmd.onboard.next: "次のステップ:"
+cmd.onboard.step1: "  1. 設定ファイルで参照されているプロバイダの環境変数を設定してください。"
+cmd.onboard.step2: "  2. チャンネル固有の環境変数がある場合は、それらもエクスポートしてください。"
+cmd.onboard.step3: "  3. ローカルで起動: frankclaw gateway --config %{path}"
+cmd.onboard.token: "ゲートウェイトークン: %{token}"
+cmd.onboard.unsupported: "未対応のオンボードチャンネル '%{channel}'; web, telegram, whatsapp, slack, discord, signal, email のいずれかを指定してください"
+cmd.pairing.approved: "送信者 %{sender} を %{channel}/%{account} で承認しました"
+cmd.remote.not_public: ゲートウェイ設定はパブリック公開に対応していません
+cmd.remote.not_remote: ゲートウェイ設定はリモート公開に対応していません
+cmd.sessions.cleared: セッション履歴を消去しました。
+cmd.start.already_running: "ゲートウェイは既に実行中です (PID %{pid})。"
+cmd.start.log: "  ログ: %{path}"
+cmd.start.pid_file: "  PIDファイル: %{path}"
+cmd.start.started: "ゲートウェイを起動しました (PID %{pid})。"
+cmd.start.stop_hint: "停止するには: frankclaw stop"
+cmd.status.agents: "エージェント:"
+cmd.status.browser: "ブラウザ:"
+cmd.status.channels: "チャンネル:"
+cmd.status.daemon: "デーモン:"
+cmd.status.healthy: 正常
+cmd.status.mutations_enabled: 変更操作 有効
+cmd.status.mutations_gated: 変更操作 制限付き
+cmd.status.providers: "プロバイダ:"
+cmd.status.read_only: 読み取り専用
+cmd.status.unhealthy: 異常
+cmd.status.unset: "<未設定>"
+cmd.stop.not_found: 実行中のゲートウェイが見つかりません (PIDファイルなし)。
+cmd.stop.not_running_stale: "ゲートウェイは実行されていません (古いPID %{pid})。"
+cmd.stop.stopped: "ゲートウェイを停止しました (PID %{pid})。"
+cmd.tools.no_activity: ツールの実行履歴が見つかりません。
+ctx.channel_not_configured: "チャンネル '%{channel}' が設定されていません"
+ctx.failed_clone_log: ログファイルハンドルの複製に失敗しました
+ctx.failed_hash_password: パスワードのハッシュ化に失敗しました
+ctx.failed_init_runtime: ランタイムの初期化に失敗しました
+ctx.failed_load_channels: 設定済みチャンネルの読み込みに失敗しました
+ctx.failed_locate_binary: frankclaw バイナリの検索に失敗しました
+ctx.failed_open_log: ログファイルのオープンに失敗しました
+ctx.failed_open_media: メディアストアのオープンに失敗しました
+ctx.failed_open_sessions: セッションストアのオープンに失敗しました
+ctx.failed_read_input: 入力の読み取りに失敗しました
+ctx.failed_read_password: パスワードの読み取りに失敗しました
+ctx.failed_run_kill: killの実行に失敗しました
+ctx.failed_sigterm: "PID %{pid} へのSIGTERM送信に失敗しました"
+ctx.failed_start_gateway: ゲートウェイプロセスの起動に失敗しました
+ctx.failed_update_metadata: 配信メタデータの更新に失敗しました
+ctx.missing_platform_id: 追跡中の返信にplatform_message_idがありません
+ctx.missing_platform_ids: 追跡中の返信にプラットフォームメッセージIDがありません
+ctx.no_delivery_metadata: セッションに追跡対象の配信メタデータがありません
+ctx.session_not_found: セッションが見つかりません
+ctx.tool_args_invalid: ツール引数は有効なJSONオブジェクトである必要があります
+daemon.not_running: "停止中 (古いPIDファイル, PID %{pid})"
+daemon.running: "実行中 (PID %{pid})"
+doctor.channel.disabled: "チャンネル '%{id}' 無効"
+doctor.channel.enabled: "チャンネル '%{id}' 有効 (%{count} アカウント)"
+doctor.channel.none: チャンネルが設定されていません
+doctor.config.critical_issues: 重大な問題が見つかりました。設定を修正して再実行してください。
+doctor.config.load_failed: "設定の読み込みに失敗しました: %{error}"
+doctor.config.no_misconfig: 設定の問題は検出されませんでした
+doctor.config.valid: 設定スキーマは有効です
+doctor.config.validation_failed: "設定の検証に失敗しました: %{error}"
+doctor.db.error: "sessions.db: %{error}"
+doctor.db.missing: sessions.db はまだ存在しません (最初のセッション時に作成されます)
+doctor.db.valid: sessions.db は読み取り可能で有効です
+doctor.info.arch: "アーキテクチャ %{arch}"
+doctor.info.exposure: "公開設定: %{summary}"
+doctor.info.os: "OS %{os}"
+doctor.info.rust: "rust %{version}"
+doctor.info.state_dir: "ステートディレクトリ: %{path}"
+doctor.info.version: "frankclaw %{version}"
+doctor.port.available: "ポート %{port} は使用可能です"
+doctor.port.check_error: "ポート %{port} を確認できませんでした: %{error}"
+doctor.port.in_use: "ポート %{port} は既に使用中です (ゲートウェイが既に実行中か、別のサービスが使用しています)"
+doctor.provider.no_key: "プロバイダ '%{id}' (%{api}) — APIキーが利用できません"
+doctor.provider.none: モデルプロバイダが設定されていません
+doctor.provider.ok: "プロバイダ '%{id}' (%{api}) — APIキーあり、%{count} 個のモデルが設定済み"
+doctor.provider.reachable: "  %{url} に到達可能です"
+doctor.provider.unreachable: "  %{url} に到達できません: %{error}"
+doctor.section.channels: チャンネル
+doctor.section.configuration: 設定
+doctor.section.database: データベース
+doctor.section.network: ネットワーク
+doctor.section.providers: プロバイダ
+doctor.section.security: セキュリティ
+doctor.section.state_directory: ステートディレクトリ
+doctor.section.system: システム
+doctor.security.auth_none: ゲートウェイ認証は無効です
+doctor.security.auth_password: ゲートウェイはパスワード認証を使用しています
+doctor.security.auth_proxy: ゲートウェイは信頼済みプロキシ認証を使用しています
+doctor.security.auth_tailscale: ゲートウェイはTailscale認証を使用しています
+doctor.security.auth_token: ゲートウェイはトークン認証を使用しています
+doctor.security.encrypt_no_key: セッション暗号化は有効ですが、FRANKCLAW_MASTER_KEY が設定されていません
+doctor.security.encrypt_off: セッション暗号化は無効です
+doctor.security.encrypt_ok: セッション暗号化が有効で、マスターキーが設定されています
+doctor.separator: ================
+doctor.state.exists: ステートディレクトリは存在します
+doctor.state.missing: "ステートディレクトリ '%{path}' はまだ存在しません (初回実行時に作成されます)"
+doctor.summary.critical: "%{fails} 件の重大な問題と %{warns} 件の警告が見つかりました。"
+doctor.summary.ok: 診断は合格です。すべてのチェックが正常です。
+doctor.summary.warnings: "%{warns} 件の警告がありますが、診断は合格です。"
+doctor.title: FrankClaw 診断
+exposure.auth: "認証:     %{mode}"
+exposure.bind: "バインド: %{surface}"
+exposure.not_ready: 未準備
+exposure.public: "パブリック: %{status}"
+exposure.ready: 準備完了
+exposure.remote: "リモート: %{status}"
+exposure.summary_label: "概要:     %{summary}"
+exposure.warnings: "警告:"
+lang.de: ドイツ語
+lang.en: 英語
+lang.es: スペイン語
+lang.fr: フランス語
+lang.it: イタリア語
+lang.ja: 日本語
+lang.ko: 韓国語
+lang.pt-BR: ブラジルポルトガル語
+lang.pt-PT: ヨーロッパポルトガル語
+perms.dir_ok: "%{label} のパーミッション %{mode} (所有者のみ)"
+perms.dir_warn: "%{label} のパーミッションが %{mode} です — 0700 (所有者のみ) にしてください"
+perms.file_ok: "%{label} のパーミッション %{mode} (所有者のみ)"
+perms.file_warn: "%{label} のパーミッションが %{mode} です — 0600 (所有者のみ) にしてください"
+prompt.respond_in: "重要: 必ず%{language}で回答してください。すべての返信は%{language}で行ってください。"
+setup.api_key_env: "APIキーの環境変数名 (デフォルト: %{default})"
+setup.cancelled: セットアップを中止しました。
+setup.channel.discord: Discord
+setup.channel.signal: Signal
+setup.channel.slack: Slack
+setup.channel.telegram: Telegram
+setup.channel.web: Web (ブラウザUI)
+setup.channel.whatsapp: WhatsApp (Cloud API)
+setup.choose: "[1-%{max}] から選択してください"
+setup.config_exists: "設定ファイルは既に %{path} に存在します。"
+setup.config_written: "設定ファイルを書き込みました: %{path}"
+setup.default_marker: (デフォルト)
+setup.default_model: "デフォルトモデル (デフォルト: %{model})"
+setup.encrypt_sessions: セッション暗号化を有効にしますか？
+setup.encryption_cmd: "  export FRANKCLAW_MASTER_KEY=$(frankclaw gen-token)"
+setup.encryption_on: "セッション暗号化が有効です。マスターキーを設定してください:"
+setup.export_channel: "  2. チャンネルの認証情報をエクスポートしてください (環境変数名は設定ファイルを参照)。"
+setup.export_key: "  1. APIキーをエクスポート:  export %{env}=<your-key>"
+setup.gateway_port: "ゲートウェイポート (デフォルト: 18789)"
+setup.gateway_token: "ゲートウェイ認証トークン: %{token}"
+setup.invalid_choice: 無効な選択です。デフォルトを使用します。
+setup.invalid_port: 無効なポート番号です
+setup.next_steps: "次のステップ:"
+setup.ollama_url: "Ollama ベースURL (デフォルト: http://127.0.0.1:11434)"
+setup.overwrite: 上書きしますか？
+setup.primary_channel: "メインチャンネルを選択してください:"
+setup.provider.anthropic: Anthropic
+setup.provider.ollama: Ollama (ローカル)
+setup.provider.openai: OpenAI
+setup.separator: ======================
+setup.start_gateway: "  4. ゲートウェイを起動:    frankclaw gateway"
+setup.title: FrankClaw セットアップ
+setup.verify_config: "  3. 設定を確認:            frankclaw doctor"
+setup.which_provider: "使用するAIプロバイダを選択してください:"
+warn.channel_inline_secret: "チャンネル '%{channel}' の '%{key}' が設定ファイルに直接記述されています。シークレットには '%{env_key}' の環境変数参照を推奨します"
+warn.channel_missing_env: "チャンネル '%{channel}' が参照している環境変数 '%{env}' (%{key} 経由) が見つかりません"
+warn.channel_open_groups: "チャンネル '%{channel}' はメンション制限やグループ許可リストなしでグループメッセージを受け付けています"
+warn.encrypt_no_key: セッション暗号化は有効ですが、FRANKCLAW_MASTER_KEY が設定されていません
+warn.encrypt_off: セッション暗号化は無効です
+warn.invalid_channel_policy: "チャンネル '%{channel}' のセキュリティポリシーが無効です"
+warn.missing_env: "プロバイダ '%{id}' が参照している環境変数 '%{env}' が見つかりません"
+warn.no_channels: チャンネルが設定されていません
+warn.no_providers: モデルプロバイダが設定されていません
+warn.state_missing: "ステートディレクトリ '%{path}' はまだ存在しません"
+warn.whatsapp_no_secret: WhatsAppチャンネルに app_secret が設定されていません。受信Webhookの署名が検証されません

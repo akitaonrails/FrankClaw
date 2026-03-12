@@ -5,8 +5,11 @@ use std::path::PathBuf;
 use anyhow::Context;
 use base64::Engine;
 use clap::{Parser, Subcommand};
+use rust_i18n::t;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
+
+rust_i18n::i18n!("locales", fallback = "en");
 
 /// FrankClaw — personal AI assistant gateway.
 ///
@@ -26,6 +29,10 @@ struct Cli {
     /// Log level (trace, debug, info, warn, error).
     #[arg(long, env = "FRANKCLAW_LOG", default_value = "info")]
     log_level: String,
+
+    /// UI language (en, pt-BR, pt-PT, es, fr, de, it, ja, ko).
+    #[arg(long, env = "FRANKCLAW_LANG")]
+    lang: Option<String>,
 
     #[command(subcommand)]
     command: Command,
@@ -270,6 +277,18 @@ async fn main() -> anyhow::Result<()> {
         .with_target(false)
         .init();
 
+    // Initialize locale from --lang flag, FRANKCLAW_LANG, or system LANG.
+    let locale = cli
+        .lang
+        .clone()
+        .or_else(|| {
+            std::env::var("LANG").ok().map(|l| {
+                l.split('.').next().unwrap_or("en").replace('_', "-")
+            })
+        })
+        .unwrap_or_else(|| "en".into());
+    rust_i18n::set_locale(&locale);
+
     let state_dir = cli
         .state_dir
         .unwrap_or_else(|| default_state_dir());
@@ -293,7 +312,7 @@ async fn main() -> anyhow::Result<()> {
                     &db_path,
                     load_master_key_from_env()?.as_ref(),
                 )
-                    .context("failed to open session store")?,
+                    .context(t!("ctx.failed_open_sessions").to_string())?,
             );
             let runtime = std::sync::Arc::new(
                 frankclaw_runtime::Runtime::from_config(
@@ -301,7 +320,7 @@ async fn main() -> anyhow::Result<()> {
                     sessions.clone() as std::sync::Arc<dyn frankclaw_core::session::SessionStore>,
                 )
                 .await
-                .context("failed to initialize runtime")?,
+                .context(t!("ctx.failed_init_runtime").to_string())?,
             );
             let pairing = open_pairing_store(&state_dir)?;
             let cron = open_cron_service(&state_dir)?;
@@ -331,21 +350,21 @@ async fn main() -> anyhow::Result<()> {
         }
 
         Command::HashPassword => {
-            eprint!("Enter password: ");
+            eprint!("{}", t!("cmd.hash_password.prompt"));
             let password = read_password()?;
             let hash = frankclaw_crypto::hash_password(&password)
-                .context("failed to hash password")?;
+                .context(t!("ctx.failed_hash_password").to_string())?;
             println!("{}", hash.as_str());
         }
 
         Command::Check => {
             let config = load_config(cli.config.as_deref(), &state_dir)?;
             config.validate()?;
-            println!("Configuration is valid.");
-            println!("  Gateway port: {}", config.gateway.port);
-            println!("  Auth mode: {:?}", config.gateway.auth);
-            println!("  Channels: {}", config.channels.len());
-            println!("  Providers: {}", config.models.providers.len());
+            println!("{}", t!("cmd.check.valid"));
+            println!("{}", t!("cmd.check.port", port = config.gateway.port));
+            println!("{}", t!("cmd.check.auth", mode = format!("{:?}", config.gateway.auth)));
+            println!("{}", t!("cmd.check.channels", count = config.channels.len()));
+            println!("{}", t!("cmd.check.providers", count = config.models.providers.len()));
         }
 
         Command::Doctor => {
@@ -365,8 +384,7 @@ async fn main() -> anyhow::Result<()> {
         Command::ConfigExample { channel } => {
             let example = supported_channel_example(&channel)
                 .ok_or_else(|| anyhow::anyhow!(
-                    "unsupported channel example '{}'; expected web, telegram, discord, slack, signal, whatsapp, or email",
-                    channel
+                    "{}", t!("cmd.config_example.unsupported", channel = &channel)
                 ))?;
             println!("{example}");
         }
@@ -377,21 +395,21 @@ async fn main() -> anyhow::Result<()> {
             let sessions = open_sessions(&state_dir)?;
             let runtime = build_runtime(&config, sessions).await?;
             let channels = frankclaw_channels::load_from_config(&config)
-                .context("failed to load configured channels")?;
+                .context(t!("ctx.failed_load_channels").to_string())?;
             let exposure = frankclaw_gateway::auth::assess_exposure(&config)?;
 
             print_exposure_report(&exposure);
             println!();
-            println!("Providers:");
+            println!("{}", t!("cmd.status.providers"));
             for provider in runtime.provider_health().await {
                 println!(
                     "  {}  {}",
                     provider.provider_id,
-                    if provider.healthy { "healthy" } else { "unhealthy" }
+                    if provider.healthy { t!("cmd.status.healthy") } else { t!("cmd.status.unhealthy") }
                 );
             }
             println!();
-            println!("Agents:");
+            println!("{}", t!("cmd.status.agents"));
             for (agent_id, agent, skills) in runtime.agent_surface() {
                 println!(
                     "  {}  model={}  tools={}  skills={}",
@@ -400,7 +418,7 @@ async fn main() -> anyhow::Result<()> {
                         .model
                         .clone()
                         .or_else(|| config.models.default_model.clone())
-                        .unwrap_or_else(|| "<unset>".into()),
+                        .unwrap_or_else(|| t!("cmd.status.unset").to_string()),
                     if agent.tools.is_empty() {
                         "-".into()
                     } else {
@@ -419,11 +437,11 @@ async fn main() -> anyhow::Result<()> {
             }
             if let Some(browser_status) = browser_runtime_status(&config, std::env::var("FRANKCLAW_BROWSER_DEVTOOLS_URL").ok().as_deref()) {
                 println!();
-                println!("Browser:");
+                println!("{}",  t!("cmd.status.browser"));
                 println!("  {}", browser_status);
             }
             println!();
-            println!("Channels:");
+            println!("{}", t!("cmd.status.channels"));
             for (channel_id, channel) in channels.channels() {
                 println!("  {}  {:?}", channel_id, channel.health().await);
             }
@@ -432,7 +450,7 @@ async fn main() -> anyhow::Result<()> {
             let pid_path = state_dir.join("frankclaw.pid");
             if let Some(status) = daemon_pid_status(&pid_path) {
                 println!();
-                println!("Daemon:");
+                println!("{}", t!("cmd.status.daemon"));
                 println!("  {status}");
             }
         }
@@ -441,14 +459,14 @@ async fn main() -> anyhow::Result<()> {
             let pid_path = state_dir.join("frankclaw.pid");
             if let Some(existing_pid) = read_pid_file(&pid_path) {
                 if is_process_alive(existing_pid) {
-                    println!("Gateway is already running (PID {existing_pid}).");
+                    println!("{}", t!("cmd.start.already_running", pid = existing_pid));
                     return Ok(());
                 }
                 // Stale PID file — clean up
                 let _ = std::fs::remove_file(&pid_path);
             }
 
-            let executable = std::env::current_exe().context("failed to locate frankclaw binary")?;
+            let executable = std::env::current_exe().context(t!("ctx.failed_locate_binary").to_string())?;
             let mut cmd = std::process::Command::new(&executable);
             cmd.arg("gateway");
             if let Some(config_path) = &cli.config {
@@ -466,26 +484,26 @@ async fn main() -> anyhow::Result<()> {
                 .create(true)
                 .append(true)
                 .open(&log_path)
-                .context("failed to open log file")?;
+                .context(t!("ctx.failed_open_log").to_string())?;
             let log_err = log_file
                 .try_clone()
-                .context("failed to clone log file handle")?;
+                .context(t!("ctx.failed_clone_log").to_string())?;
 
             cmd.stdout(std::process::Stdio::from(log_file));
             cmd.stderr(std::process::Stdio::from(log_err));
             cmd.stdin(std::process::Stdio::null());
 
-            let child = cmd.spawn().context("failed to start gateway process")?;
+            let child = cmd.spawn().context(t!("ctx.failed_start_gateway").to_string())?;
             let pid = child.id();
 
             std::fs::write(&pid_path, pid.to_string())?;
             restrict_file_permissions(&pid_path);
 
-            println!("Gateway started (PID {pid}).");
-            println!("  Log: {}", log_path.display());
-            println!("  PID file: {}", pid_path.display());
+            println!("{}", t!("cmd.start.started", pid = pid));
+            println!("{}", t!("cmd.start.log", path = log_path.display()));
+            println!("{}", t!("cmd.start.pid_file", path = pid_path.display()));
             println!();
-            println!("Stop with: frankclaw stop");
+            println!("{}", t!("cmd.start.stop_hint"));
         }
 
         Command::Stop => {
@@ -493,16 +511,16 @@ async fn main() -> anyhow::Result<()> {
             match read_pid_file(&pid_path) {
                 Some(pid) => {
                     if !is_process_alive(pid) {
-                        println!("Gateway is not running (stale PID {pid}).");
+                        println!("{}", t!("cmd.stop.not_running_stale", pid = pid));
                         let _ = std::fs::remove_file(&pid_path);
                         return Ok(());
                     }
                     stop_process(pid)?;
                     let _ = std::fs::remove_file(&pid_path);
-                    println!("Gateway stopped (PID {pid}).");
+                    println!("{}", t!("cmd.stop.stopped", pid = pid));
                 }
                 None => {
-                    println!("No running gateway found (no PID file).");
+                    println!("{}", t!("cmd.stop.not_found"));
                 }
             }
         }
@@ -526,8 +544,7 @@ async fn main() -> anyhow::Result<()> {
                 .unwrap_or_else(|| state_dir.join("frankclaw.json"));
             if config_path.exists() && !force {
                 anyhow::bail!(
-                    "config already exists at {}. Use --force to overwrite.",
-                    config_path.display()
+                    "{}", t!("cmd.onboard.exists", path = config_path.display())
                 );
             }
 
@@ -538,20 +555,20 @@ async fn main() -> anyhow::Result<()> {
             std::fs::write(&config_path, json)?;
             restrict_file_permissions(&config_path);
 
-            println!("Starter config created at: {}", config_path.display());
-            println!("Gateway token: {gateway_token}");
+            println!("{}", t!("cmd.onboard.created", path = config_path.display()));
+            println!("{}", t!("cmd.onboard.token", token = &gateway_token));
             println!();
-            println!("Next steps:");
-            println!("  1. Fill the provider env vars referenced in the config.");
-            println!("  2. If using channel-specific env vars, export those too.");
-            println!("  3. Start locally: frankclaw gateway --config {}", config_path.display());
+            println!("{}", t!("cmd.onboard.next"));
+            println!("{}", t!("cmd.onboard.step1"));
+            println!("{}", t!("cmd.onboard.step2"));
+            println!("{}", t!("cmd.onboard.step3", path = config_path.display()));
         }
 
         Command::InstallSystemd { config } => {
             let config_path = config
                 .or_else(|| cli.config.clone())
                 .unwrap_or_else(|| state_dir.join("frankclaw.json"));
-            let executable = std::env::current_exe().context("failed to locate frankclaw binary")?;
+            let executable = std::env::current_exe().context(t!("ctx.failed_locate_binary").to_string())?;
             println!(
                 "{}",
                 render_systemd_unit(&executable, &config_path, &state_dir)
@@ -599,25 +616,25 @@ async fn main() -> anyhow::Result<()> {
             let mut entry = sessions
                 .get(&session_key)
                 .await?
-                .context("session not found")?;
+                .context(t!("ctx.session_not_found").to_string())?;
             let last_reply = frankclaw_gateway::delivery::last_reply_from_metadata(&entry.metadata)
-                .context("session has no tracked delivery metadata")?;
+                .context(t!("ctx.no_delivery_metadata").to_string())?;
 
             if last_reply.chunks.len() > 1 {
-                anyhow::bail!("editing chunked replies is not supported yet");
+                anyhow::bail!("{}", t!("cmd.message.editing_chunked_unsupported"));
             }
 
             let platform_message_id = last_reply
                 .platform_message_id
                 .clone()
-                .context("tracked reply is missing platform_message_id")?;
+                .context(t!("ctx.missing_platform_id").to_string())?;
 
             let channels = frankclaw_channels::load_from_config(&config)
-                .context("failed to load configured channels")?;
+                .context(t!("ctx.failed_load_channels").to_string())?;
             let channel = channels
                 .get(&entry.channel)
                 .cloned()
-                .with_context(|| format!("channel '{}' is not configured", entry.channel))?;
+                .with_context(|| t!("ctx.channel_not_configured", channel = entry.channel.as_str()).to_string())?;
 
             channel
                 .edit_message(
@@ -635,13 +652,13 @@ async fn main() -> anyhow::Result<()> {
                 .rewrite_last_assistant_message(&session_key, &text)
                 .await?;
             if !rewritten {
-                anyhow::bail!("session has no assistant turn to rewrite");
+                anyhow::bail!("{}", t!("cmd.message.no_assistant_turn"));
             }
 
             rewrite_last_reply_metadata_for_edit(&mut entry.metadata, &text)?;
             sessions.upsert(&entry).await?;
 
-            println!("Edited last reply for session {}.", session_key);
+            println!("{}", t!("cmd.message.edited", key = session_key.to_string()));
         }
 
         Command::MessageDeleteLast { session } => {
@@ -655,16 +672,16 @@ async fn main() -> anyhow::Result<()> {
             let mut entry = sessions
                 .get(&session_key)
                 .await?
-                .context("session not found")?;
+                .context(t!("ctx.session_not_found").to_string())?;
             let last_reply = frankclaw_gateway::delivery::last_reply_from_metadata(&entry.metadata)
-                .context("session has no tracked delivery metadata")?;
+                .context(t!("ctx.no_delivery_metadata").to_string())?;
 
             let channels = frankclaw_channels::load_from_config(&config)
-                .context("failed to load configured channels")?;
+                .context(t!("ctx.failed_load_channels").to_string())?;
             let channel = channels
                 .get(&entry.channel)
                 .cloned()
-                .with_context(|| format!("channel '{}' is not configured", entry.channel))?;
+                .with_context(|| t!("ctx.channel_not_configured", channel = entry.channel.as_str()).to_string())?;
 
             for platform_message_id in delete_targets_from_last_reply(&last_reply)? {
                 channel
@@ -680,7 +697,7 @@ async fn main() -> anyhow::Result<()> {
             mark_last_reply_metadata_deleted(&mut entry.metadata)?;
             sessions.upsert(&entry).await?;
 
-            println!("Deleted last reply for session {}.", session_key);
+            println!("{}", t!("cmd.message.deleted", key = session_key.to_string()));
         }
 
         Command::ModelsList => {
@@ -723,7 +740,7 @@ async fn main() -> anyhow::Result<()> {
             let runtime = build_runtime(&config, sessions).await?;
             let arguments = match args {
                 Some(raw) => serde_json::from_str(&raw)
-                    .context("tool args must be a valid JSON object")?,
+                    .context(t!("ctx.tool_args_invalid").to_string())?,
                 None => serde_json::json!({}),
             };
 
@@ -748,7 +765,7 @@ async fn main() -> anyhow::Result<()> {
                 .await?;
 
             if activity.is_empty() {
-                println!("No tool activity found.");
+                println!("{}", t!("cmd.tools.no_activity"));
             } else {
                 for entry in activity {
                     println!(
@@ -845,7 +862,7 @@ async fn main() -> anyhow::Result<()> {
             sessions
                 .clear_transcript(&frankclaw_core::types::SessionKey::from_raw(session))
                 .await?;
-            println!("Session transcript cleared.");
+            println!("{}", t!("cmd.sessions.cleared"));
         }
 
         Command::PairingList { channel } => {
@@ -865,10 +882,7 @@ async fn main() -> anyhow::Result<()> {
         } => {
             let store = open_pairing_store(&state_dir)?;
             let approved = store.approve(Some(&channel), account.as_deref(), &code)?;
-            println!(
-                "Approved sender {} on {}/{}",
-                approved.sender_id, approved.channel, approved.account_id
-            );
+            println!("{}", t!("cmd.pairing.approved", sender = approved.sender_id.as_str(), channel = approved.channel.as_str(), account = approved.account_id.as_str()));
         }
 
         Command::RemoteStatus => {
@@ -886,10 +900,10 @@ async fn main() -> anyhow::Result<()> {
 
             if public {
                 if !report.public_ready {
-                    anyhow::bail!("gateway config is not ready for direct public exposure");
+                    anyhow::bail!("{}", t!("cmd.remote.not_public"));
                 }
             } else if !report.remote_ready {
-                anyhow::bail!("gateway config is not ready for remote exposure");
+                anyhow::bail!("{}", t!("cmd.remote.not_remote"));
             }
         }
 
@@ -899,10 +913,7 @@ async fn main() -> anyhow::Result<()> {
                 .unwrap_or_else(|| state_dir.join("frankclaw.json"));
 
             if config_path.exists() && !force {
-                anyhow::bail!(
-                    "config already exists at {}. Use --force to overwrite.",
-                    config_path.display()
-                );
+                anyhow::bail!("{}", t!("cmd.init.exists", path = config_path.display()));
             }
 
             let config = frankclaw_core::config::FrankClawConfig::default();
@@ -912,12 +923,12 @@ async fn main() -> anyhow::Result<()> {
             std::fs::write(&config_path, &json)?;
             restrict_file_permissions(&config_path);
 
-            println!("Config created at: {}", config_path.display());
+            println!("{}", t!("cmd.init.created", path = config_path.display()));
             println!();
-            println!("Next steps:");
-            println!("  1. Generate an auth token:  frankclaw gen-token");
-            println!("  2. Edit the config:         $EDITOR {}", config_path.display());
-            println!("  3. Start the gateway:       frankclaw gateway");
+            println!("{}", t!("cmd.init.next"));
+            println!("{}", t!("cmd.init.step1"));
+            println!("{}", t!("cmd.init.step2", path = config_path.display()));
+            println!("{}", t!("cmd.init.step3"));
         }
     }
 
@@ -954,31 +965,25 @@ fn collect_doctor_warnings(
     let mut warnings = Vec::new();
 
     if config.models.providers.is_empty() {
-        warnings.push("no model providers configured".into());
+        warnings.push(t!("warn.no_providers").to_string());
     }
     if config.channels.is_empty() {
-        warnings.push("no channels configured".into());
+        warnings.push(t!("warn.no_channels").to_string());
     }
     if !config.security.encrypt_sessions {
-        warnings.push("session encryption is disabled".into());
+        warnings.push(t!("warn.encrypt_off").to_string());
     }
     if config.security.encrypt_sessions && load_master_key_from_env()?.is_none() {
-        warnings.push("session encryption is enabled but FRANKCLAW_MASTER_KEY is not set".into());
+        warnings.push(t!("warn.encrypt_no_key").to_string());
     }
     if !state_dir.exists() {
-        warnings.push(format!(
-            "state directory '{}' does not exist yet",
-            state_dir.display()
-        ));
+        warnings.push(t!("warn.state_missing", path = state_dir.display()).to_string());
     }
 
     for provider in &config.models.providers {
         if let Some(env_name) = provider.api_key_ref.as_deref() {
             if std::env::var(env_name).ok().filter(|value| !value.trim().is_empty()).is_none() {
-                warnings.push(format!(
-                    "provider '{}' references missing environment variable '{}'",
-                    provider.id, env_name
-                ));
+                warnings.push(t!("warn.missing_env", id = provider.id.as_str(), env = env_name).to_string());
             }
         }
     }
@@ -986,13 +991,10 @@ fn collect_doctor_warnings(
     for (channel_id, channel) in &config.channels {
         let policy = channel
             .security_policy()
-            .with_context(|| format!("invalid security policy for channel '{}'", channel_id))?;
+            .with_context(|| t!("warn.invalid_channel_policy", channel = channel_id.as_str()).to_string())?;
 
         if group_surface_needs_guard(channel_id.as_str()) && !policy.require_mention_for_groups && policy.allowed_groups.is_none() {
-            warnings.push(format!(
-                "channel '{}' accepts group messages without mention gating and without a groups allowlist",
-                channel_id
-            ));
+            warnings.push(t!("warn.channel_open_groups", channel = channel_id.as_str()).to_string());
         }
 
         for account in &channel.accounts {
@@ -1008,10 +1010,7 @@ fn collect_doctor_warnings(
             ] {
                 if let Some(env_name) = account.get(key).and_then(|value| value.as_str()) {
                     if std::env::var(env_name).ok().filter(|value| !value.trim().is_empty()).is_none() {
-                        warnings.push(format!(
-                            "channel '{}' references missing environment variable '{}' via {}",
-                            channel_id, env_name, key
-                        ));
+                        warnings.push(t!("warn.channel_missing_env", channel = channel_id.as_str(), env = env_name, key = key).to_string());
                     }
                 }
             }
@@ -1031,10 +1030,7 @@ fn collect_doctor_warnings(
                     .filter(|value| !value.is_empty())
                     .is_some()
                 {
-                    warnings.push(format!(
-                        "channel '{}' stores '{}' inline; prefer '{}' environment references for secrets",
-                        channel_id, inline_key, env_key
-                    ));
+                    warnings.push(t!("warn.channel_inline_secret", channel = channel_id.as_str(), key = inline_key, env_key = env_key).to_string());
                 }
             }
 
@@ -1042,10 +1038,7 @@ fn collect_doctor_warnings(
                 && account.get("app_secret").and_then(|value| value.as_str()).map(str::trim).filter(|value| !value.is_empty()).is_none()
                 && account.get("app_secret_env").and_then(|value| value.as_str()).map(str::trim).filter(|value| !value.is_empty()).is_none()
             {
-                warnings.push(
-                    "whatsapp channel has no app_secret configured; inbound webhook signatures will not be verified"
-                        .into(),
-                );
+                warnings.push(t!("warn.whatsapp_no_secret").to_string());
             }
         }
     }
@@ -1103,26 +1096,18 @@ fn collect_browser_tool_warnings_with_policy(
     let parsed = match url::Url::parse(endpoint) {
         Ok(parsed) => parsed,
         Err(err) => {
-            return vec![format!(
-                "browser tools are enabled but FRANKCLAW_BROWSER_DEVTOOLS_URL is invalid: {}",
-                err
-            )];
+            return vec![t!("browser.invalid_url", error = err.to_string()).to_string()];
         }
     };
 
     let mut warnings = Vec::new();
     if has_mutating_tools && !tool_policy.approval_level.approves(frankclaw_core::model::ToolRiskLevel::Mutating) {
-        warnings.push(
-            "browser mutation tools are configured but blocked — set FRANKCLAW_TOOL_APPROVAL=mutating (or FRANKCLAW_ALLOW_BROWSER_MUTATIONS=1) to enable".into(),
-        );
+        warnings.push(t!("browser.mutations_blocked").to_string());
     }
     match parsed.host_str() {
         Some("127.0.0.1") | Some("localhost") => {}
-        Some(other) => warnings.push(format!(
-            "browser tools are pointed at non-loopback host '{}'; keep Chromium DevTools local-only",
-            other
-        )),
-        None => warnings.push("browser tools endpoint has no host".into()),
+        Some(other) => warnings.push(t!("browser.non_loopback", host = other).to_string()),
+        None => warnings.push(t!("browser.no_host").to_string()),
     }
 
     let port = parsed.port_or_known_default().unwrap_or(9222);
@@ -1136,10 +1121,7 @@ fn collect_browser_tool_warnings_with_policy(
         std::time::Duration::from_millis(250),
     ) {
         Ok(_) => {}
-        Err(_) => warnings.push(format!(
-            "browser tools are enabled but Chromium DevTools is unreachable at {}; start it locally or run `docker compose up -d chromium`",
-            endpoint
-        )),
+        Err(_) => warnings.push(t!("browser.unreachable", endpoint = endpoint).to_string()),
     }
 
     warnings
@@ -1178,12 +1160,12 @@ fn browser_runtime_status_with_policy(
                 .any(|tool| frankclaw_tools::tool_risk_level(tool) >= frankclaw_core::model::ToolRiskLevel::Mutating);
             let mutation_state = if has_mutating {
                 if policy.approval_level.approves(frankclaw_core::model::ToolRiskLevel::Mutating) {
-                    "mutations enabled"
+                    t!("cmd.status.mutations_enabled").to_string()
                 } else {
-                    "mutations gated"
+                    t!("cmd.status.mutations_gated").to_string()
                 }
             } else {
-                "read-only"
+                t!("cmd.status.read_only").to_string()
             };
             Some(format!(
                 "{} at {}",
@@ -1202,7 +1184,7 @@ fn read_password() -> anyhow::Result<secrecy::SecretString> {
     let mut input = String::new();
     std::io::stdin()
         .read_line(&mut input)
-        .context("failed to read password")?;
+        .context(t!("ctx.failed_read_password").to_string())?;
     Ok(secrecy::SecretString::from(input.trim().to_string()))
 }
 
@@ -1294,8 +1276,7 @@ fn build_onboard_config(
             extra: serde_json::json!({}),
         },
         other => anyhow::bail!(
-            "unsupported onboard channel '{}'; expected web, telegram, whatsapp, slack, discord, signal, or email",
-            other
+            "{}", t!("cmd.onboard.unsupported", channel = other)
         ),
     };
     config.channels.insert(ChannelId::new(channel), channel_config);
@@ -1334,10 +1315,10 @@ fn rewrite_last_reply_metadata_for_edit(
     new_text: &str,
 ) -> anyhow::Result<frankclaw_gateway::delivery::StoredReplyMetadata> {
     let mut last_reply = frankclaw_gateway::delivery::last_reply_from_metadata(metadata)
-        .context("session has no tracked delivery metadata")?;
+        .context(t!("ctx.no_delivery_metadata").to_string())?;
 
     if last_reply.chunks.len() > 1 {
-        anyhow::bail!("editing chunked replies is not supported yet");
+        anyhow::bail!("{}", t!("cmd.message.editing_chunked_unsupported"));
     }
 
     last_reply.content = new_text.to_string();
@@ -1346,7 +1327,7 @@ fn rewrite_last_reply_metadata_for_edit(
     }
 
     frankclaw_gateway::delivery::set_last_reply_in_metadata(metadata, &last_reply)
-        .context("failed to update delivery metadata")?;
+        .context(t!("ctx.failed_update_metadata").to_string())?;
     Ok(last_reply)
 }
 
@@ -1368,7 +1349,7 @@ fn delete_targets_from_last_reply(
     };
 
     if targets.is_empty() {
-        anyhow::bail!("tracked reply is missing platform message ids");
+        anyhow::bail!("{}", t!("ctx.missing_platform_ids"));
     }
 
     Ok(targets)
@@ -1378,7 +1359,7 @@ fn mark_last_reply_metadata_deleted(
     metadata: &mut serde_json::Value,
 ) -> anyhow::Result<frankclaw_gateway::delivery::StoredReplyMetadata> {
     let mut last_reply = frankclaw_gateway::delivery::last_reply_from_metadata(metadata)
-        .context("session has no tracked delivery metadata")?;
+        .context(t!("ctx.no_delivery_metadata").to_string())?;
 
     last_reply.status = "deleted".into();
     last_reply.platform_message_id = None;
@@ -1388,7 +1369,7 @@ fn mark_last_reply_metadata_deleted(
     }
 
     frankclaw_gateway::delivery::set_last_reply_in_metadata(metadata, &last_reply)
-        .context("failed to update delivery metadata")?;
+        .context(t!("ctx.failed_update_metadata").to_string())?;
     Ok(last_reply)
 }
 
@@ -1402,14 +1383,14 @@ fn display_skill_capability(
 }
 
 fn print_exposure_report(report: &frankclaw_gateway::auth::ExposureReport) {
-    println!("Summary: {}", report.summary);
-    println!("Auth:    {}", report.auth_mode);
-    println!("Bind:    {}", display_exposure_surface(&report.surface));
-    println!("Remote:  {}", if report.remote_ready { "ready" } else { "not ready" });
-    println!("Public:  {}", if report.public_ready { "ready" } else { "not ready" });
+    println!("{}", t!("exposure.summary_label", summary = &*report.summary));
+    println!("{}", t!("exposure.auth", mode = &*report.auth_mode));
+    println!("{}", t!("exposure.bind", surface = display_exposure_surface(&report.surface)));
+    println!("{}", t!("exposure.remote", status = if report.remote_ready { t!("exposure.ready") } else { t!("exposure.not_ready") }));
+    println!("{}", t!("exposure.public", status = if report.public_ready { t!("exposure.ready") } else { t!("exposure.not_ready") }));
     if !report.warnings.is_empty() {
         println!();
-        println!("Warnings:");
+        println!("{}", t!("exposure.warnings"));
         for warning in &report.warnings {
             println!("  - {warning}");
         }
@@ -1440,7 +1421,7 @@ fn open_sessions(
             &db_path,
             load_master_key_from_env()?.as_ref(),
         )
-            .context("failed to open session store")?,
+            .context(t!("ctx.failed_open_sessions").to_string())?,
     ))
 }
 
@@ -1529,9 +1510,9 @@ fn stop_process(pid: u32) -> anyhow::Result<()> {
 fn daemon_pid_status(pid_path: &std::path::Path) -> Option<String> {
     let pid = read_pid_file(pid_path)?;
     if is_process_alive(pid) {
-        Some(format!("running (PID {pid})"))
+        Some(t!("daemon.running", pid = pid).to_string())
     } else {
-        Some(format!("not running (stale PID file, PID {pid})"))
+        Some(t!("daemon.not_running", pid = pid).to_string())
     }
 }
 
@@ -1544,24 +1525,28 @@ fn prompt_line(question: &str) -> anyhow::Result<String> {
     let mut input = String::new();
     std::io::stdin()
         .read_line(&mut input)
-        .context("failed to read input")?;
+        .context(t!("ctx.failed_read_input").to_string())?;
     Ok(input.trim().to_string())
 }
 
 fn prompt_choice(question: &str, options: &[&str], default: usize) -> anyhow::Result<usize> {
     eprintln!("{question}");
     for (i, option) in options.iter().enumerate() {
-        let marker = if i == default { " (default)" } else { "" };
+        let marker = if i == default {
+            format!(" {}", t!("setup.default_marker"))
+        } else {
+            String::new()
+        };
         eprintln!("  {}: {}{}", i + 1, option, marker);
     }
-    let input = prompt_line(&format!("Choose [1-{}]", options.len()))?;
+    let input = prompt_line(&t!("setup.choose", max = options.len()).to_string())?;
     if input.is_empty() {
         return Ok(default);
     }
     match input.parse::<usize>() {
         Ok(n) if n >= 1 && n <= options.len() => Ok(n - 1),
         _ => {
-            eprintln!("Invalid choice, using default.");
+            eprintln!("{}", t!("setup.invalid_choice"));
             Ok(default)
         }
     }
@@ -1589,17 +1574,14 @@ fn run_setup(
         .map(PathBuf::from)
         .unwrap_or_else(|| state_dir.join("frankclaw.json"));
 
-    println!("FrankClaw Setup");
-    println!("===============");
+    println!("{}", t!("setup.title"));
+    println!("{}", t!("setup.separator"));
     println!();
 
     if config_path.exists() && !force {
-        eprintln!(
-            "Config already exists at {}.",
-            config_path.display()
-        );
-        if !prompt_yes_no("Overwrite?", false)? {
-            println!("Setup cancelled.");
+        eprintln!("{}", t!("setup.config_exists", path = config_path.display()));
+        if !prompt_yes_no(&t!("setup.overwrite").to_string(), false)? {
+            println!("{}", t!("setup.cancelled"));
             return Ok(());
         }
     }
@@ -1607,8 +1589,12 @@ fn run_setup(
     // --- Provider selection ---
     println!();
     let provider_idx = prompt_choice(
-        "Which AI provider?",
-        &["OpenAI", "Anthropic", "Ollama (local)"],
+        &t!("setup.which_provider").to_string(),
+        &[
+            &t!("setup.provider.openai").to_string(),
+            &t!("setup.provider.anthropic").to_string(),
+            &t!("setup.provider.ollama").to_string(),
+        ],
         0,
     )?;
 
@@ -1627,9 +1613,7 @@ fn run_setup(
 
     let api_key_ref = if needs_key {
         println!();
-        let env_name = prompt_line(&format!(
-            "API key env var name (default: {default_env})"
-        ))?;
+        let env_name = prompt_line(&t!("setup.api_key_env", default = default_env).to_string())?;
         let env_name = if env_name.is_empty() {
             default_env.to_string()
         } else {
@@ -1642,7 +1626,7 @@ fn run_setup(
 
     let base_url = if provider_api == "ollama" {
         println!();
-        let url = prompt_line("Ollama base URL (default: http://127.0.0.1:11434)")?;
+        let url = prompt_line(&t!("setup.ollama_url").to_string())?;
         Some(if url.is_empty() {
             "http://127.0.0.1:11434".to_string()
         } else {
@@ -1653,7 +1637,7 @@ fn run_setup(
     };
 
     println!();
-    let model_input = prompt_line(&format!("Default model (default: {default_model})"))?;
+    let model_input = prompt_line(&t!("setup.default_model", model = default_model).to_string())?;
     let model = if model_input.is_empty() {
         default_model.to_string()
     } else {
@@ -1663,14 +1647,14 @@ fn run_setup(
     // --- Channel selection ---
     println!();
     let channel_idx = prompt_choice(
-        "Primary channel?",
+        &t!("setup.primary_channel").to_string(),
         &[
-            "Web (browser UI)",
-            "Telegram",
-            "Discord",
-            "Slack",
-            "WhatsApp (Cloud API)",
-            "Signal",
+            &t!("setup.channel.web").to_string(),
+            &t!("setup.channel.telegram").to_string(),
+            &t!("setup.channel.discord").to_string(),
+            &t!("setup.channel.slack").to_string(),
+            &t!("setup.channel.whatsapp").to_string(),
+            &t!("setup.channel.signal").to_string(),
         ],
         0,
     )?;
@@ -1744,18 +1728,18 @@ fn run_setup(
 
     // --- Gateway port ---
     println!();
-    let port_input = prompt_line("Gateway port (default: 18789)")?;
+    let port_input = prompt_line(&t!("setup.gateway_port").to_string())?;
     let port: u16 = if port_input.is_empty() {
         18789
     } else {
         port_input
             .parse()
-            .context("invalid port number")?
+            .context(t!("setup.invalid_port").to_string())?
     };
 
     // --- Session encryption ---
     println!();
-    let encrypt = prompt_yes_no("Enable session encryption?", true)?;
+    let encrypt = prompt_yes_no(&t!("setup.encrypt_sessions").to_string(), true)?;
 
     // --- Build config ---
     let gateway_token = frankclaw_crypto::generate_token();
@@ -1783,29 +1767,27 @@ fn run_setup(
     restrict_file_permissions(&config_path);
 
     println!();
-    println!("Configuration written to: {}", config_path.display());
-    println!("Gateway auth token: {gateway_token}");
+    println!("{}", t!("setup.config_written", path = config_path.display()));
+    println!("{}", t!("setup.gateway_token", token = gateway_token));
     if encrypt {
         println!();
-        println!("Session encryption is ON. Set the master key:");
-        println!("  export FRANKCLAW_MASTER_KEY=$(frankclaw gen-token)");
+        println!("{}", t!("setup.encryption_on"));
+        println!("{}", t!("setup.encryption_cmd"));
     }
     println!();
-    println!("Next steps:");
+    println!("{}", t!("setup.next_steps"));
     if needs_key {
-        println!(
-            "  1. Export your API key:  export {}=<your-key>",
-            config.models.providers[0]
-                .api_key_ref
-                .as_deref()
-                .unwrap_or("API_KEY")
-        );
+        let env = config.models.providers[0]
+            .api_key_ref
+            .as_deref()
+            .unwrap_or("API_KEY");
+        println!("{}", t!("setup.export_key", env = env));
     }
     if channel_id != "web" {
-        println!("  2. Export channel credentials (see config for env var names).");
+        println!("{}", t!("setup.export_channel"));
     }
-    println!("  3. Verify config:        frankclaw doctor");
-    println!("  4. Start the gateway:    frankclaw gateway");
+    println!("{}", t!("setup.verify_config"));
+    println!("{}", t!("setup.start_gateway"));
 
     Ok(())
 }
@@ -1854,40 +1836,40 @@ async fn run_doctor(
     config_path: Option<&std::path::Path>,
     state_dir: &std::path::Path,
 ) -> anyhow::Result<()> {
-    println!("FrankClaw Doctor");
-    println!("================");
+    println!("{}", t!("doctor.title"));
+    println!("{}", t!("doctor.separator"));
 
     // --- System info ---
     let mut system_checks = vec![
-        CheckResult::Info(format!("frankclaw {}", env!("CARGO_PKG_VERSION"))),
-        CheckResult::Info(format!("rust {}", rustc_version())),
-        CheckResult::Info(format!("os {}", std::env::consts::OS)),
-        CheckResult::Info(format!("arch {}", std::env::consts::ARCH)),
+        CheckResult::Info(t!("doctor.info.version", version = env!("CARGO_PKG_VERSION")).to_string()),
+        CheckResult::Info(t!("doctor.info.rust", version = rustc_version()).to_string()),
+        CheckResult::Info(t!("doctor.info.os", os = std::env::consts::OS).to_string()),
+        CheckResult::Info(t!("doctor.info.arch", arch = std::env::consts::ARCH).to_string()),
     ];
     let state_display = state_dir.display().to_string();
-    system_checks.push(CheckResult::Info(format!("state dir: {state_display}")));
-    print_section("System", &system_checks);
+    system_checks.push(CheckResult::Info(t!("doctor.info.state_dir", path = state_display).to_string()));
+    print_section(&t!("doctor.section.system").to_string(), &system_checks);
 
     // --- Configuration ---
     let config = match load_config(config_path, state_dir) {
         Ok(cfg) => cfg,
         Err(err) => {
             print_section(
-                "Configuration",
-                &[CheckResult::Fail(format!("failed to load config: {err}"))],
+                &t!("doctor.section.configuration").to_string(),
+                &[CheckResult::Fail(t!("doctor.config.load_failed", error = err).to_string())],
             );
-            println!("\nDoctor found critical issues. Fix config and rerun.");
+            println!("\n{}", t!("doctor.config.critical_issues"));
             return Ok(());
         }
     };
 
     let mut config_checks = Vec::new();
     match config.validate() {
-        Ok(()) => config_checks.push(CheckResult::Pass("config schema is valid".into())),
+        Ok(()) => config_checks.push(CheckResult::Pass(t!("doctor.config.valid").to_string())),
         Err(err) => {
-            config_checks.push(CheckResult::Fail(format!("config validation failed: {err}")));
-            print_section("Configuration", &config_checks);
-            println!("\nDoctor found critical issues. Fix config and rerun.");
+            config_checks.push(CheckResult::Fail(t!("doctor.config.validation_failed", error = err).to_string()));
+            print_section(&t!("doctor.section.configuration").to_string(), &config_checks);
+            println!("\n{}", t!("doctor.config.critical_issues"));
             return Ok(());
         }
     }
@@ -1903,64 +1885,63 @@ async fn run_doctor(
         config_checks.push(CheckResult::Warn(warning.clone()));
     }
     if warnings.is_empty() {
-        config_checks.push(CheckResult::Pass("no misconfigurations detected".into()));
+        config_checks.push(CheckResult::Pass(t!("doctor.config.no_misconfig").to_string()));
     }
 
     let exposure = frankclaw_gateway::auth::assess_exposure(&config)?;
-    config_checks.push(CheckResult::Info(format!("exposure: {}", exposure.summary)));
+    config_checks.push(CheckResult::Info(t!("doctor.info.exposure", summary = exposure.summary).to_string()));
     for warning in &exposure.warnings {
         config_checks.push(CheckResult::Warn(warning.clone()));
     }
 
-    print_section("Configuration", &config_checks);
+    print_section(&t!("doctor.section.configuration").to_string(), &config_checks);
 
     // --- State directory ---
     let mut state_checks = Vec::new();
     if state_dir.exists() {
-        state_checks.push(CheckResult::Pass("state directory exists".into()));
+        state_checks.push(CheckResult::Pass(t!("doctor.state.exists").to_string()));
         state_checks.extend(check_dir_permissions(state_dir, "state directory"));
     } else {
-        state_checks.push(CheckResult::Warn(format!(
-            "state directory '{}' does not exist yet (will be created on first run)",
-            state_dir.display()
-        )));
+        state_checks.push(CheckResult::Warn(
+            t!("doctor.state.missing", path = state_dir.display()).to_string(),
+        ));
     }
-    print_section("State Directory", &state_checks);
+    print_section(&t!("doctor.section.state_directory").to_string(), &state_checks);
 
     // --- Database ---
     let mut db_checks = Vec::new();
     let db_path = state_dir.join("sessions.db");
     if db_path.exists() {
         match check_sqlite_health(&db_path) {
-            Ok(()) => db_checks.push(CheckResult::Pass("sessions.db is readable and valid".into())),
-            Err(err) => db_checks.push(CheckResult::Fail(format!("sessions.db: {err}"))),
+            Ok(()) => db_checks.push(CheckResult::Pass(t!("doctor.db.valid").to_string())),
+            Err(err) => db_checks.push(CheckResult::Fail(t!("doctor.db.error", error = err).to_string())),
         }
         db_checks.extend(check_file_permissions(&db_path, "sessions.db"));
     } else {
         db_checks.push(CheckResult::Info(
-            "sessions.db does not exist yet (created on first session)".into(),
+            t!("doctor.db.missing").to_string(),
         ));
     }
-    print_section("Database", &db_checks);
+    print_section(&t!("doctor.section.database").to_string(), &db_checks);
 
     // --- Port availability ---
     let mut port_checks = Vec::new();
     let port = config.gateway.port;
     match check_port_available(port) {
-        Ok(true) => port_checks.push(CheckResult::Pass(format!("port {port} is available"))),
-        Ok(false) => port_checks.push(CheckResult::Warn(format!(
-            "port {port} is already in use (gateway may already be running, or another service is using it)"
-        ))),
-        Err(err) => port_checks.push(CheckResult::Warn(format!(
-            "could not check port {port}: {err}"
-        ))),
+        Ok(true) => port_checks.push(CheckResult::Pass(t!("doctor.port.available", port = port).to_string())),
+        Ok(false) => port_checks.push(CheckResult::Warn(
+            t!("doctor.port.in_use", port = port).to_string(),
+        )),
+        Err(err) => port_checks.push(CheckResult::Warn(
+            t!("doctor.port.check_error", port = port, error = err).to_string(),
+        )),
     }
-    print_section("Network", &port_checks);
+    print_section(&t!("doctor.section.network").to_string(), &port_checks);
 
     // --- Providers ---
     let mut provider_checks = Vec::new();
     if config.models.providers.is_empty() {
-        provider_checks.push(CheckResult::Warn("no model providers configured".into()));
+        provider_checks.push(CheckResult::Warn(t!("doctor.provider.none").to_string()));
     }
     for provider in &config.models.providers {
         let has_key = provider
@@ -1971,19 +1952,15 @@ async fn run_doctor(
             .is_some();
 
         if !has_key {
-            provider_checks.push(CheckResult::Warn(format!(
-                "provider '{}' ({}) — API key not available",
-                provider.id, provider.api
-            )));
+            provider_checks.push(CheckResult::Warn(
+                t!("doctor.provider.no_key", id = provider.id, api = provider.api).to_string(),
+            ));
             continue;
         }
 
-        provider_checks.push(CheckResult::Pass(format!(
-            "provider '{}' ({}) — API key present, {} model(s) configured",
-            provider.id,
-            provider.api,
-            provider.models.len()
-        )));
+        provider_checks.push(CheckResult::Pass(
+            t!("doctor.provider.ok", id = provider.id, api = provider.api, count = provider.models.len()).to_string(),
+        ));
 
         // Connectivity check for providers with a base URL
         let base_url = provider.base_url.as_deref().unwrap_or_else(|| {
@@ -1995,72 +1972,65 @@ async fn run_doctor(
         });
         if !base_url.is_empty() {
             match check_provider_reachable(base_url).await {
-                Ok(()) => provider_checks.push(CheckResult::Pass(format!(
-                    "  {} is reachable",
-                    base_url
-                ))),
-                Err(err) => provider_checks.push(CheckResult::Warn(format!(
-                    "  {} is unreachable: {}",
-                    base_url, err
-                ))),
+                Ok(()) => provider_checks.push(CheckResult::Pass(
+                    t!("doctor.provider.reachable", url = base_url).to_string(),
+                )),
+                Err(err) => provider_checks.push(CheckResult::Warn(
+                    t!("doctor.provider.unreachable", url = base_url, error = err).to_string(),
+                )),
             }
         }
     }
-    print_section("Providers", &provider_checks);
+    print_section(&t!("doctor.section.providers").to_string(), &provider_checks);
 
     // --- Channels ---
     let mut channel_checks = Vec::new();
     if config.channels.is_empty() {
-        channel_checks.push(CheckResult::Warn("no channels configured".into()));
+        channel_checks.push(CheckResult::Warn(t!("doctor.channel.none").to_string()));
     }
     for (channel_id, channel) in &config.channels {
         if channel.enabled {
-            channel_checks.push(CheckResult::Pass(format!(
-                "channel '{}' enabled ({} account(s))",
-                channel_id,
-                channel.accounts.len()
-            )));
+            channel_checks.push(CheckResult::Pass(
+                t!("doctor.channel.enabled", id = channel_id, count = channel.accounts.len()).to_string(),
+            ));
         } else {
-            channel_checks.push(CheckResult::Info(format!(
-                "channel '{}' disabled",
-                channel_id
-            )));
+            channel_checks.push(CheckResult::Info(
+                t!("doctor.channel.disabled", id = channel_id).to_string(),
+            ));
         }
     }
-    print_section("Channels", &channel_checks);
+    print_section(&t!("doctor.section.channels").to_string(), &channel_checks);
 
     // --- Security ---
     let mut security_checks = Vec::new();
     if config.security.encrypt_sessions {
         if load_master_key_from_env()?.is_some() {
-            security_checks.push(CheckResult::Pass("session encryption enabled and master key set".into()));
+            security_checks.push(CheckResult::Pass(t!("doctor.security.encrypt_ok").to_string()));
         } else {
-            security_checks.push(CheckResult::Warn(
-                "session encryption enabled but FRANKCLAW_MASTER_KEY is not set".into(),
-            ));
+            security_checks.push(CheckResult::Warn(t!("doctor.security.encrypt_no_key").to_string()));
         }
     } else {
-        security_checks.push(CheckResult::Warn("session encryption is disabled".into()));
+        security_checks.push(CheckResult::Warn(t!("doctor.security.encrypt_off").to_string()));
     }
 
     match &config.gateway.auth {
         frankclaw_core::auth::AuthMode::None => {
-            security_checks.push(CheckResult::Warn("gateway auth is disabled".into()));
+            security_checks.push(CheckResult::Warn(t!("doctor.security.auth_none").to_string()));
         }
         frankclaw_core::auth::AuthMode::Token { .. } => {
-            security_checks.push(CheckResult::Pass("gateway uses token authentication".into()));
+            security_checks.push(CheckResult::Pass(t!("doctor.security.auth_token").to_string()));
         }
         frankclaw_core::auth::AuthMode::Password { .. } => {
-            security_checks.push(CheckResult::Pass("gateway uses password authentication".into()));
+            security_checks.push(CheckResult::Pass(t!("doctor.security.auth_password").to_string()));
         }
         frankclaw_core::auth::AuthMode::TrustedProxy { .. } => {
-            security_checks.push(CheckResult::Pass("gateway uses trusted proxy authentication".into()));
+            security_checks.push(CheckResult::Pass(t!("doctor.security.auth_proxy").to_string()));
         }
         frankclaw_core::auth::AuthMode::Tailscale => {
-            security_checks.push(CheckResult::Pass("gateway uses Tailscale authentication".into()));
+            security_checks.push(CheckResult::Pass(t!("doctor.security.auth_tailscale").to_string()));
         }
     }
-    print_section("Security", &security_checks);
+    print_section(&t!("doctor.section.security").to_string(), &security_checks);
 
     // --- Summary ---
     let all_checks: Vec<&CheckResult> = system_checks
@@ -2079,11 +2049,11 @@ async fn run_doctor(
 
     println!();
     if fail_count > 0 {
-        println!("Doctor found {fail_count} critical issue(s) and {warn_count} warning(s).");
+        println!("{}", t!("doctor.summary.critical", fails = fail_count, warns = warn_count));
     } else if warn_count > 0 {
-        println!("Doctor passed with {warn_count} warning(s).");
+        println!("{}", t!("doctor.summary.warnings", warns = warn_count));
     } else {
-        println!("Doctor passed. All checks OK.");
+        println!("{}", t!("doctor.summary.ok"));
     }
 
     Ok(())
@@ -2106,13 +2076,13 @@ fn check_file_permissions(path: &std::path::Path, label: &str) -> Vec<CheckResul
     if let Ok(metadata) = std::fs::metadata(path) {
         let mode = metadata.permissions().mode() & 0o777;
         if mode & 0o077 != 0 {
-            results.push(CheckResult::Warn(format!(
-                "{label} has permissions {mode:04o} — should be 0600 (owner-only)",
-            )));
+            results.push(CheckResult::Warn(
+                t!("perms.file_warn", label = label, mode = format!("{mode:04o}")).to_string(),
+            ));
         } else {
-            results.push(CheckResult::Pass(format!(
-                "{label} permissions {mode:04o} (owner-only)",
-            )));
+            results.push(CheckResult::Pass(
+                t!("perms.file_ok", label = label, mode = format!("{mode:04o}")).to_string(),
+            ));
         }
     }
     results
@@ -2130,13 +2100,13 @@ fn check_dir_permissions(path: &std::path::Path, label: &str) -> Vec<CheckResult
     if let Ok(metadata) = std::fs::metadata(path) {
         let mode = metadata.permissions().mode() & 0o777;
         if mode & 0o077 != 0 {
-            results.push(CheckResult::Warn(format!(
-                "{label} has permissions {mode:04o} — should be 0700 (owner-only)",
-            )));
+            results.push(CheckResult::Warn(
+                t!("perms.dir_warn", label = label, mode = format!("{mode:04o}")).to_string(),
+            ));
         } else {
-            results.push(CheckResult::Pass(format!(
-                "{label} permissions {mode:04o} (owner-only)",
-            )));
+            results.push(CheckResult::Pass(
+                t!("perms.dir_ok", label = label, mode = format!("{mode:04o}")).to_string(),
+            ));
         }
     }
     results
@@ -2244,20 +2214,20 @@ fn run_security_audit(
         findings.push(Finding {
             severity: Severity::Critical,
             category: "network",
-            message: "SSRF protection is disabled — outbound requests can reach private networks".into(),
-            remediation: "Set security.ssrf_protection to true".into(),
+            message: t!("audit.network.ssrf_off").to_string(),
+            remediation: t!("audit.network.ssrf_off_fix").to_string(),
         });
     }
 
     // --- Print report ---
     findings.sort_by(|a, b| b.severity.cmp(&a.severity));
 
-    println!("FrankClaw Security Audit");
-    println!("========================");
+    println!("{}", t!("audit.title"));
+    println!("{}", t!("audit.separator"));
     println!();
 
     if findings.is_empty() {
-        println!("No security issues found. Configuration looks good.");
+        println!("{}", t!("audit.clean"));
         return Ok(0);
     }
 
@@ -2271,7 +2241,7 @@ fn run_security_audit(
         println!("  {}", category.to_uppercase());
         for finding in category_findings {
             println!("    [{}] {}", finding.severity, finding.message);
-            println!("          Fix: {}", finding.remediation);
+            println!("          {}", t!("audit.fix_label", remediation = finding.remediation));
         }
         println!();
     }
@@ -2283,16 +2253,13 @@ fn run_security_audit(
     let low = findings.iter().filter(|f| f.severity == Severity::Low).count();
     let info = findings.iter().filter(|f| f.severity == Severity::Info).count();
 
-    println!(
-        "Summary: {} critical, {} high, {} medium, {} low, {} info",
-        crit, high, med, low, info
-    );
+    println!("{}", t!("audit.summary", crit = crit, high = high, med = med, low = low, info = info));
 
     if crit > 0 || high > 0 {
-        println!("Audit FAILED — fix critical/high issues before deploying.");
+        println!("{}", t!("audit.failed"));
         Ok(1)
     } else {
-        println!("Audit passed with warnings.");
+        println!("{}", t!("audit.passed"));
         Ok(0)
     }
 }
@@ -2306,8 +2273,8 @@ fn audit_auth(
             findings.push(Finding {
                 severity: Severity::High,
                 category: "auth",
-                message: "Gateway authentication is disabled — anyone with network access can connect".into(),
-                remediation: "Set gateway.auth to token or password mode. Run: frankclaw gen-token".into(),
+                message: t!("audit.auth.disabled").to_string(),
+                remediation: t!("audit.auth.disabled_fix").to_string(),
             });
         }
         frankclaw_core::auth::AuthMode::Token { token } => {
@@ -2318,8 +2285,8 @@ fn audit_auth(
                     findings.push(Finding {
                         severity: Severity::Medium,
                         category: "auth",
-                        message: "Gateway token is shorter than 16 characters".into(),
-                        remediation: "Generate a stronger token: frankclaw gen-token".into(),
+                        message: t!("audit.auth.token_short").to_string(),
+                        remediation: t!("audit.auth.token_short_fix").to_string(),
                     });
                 }
             }
@@ -2329,8 +2296,8 @@ fn audit_auth(
                 findings.push(Finding {
                     severity: Severity::High,
                     category: "auth",
-                    message: "Password auth is configured but password hash is empty".into(),
-                    remediation: "Set a password hash: frankclaw hash-password".into(),
+                    message: t!("audit.auth.password_empty").to_string(),
+                    remediation: t!("audit.auth.password_empty_fix").to_string(),
                 });
             }
         }
@@ -2348,15 +2315,8 @@ fn audit_inline_secrets(
             findings.push(Finding {
                 severity: Severity::Medium,
                 category: "secrets",
-                message: format!(
-                    "Provider '{}' has no api_key_ref — API key may be missing or hardcoded elsewhere",
-                    provider.id
-                ),
-                remediation: format!(
-                    "Set models.providers[{}].api_key_ref to an env var name like \"{}_API_KEY\"",
-                    provider.id,
-                    provider.api.to_uppercase()
-                ),
+                message: t!("audit.secrets.no_key_ref", id = provider.id).to_string(),
+                remediation: t!("audit.secrets.no_key_ref_fix", id = provider.id).to_string(),
             });
         }
     }
@@ -2381,14 +2341,8 @@ fn audit_inline_secrets(
                     findings.push(Finding {
                         severity: Severity::High,
                         category: "secrets",
-                        message: format!(
-                            "Channel '{}' has '{}' stored inline in config file",
-                            channel_id, inline_key
-                        ),
-                        remediation: format!(
-                            "Move to env var: rename '{}' to '{}' and set the value in the environment",
-                            inline_key, env_key
-                        ),
+                        message: t!("audit.secrets.inline", channel = channel_id, key = inline_key).to_string(),
+                        remediation: t!("audit.secrets.inline_fix", key = inline_key, env_key = env_key).to_string(),
                     });
                 }
             }
@@ -2400,8 +2354,8 @@ fn audit_inline_secrets(
         findings.push(Finding {
             severity: Severity::Low,
             category: "secrets",
-            message: "Gateway auth token is stored inline in config file".into(),
-            remediation: "Ensure config file permissions are 0600 (owner-only). Consider using FRANKCLAW_AUTH_TOKEN env var if supported.".into(),
+            message: t!("audit.secrets.token_inline").to_string(),
+            remediation: t!("audit.secrets.token_inline_fix").to_string(),
         });
     }
 }
@@ -2420,11 +2374,8 @@ fn audit_missing_env_vars(
                 findings.push(Finding {
                     severity: Severity::Medium,
                     category: "secrets",
-                    message: format!(
-                        "Provider '{}' references env var '{}' which is not set",
-                        provider.id, env_name
-                    ),
-                    remediation: format!("Export the API key: export {}=<your-key>", env_name),
+                    message: t!("audit.secrets.missing_env", id = provider.id, env = env_name).to_string(),
+                    remediation: t!("audit.secrets.missing_env_fix", env = env_name).to_string(),
                 });
             }
         }
@@ -2446,11 +2397,8 @@ fn audit_missing_env_vars(
                         findings.push(Finding {
                             severity: Severity::Medium,
                             category: "secrets",
-                            message: format!(
-                                "Channel '{}' references env var '{}' (via {}) which is not set",
-                                channel_id, env_name, key
-                            ),
-                            remediation: format!("Export: export {}=<value>", env_name),
+                            message: t!("audit.secrets.channel_missing_env", channel = channel_id, env = env_name, key = key).to_string(),
+                            remediation: t!("audit.secrets.channel_missing_env_fix", env = env_name).to_string(),
                         });
                     }
                 }
@@ -2467,15 +2415,15 @@ fn audit_encryption(
         findings.push(Finding {
             severity: Severity::Medium,
             category: "encryption",
-            message: "Session transcript encryption is disabled — transcripts stored in plaintext".into(),
-            remediation: "Set security.encrypt_sessions to true and export FRANKCLAW_MASTER_KEY".into(),
+            message: t!("audit.encrypt.sessions_off").to_string(),
+            remediation: t!("audit.encrypt.sessions_off_fix").to_string(),
         });
     } else if load_master_key_from_env().unwrap_or(None).is_none() {
         findings.push(Finding {
             severity: Severity::High,
             category: "encryption",
-            message: "Session encryption is enabled but FRANKCLAW_MASTER_KEY is not set — sessions will fail".into(),
-            remediation: "Generate and export: export FRANKCLAW_MASTER_KEY=$(frankclaw gen-token)".into(),
+            message: t!("audit.encrypt.no_master_key").to_string(),
+            remediation: t!("audit.encrypt.no_master_key_fix").to_string(),
         });
     }
 
@@ -2483,8 +2431,8 @@ fn audit_encryption(
         findings.push(Finding {
             severity: Severity::Low,
             category: "encryption",
-            message: "Media file encryption is disabled".into(),
-            remediation: "Set security.encrypt_media to true if media files contain sensitive content".into(),
+            message: t!("audit.encrypt.media_off").to_string(),
+            remediation: t!("audit.encrypt.media_off_fix").to_string(),
         });
     }
 }
@@ -2502,8 +2450,8 @@ fn audit_network(
             findings.push(Finding {
                 severity: Severity::Critical,
                 category: "network",
-                message: "Gateway is network-exposed with no authentication".into(),
-                remediation: "Either bind to loopback only, or configure auth: frankclaw gen-token".into(),
+                message: t!("audit.network.exposed_no_auth").to_string(),
+                remediation: t!("audit.network.exposed_no_auth_fix").to_string(),
             });
         }
 
@@ -2511,8 +2459,8 @@ fn audit_network(
             findings.push(Finding {
                 severity: Severity::High,
                 category: "network",
-                message: "Gateway is network-exposed without TLS — credentials sent in cleartext".into(),
-                remediation: "Configure TLS, use a reverse proxy with TLS termination, or restrict to a Tailscale network".into(),
+                message: t!("audit.network.no_tls").to_string(),
+                remediation: t!("audit.network.no_tls_fix").to_string(),
             });
         }
     }
@@ -2533,8 +2481,8 @@ fn audit_channel_policies(
                 findings.push(Finding {
                     severity: Severity::High,
                     category: "channels",
-                    message: format!("Channel '{}' has an invalid security policy", channel_id),
-                    remediation: "Check the channel's extra configuration for valid policy fields".into(),
+                    message: t!("audit.channels.invalid_policy", channel = channel_id).to_string(),
+                    remediation: t!("audit.channels.invalid_policy_fix").to_string(),
                 });
                 continue;
             }
@@ -2547,14 +2495,8 @@ fn audit_channel_policies(
             findings.push(Finding {
                 severity: Severity::Medium,
                 category: "channels",
-                message: format!(
-                    "Channel '{}' responds to all group messages without mention gating or allowlist",
-                    channel_id
-                ),
-                remediation: format!(
-                    "Set extra.require_mention_for_groups=true or configure extra.allowed_groups for '{}'",
-                    channel_id
-                ),
+                message: t!("audit.channels.open_groups", channel = channel_id).to_string(),
+                remediation: t!("audit.channels.open_groups_fix", channel = channel_id).to_string(),
             });
         }
 
@@ -2568,8 +2510,8 @@ fn audit_channel_policies(
                 findings.push(Finding {
                     severity: Severity::High,
                     category: "channels",
-                    message: "WhatsApp channel has no app_secret — webhook signatures are not verified".into(),
-                    remediation: "Set app_secret_env in the WhatsApp account config".into(),
+                    message: t!("audit.channels.whatsapp_no_secret").to_string(),
+                    remediation: t!("audit.channels.whatsapp_no_secret_fix").to_string(),
                 });
             }
         }
@@ -2594,28 +2536,24 @@ fn audit_tool_policies(
                 findings.push(Finding {
                     severity: Severity::Critical,
                     category: "tools",
-                    message: "Bash tool policy is allow-all — agents can execute any shell command".into(),
-                    remediation: "Set FRANKCLAW_BASH_POLICY to a comma-separated allowlist of permitted binaries, or deny-all".into(),
+                    message: t!("audit.tools.bash_allow_all").to_string(),
+                    remediation: t!("audit.tools.bash_allow_all_fix").to_string(),
                 });
             }
             frankclaw_tools::bash::BashPolicy::DenyAll => {
                 findings.push(Finding {
                     severity: Severity::Info,
                     category: "tools",
-                    message: "Bash tool is configured for agents but policy is deny-all (safe default)".into(),
-                    remediation: "If bash execution is needed, set FRANKCLAW_BASH_POLICY to an allowlist".into(),
+                    message: t!("audit.tools.bash_deny_all").to_string(),
+                    remediation: t!("audit.tools.bash_deny_all_fix").to_string(),
                 });
             }
             frankclaw_tools::bash::BashPolicy::Allowlist(ref allowed) => {
                 findings.push(Finding {
                     severity: Severity::Low,
                     category: "tools",
-                    message: format!(
-                        "Bash tool allowlist permits {} command(s): {}",
-                        allowed.len(),
-                        allowed.join(", ")
-                    ),
-                    remediation: "Review the allowlist and remove any unnecessary commands".into(),
+                    message: t!("audit.tools.bash_allowlist", count = allowed.len(), commands = allowed.join(", ")).to_string(),
+                    remediation: t!("audit.tools.bash_allowlist_fix").to_string(),
                 });
             }
         }
@@ -2628,8 +2566,8 @@ fn audit_tool_policies(
                     findings.push(Finding {
                         severity: Severity::Medium,
                         category: "tools",
-                        message: "Bash tool has no sandbox — commands run directly on the host".into(),
-                        remediation: "Set FRANKCLAW_SANDBOX=ai-jail or ai-jail-lockdown for OS-level isolation (requires ai-jail)".into(),
+                        message: t!("audit.tools.no_sandbox").to_string(),
+                        remediation: t!("audit.tools.no_sandbox_fix").to_string(),
                     });
                 }
             }
@@ -2638,15 +2576,15 @@ fn audit_tool_policies(
                     findings.push(Finding {
                         severity: Severity::Info,
                         category: "tools",
-                        message: "Bash tool sandbox: ai-jail (bubblewrap + landlock, network allowed)".into(),
-                        remediation: "For stricter isolation, use FRANKCLAW_SANDBOX=ai-jail-lockdown".into(),
+                        message: t!("audit.tools.sandbox_aijail").to_string(),
+                        remediation: t!("audit.tools.sandbox_aijail_fix").to_string(),
                     });
                 } else {
                     findings.push(Finding {
                         severity: Severity::High,
                         category: "tools",
-                        message: "FRANKCLAW_SANDBOX=ai-jail is set but ai-jail binary not found on PATH".into(),
-                        remediation: "Install ai-jail or unset FRANKCLAW_SANDBOX".into(),
+                        message: t!("audit.tools.sandbox_missing", mode = "ai-jail").to_string(),
+                        remediation: t!("audit.tools.sandbox_missing_fix").to_string(),
                     });
                 }
             }
@@ -2655,15 +2593,15 @@ fn audit_tool_policies(
                     findings.push(Finding {
                         severity: Severity::Info,
                         category: "tools",
-                        message: "Bash tool sandbox: ai-jail lockdown (read-only filesystem, no network)".into(),
-                        remediation: "This is the most restrictive sandbox mode".into(),
+                        message: t!("audit.tools.sandbox_lockdown").to_string(),
+                        remediation: t!("audit.tools.sandbox_lockdown_fix").to_string(),
                     });
                 } else {
                     findings.push(Finding {
                         severity: Severity::High,
                         category: "tools",
-                        message: "FRANKCLAW_SANDBOX=ai-jail-lockdown is set but ai-jail binary not found on PATH".into(),
-                        remediation: "Install ai-jail or unset FRANKCLAW_SANDBOX".into(),
+                        message: t!("audit.tools.sandbox_missing", mode = "ai-jail-lockdown").to_string(),
+                        remediation: t!("audit.tools.sandbox_missing_fix").to_string(),
                     });
                 }
             }
@@ -2681,16 +2619,16 @@ fn audit_tool_policies(
     findings.push(Finding {
         severity: Severity::Info,
         category: "tools",
-        message: format!("Tool approval level: {}", policy.approval_level),
-        remediation: "Set FRANKCLAW_TOOL_APPROVAL=readonly|mutating|destructive to control".into(),
+        message: t!("audit.tools.approval_level", level = policy.approval_level.to_string()).to_string(),
+        remediation: t!("audit.tools.approval_level_fix").to_string(),
     });
 
     if has_mutating_tools && policy.approval_level.approves(frankclaw_core::model::ToolRiskLevel::Mutating) {
         findings.push(Finding {
             severity: Severity::Medium,
             category: "tools",
-            message: "Mutating tools are approved — agents can click, type, and run shell commands".into(),
-            remediation: "Set FRANKCLAW_TOOL_APPROVAL=readonly if mutation is not needed".into(),
+            message: t!("audit.tools.mutating_approved").to_string(),
+            remediation: t!("audit.tools.mutating_approved_fix").to_string(),
         });
     }
 
@@ -2698,8 +2636,8 @@ fn audit_tool_policies(
         findings.push(Finding {
             severity: Severity::High,
             category: "tools",
-            message: "Destructive tools are approved — agents can perform irreversible operations".into(),
-            remediation: "Set FRANKCLAW_TOOL_APPROVAL=mutating or readonly unless destructive operations are intended".into(),
+            message: t!("audit.tools.destructive_approved").to_string(),
+            remediation: t!("audit.tools.destructive_approved_fix").to_string(),
         });
     }
 }
@@ -2709,15 +2647,15 @@ fn audit_file_scanning(findings: &mut Vec<Finding>) {
         findings.push(Finding {
             severity: Severity::Info,
             category: "media",
-            message: "VirusTotal file scanning is enabled — files are scanned for malware before storage".into(),
-            remediation: "No action needed".into(),
+            message: t!("audit.media.scanning_on").to_string(),
+            remediation: t!("audit.media.scanning_on_fix").to_string(),
         });
     } else {
         findings.push(Finding {
             severity: Severity::Low,
             category: "media",
-            message: "No file scanning service configured — files are stored without malware checks".into(),
-            remediation: "Set VIRUSTOTAL_API_KEY environment variable to enable VirusTotal scanning".into(),
+            message: t!("audit.media.scanning_off").to_string(),
+            remediation: t!("audit.media.scanning_off_fix").to_string(),
         });
     }
 }
@@ -2736,11 +2674,8 @@ fn audit_file_permissions(
             findings.push(Finding {
                 severity: Severity::High,
                 category: "filesystem",
-                message: format!(
-                    "Config file has permissions {:04o} — readable by other users",
-                    mode
-                ),
-                remediation: format!("chmod 600 {}", config_path.display()),
+                message: t!("audit.fs.config_world_readable", mode = format!("{mode:04o}")).to_string(),
+                remediation: t!("audit.fs.config_world_readable_fix", path = config_path.display()).to_string(),
             });
         }
     }
@@ -2751,11 +2686,8 @@ fn audit_file_permissions(
             findings.push(Finding {
                 severity: Severity::Medium,
                 category: "filesystem",
-                message: format!(
-                    "State directory has permissions {:04o} — accessible by other users",
-                    mode
-                ),
-                remediation: format!("chmod 700 {}", state_dir.display()),
+                message: t!("audit.fs.state_world_readable", mode = format!("{mode:04o}")).to_string(),
+                remediation: t!("audit.fs.state_world_readable_fix", path = state_dir.display()).to_string(),
             });
         }
     }
@@ -2767,11 +2699,8 @@ fn audit_file_permissions(
             findings.push(Finding {
                 severity: Severity::High,
                 category: "filesystem",
-                message: format!(
-                    "Sessions database has permissions {:04o} — readable by other users",
-                    mode
-                ),
-                remediation: format!("chmod 600 {}", db_path.display()),
+                message: t!("audit.fs.db_world_readable", mode = format!("{mode:04o}")).to_string(),
+                remediation: t!("audit.fs.db_world_readable_fix", path = db_path.display()).to_string(),
             });
         }
     }
@@ -3641,7 +3570,7 @@ async fn build_runtime(
             sessions as std::sync::Arc<dyn frankclaw_core::session::SessionStore>,
         )
         .await
-        .context("failed to initialize runtime")?,
+        .context(t!("ctx.failed_init_runtime").to_string())?,
     ))
 }
 

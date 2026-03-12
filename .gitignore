@@ -1,4 +1,5 @@
 openclaw/
+ironclaw/
 target/
 .env
 .env.*

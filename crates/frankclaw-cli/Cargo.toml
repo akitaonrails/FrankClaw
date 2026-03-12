@@ -35,3 +35,4 @@ url = { workspace = true }
 chrono = { workspace = true }
 reqwest = { workspace = true }
 rusqlite = { workspace = true }
+rust-i18n = { workspace = true }

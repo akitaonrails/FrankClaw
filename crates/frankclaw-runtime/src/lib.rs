@@ -555,6 +555,32 @@ impl Runtime {
             ("tool_count", &tool_count_str),
         ]));
 
+        // Section 7: Language instruction (non-English locales)
+        let locale = std::env::var("FRANKCLAW_LANG")
+            .ok()
+            .or_else(|| {
+                std::env::var("LANG")
+                    .ok()
+                    .map(|l| l.split('.').next().unwrap_or("en").replace('_', "-"))
+            })
+            .unwrap_or_else(|| "en".into());
+        if !locale.is_empty() && locale != "en" {
+            let language = match locale.as_str() {
+                "pt-BR" => "Brazilian Portuguese",
+                "pt-PT" => "European Portuguese",
+                "es" => "Spanish",
+                "fr" => "French",
+                "de" => "German",
+                "it" => "Italian",
+                "ja" => "Japanese",
+                "ko" => "Korean",
+                other => other,
+            };
+            sections.push(format!(
+                "IMPORTANT: Always respond in {language}. All your replies must be in {language}."
+            ));
+        }
+
         if sections.is_empty() {
             None
         } else {

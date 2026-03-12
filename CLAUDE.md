@@ -8,7 +8,7 @@ FrankClaw is a security-hardened Rust rewrite of OpenClaw (a TypeScript AI assis
 
 ```bash
 cargo check          # Type-check the whole workspace
-cargo test           # Run all tests (~498)
+cargo test           # Run all tests (~511)
 cargo build          # Build everything (debug)
 cargo build -r       # Build release (LTO, stripped)
 cargo build -p frankclaw  # Build just the CLI binary
@@ -57,6 +57,19 @@ The binary is at `target/debug/frankclaw` (or `target/release/frankclaw`).
 - Every feature addition should include unit tests for the new behavior and any extracted shared logic.
 - Treat regression resistance as part of feature work: do not land new capability without test coverage that protects the existing path.
 
+## Internationalization (i18n)
+
+All user-facing text in the CLI (`crates/frankclaw-cli`) is internationalized using `rust-i18n`. Translations live in `crates/frankclaw-cli/locales/` as YAML files (v1 format: `_version: 1`, flat dotted keys, one file per locale). Supported locales: en, pt-BR, pt-PT, es, fr, de, it, ja, ko.
+
+**Rules:**
+
+- **Always use `t!()` for user-facing strings.** Never hardcode English text in `println!`, `eprintln!`, `.context()`, or error messages that users see. Use `t!("key.path", var = value)` with `%{var}` interpolation in YAML.
+- **Keep all locale files in sync.** When adding or modifying a user-facing string, update `en.yml` first, then update all other locale files with the translated equivalent. Never leave a translation key present in `en.yml` but missing from other locales.
+- **Code stays in English.** Variable names, comments, function names, and internal error messages remain in English. Only text displayed to the end user goes through i18n.
+- **System prompts stay in English.** LLM system prompts are NOT translated. Instead, `build_system_prompt()` in `frankclaw-runtime` appends a "respond in {language}" instruction when `FRANKCLAW_LANG` is set to a non-English locale.
+- **YAML format:** Use `_version: 1` flat dotted keys (e.g., `setup.title: "FrankClaw Setup"`). Do NOT use locale root keys or nested YAML — rust-i18n v1 format requires flat keys with the locale inferred from the filename.
+- **Test impact:** Tests that check for specific English substrings in output will work because the default/fallback locale is "en". If you add new tests checking string content, use the English translation text.
+
 ## Security Rules
 
 - Gateway **refuses** to bind to non-loopback addresses without auth configured (hard error, not a warning)
@@ -79,6 +92,7 @@ The binary is at `target/debug/frankclaw` (or `target/release/frankclaw`).
 - PID file: `<state_dir>/frankclaw.pid` (daemon mode)
 - Prompt templates: `crates/frankclaw-runtime/prompts/*.md` (embedded at compile time)
 - Default gateway port: `18789`
+- Locale files: `crates/frankclaw-cli/locales/*.yml` (embedded at compile time)
 - OpenClaw reference: `openclaw/` (gitignored, not part of the build)
 
 ## Key Environment Variables
@@ -91,6 +105,7 @@ The binary is at `target/debug/frankclaw` (or `target/release/frankclaw`).
 | `FRANKCLAW_SANDBOX` | `ai-jail` or `ai-jail-lockdown` (requires ai-jail binary) |
 | `FRANKCLAW_ALLOW_BROWSER_MUTATIONS` | `1` to enable browser click/type/press |
 | `FRANKCLAW_BROWSER_DEVTOOLS_URL` | Chromium DevTools endpoint |
+| `FRANKCLAW_LANG` | UI language: `en`, `pt-BR`, `pt-PT`, `es`, `fr`, `de`, `it`, `ja`, `ko` |
 | `VIRUSTOTAL_API_KEY` | Optional — enables malware scanning on all file uploads |
 
 ## Input Validation & Injection Prevention
@@ -184,15 +199,15 @@ When adding any feature that handles external data, verify:
 
 ## Parity Work Process
 
-When working through `PARITY_TODO.md` features:
+When working through `docs/PARITY_TODO.md` features:
 
 1. **One feature at a time** — complete, test, commit before starting the next.
 2. **Compare with OpenClaw** (`openclaw/` directory) for functional requirements, but do NOT copy 1:1. Prefer Rust idioms, slim design, and security hardening over feature-identical ports.
 3. **Drop what's unnecessary** — if an OpenClaw feature is over-engineered, Node-specific, or adds complexity without clear value, skip it and note why in the TODO.
 4. **Add tests** for every new feature. Tests must pass before committing.
 5. **Commit per feature** with a clear message describing what was added.
-6. **Update `PARITY_TODO.md`** — mark the feature done and add notes on what was implemented vs dropped.
-7. **Follow priority order** in `PARITY_TODO.md` (Tier 1 → Tier 2 → Tier 3 → Tier 4).
+6. **Update `docs/PARITY_TODO.md`** — mark the feature done and add notes on what was implemented vs dropped.
+7. **Follow priority order** in `docs/PARITY_TODO.md` (Tier 1 → Tier 2 → Tier 3 → Tier 4).
 8. **Frontend**: if UI is needed, keep it slim (TypeScript + Tailwind, no heavy frameworks).
 
 ## CI Expectations
