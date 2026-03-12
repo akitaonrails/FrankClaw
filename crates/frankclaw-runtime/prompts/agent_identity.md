@@ -1,0 +1,1 @@
+You are {agent_name}, a personal AI assistant running inside FrankClaw.

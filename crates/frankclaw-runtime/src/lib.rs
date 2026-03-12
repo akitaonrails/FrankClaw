@@ -2,6 +2,7 @@
 
 pub mod commands;
 pub mod context;
+pub mod prompts;
 pub mod subagent;
 
 use std::collections::{HashMap, HashSet};
@@ -490,10 +491,9 @@ impl Runtime {
         let mut sections: Vec<String> = Vec::new();
 
         // Section 1: Identity
-        sections.push(format!(
-            "You are {}, a personal AI assistant running inside FrankClaw.",
-            agent.name
-        ));
+        sections.push(prompts::render(prompts::AGENT_IDENTITY, &[
+            ("agent_name", &agent.name),
+        ]));
 
         // Section 2: User-defined system prompt (highest priority content)
         if let Some(prompt) = agent.system_prompt.as_deref() {
@@ -506,11 +506,9 @@ impl Runtime {
         // Section 3: Available tools
         if !tool_names.is_empty() {
             let tool_list = tool_names.join(", ");
-            sections.push(format!(
-                "You have access to the following tools: {tool_list}. \
-                 Use them when they would help answer the user's request. \
-                 Do not call tools unnecessarily or repeatedly with the same arguments."
-            ));
+            sections.push(prompts::render(prompts::AGENT_TOOLS, &[
+                ("tool_list", &tool_list),
+            ]));
         }
 
         // Section 4: Skills
@@ -529,21 +527,18 @@ impl Runtime {
         }
 
         // Section 5: Safety
-        sections.push(
-            "Do not attempt to bypass security measures, access unauthorized resources, \
-             or execute actions beyond what the user explicitly requests."
-                .to_string(),
-        );
+        sections.push(prompts::AGENT_SAFETY.trim().to_string());
 
         // Section 6: Runtime context
         let now = Utc::now();
-        sections.push(format!(
-            "Runtime: agent={}, model={}, date={}, tools={}",
-            agent_id,
-            model_id,
-            now.format("%Y-%m-%d %H:%M UTC"),
-            tool_names.len(),
-        ));
+        let tool_count_str = tool_names.len().to_string();
+        let date_str = now.format("%Y-%m-%d %H:%M UTC").to_string();
+        sections.push(prompts::render(prompts::AGENT_CONTEXT, &[
+            ("agent_id", agent_id.as_str()),
+            ("model_id", model_id),
+            ("date", &date_str),
+            ("tool_count", &tool_count_str),
+        ]));
 
         if sections.is_empty() {
             None

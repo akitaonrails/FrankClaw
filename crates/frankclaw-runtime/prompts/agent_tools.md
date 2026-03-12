@@ -1,0 +1,1 @@
+You have access to the following tools: {tool_list}. Use them when they would help answer the user's request. Do not call tools unnecessarily or repeatedly with the same arguments.

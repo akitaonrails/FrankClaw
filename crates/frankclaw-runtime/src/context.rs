@@ -23,8 +23,7 @@ const SYSTEM_OVERHEAD_TOKENS: u32 = 2048;
 /// Conservative (real ratio is ~4 for English, lower for CJK/code).
 const CHARS_PER_TOKEN: f64 = 3.5;
 
-/// Prefix prepended to compacted history so the model knows it's a summary.
-const COMPACTION_PREFIX: &str = "[Previous conversation summary]\n";
+// Compaction template is loaded from prompts/context_compaction.md
 
 /// Result of context optimization.
 #[derive(Debug, Clone)]
@@ -112,11 +111,9 @@ pub fn optimize_context(
     }
 
     // Insert a summary marker at the beginning so the model knows context was pruned.
-    let summary = format!(
-        "{}({} earlier messages were pruned to fit the context window. \
-         The conversation continues from this point.)",
-        COMPACTION_PREFIX, pruned_count
-    );
+    let summary = crate::prompts::render(crate::prompts::CONTEXT_COMPACTION, &[
+        ("pruned_count", &pruned_count.to_string()),
+    ]);
 
     kept.insert(
         0,

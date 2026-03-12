@@ -1,0 +1,1 @@
+Runtime: agent={agent_id}, model={model_id}, date={date}, tools={tool_count}

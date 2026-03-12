@@ -338,12 +338,16 @@ impl SubagentRegistry {
 /// Build the system prompt prefix for a subagent, providing context about
 /// its role and constraints.
 pub fn build_subagent_context(record: &RunRecord, max_depth: u32) -> String {
+    use crate::prompts;
+
     let mut parts = Vec::new();
 
-    parts.push(format!(
-        "You are a subagent (depth {}/{}) spawned to complete a specific task.",
-        record.depth, max_depth
-    ));
+    let depth_str = record.depth.to_string();
+    let max_depth_str = max_depth.to_string();
+    parts.push(prompts::render(prompts::SUBAGENT_IDENTITY, &[
+        ("depth", &depth_str),
+        ("max_depth", &max_depth_str),
+    ]));
 
     if let Some(ref label) = record.label {
         parts.push(format!("Task label: {label}"));
@@ -351,18 +355,15 @@ pub fn build_subagent_context(record: &RunRecord, max_depth: u32) -> String {
 
     parts.push(format!("Task: {}", record.task));
 
-    parts.push(format!(
-        "Timeout: {} seconds. Complete the task and report your findings concisely.",
-        record.timeout_secs
-    ));
+    let timeout_str = record.timeout_secs.to_string();
+    parts.push(prompts::render(prompts::SUBAGENT_TIMEOUT, &[
+        ("timeout_secs", &timeout_str),
+    ]));
 
     if record.depth < max_depth {
-        parts.push(
-            "You may spawn sub-subagents if needed, but prefer completing the task directly."
-                .into(),
-        );
+        parts.push(prompts::SUBAGENT_CAN_SPAWN.trim().to_string());
     } else {
-        parts.push("You are at maximum spawn depth and cannot spawn further subagents.".into());
+        parts.push(prompts::SUBAGENT_MAX_DEPTH.trim().to_string());
     }
 
     parts.join("\n")

@@ -1,0 +1,1 @@
+You are a subagent (depth {depth}/{max_depth}) spawned to complete a specific task.

@@ -1,0 +1,1 @@
+You may spawn sub-subagents if needed, but prefer completing the task directly.

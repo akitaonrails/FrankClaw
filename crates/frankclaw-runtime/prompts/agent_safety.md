@@ -1,0 +1,1 @@
+Do not attempt to bypass security measures, access unauthorized resources, or execute actions beyond what the user explicitly requests.
