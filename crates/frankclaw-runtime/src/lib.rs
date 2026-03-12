@@ -30,6 +30,7 @@ use frankclaw_tools::{ToolContext, ToolOutput, ToolRegistry};
 
 pub struct Runtime {
     config: FrankClawConfig,
+    config_arc: Option<Arc<FrankClawConfig>>,
     sessions: Arc<dyn SessionStore>,
     models: FailoverChain,
     model_defs: Vec<ModelDef>,
@@ -37,6 +38,10 @@ pub struct Runtime {
     tools: ToolRegistry,
     skill_manifests: HashMap<AgentId, Vec<SkillManifest>>,
     subagent_registry: Arc<subagent::SubagentRegistry>,
+    fetcher: Option<Arc<dyn frankclaw_core::tool_services::Fetcher>>,
+    channels: Option<Arc<dyn frankclaw_core::tool_services::MessageSender>>,
+    cron: Option<Arc<dyn frankclaw_core::tool_services::CronManager>>,
+    workspace: Option<std::path::PathBuf>,
 }
 
 pub struct ChatRequest {
@@ -142,6 +147,7 @@ impl Runtime {
 
         Ok(Self {
             config: config.clone(),
+            config_arc: Some(Arc::new(config.clone())),
             sessions,
             models,
             model_defs,
@@ -149,7 +155,27 @@ impl Runtime {
             tools,
             skill_manifests,
             subagent_registry: Arc::new(subagent::SubagentRegistry::new()),
+            fetcher: None,
+            channels: None,
+            cron: None,
+            workspace: None,
         })
+    }
+
+    pub fn set_fetcher(&mut self, fetcher: Arc<dyn frankclaw_core::tool_services::Fetcher>) {
+        self.fetcher = Some(fetcher);
+    }
+
+    pub fn set_channels(&mut self, channels: Arc<dyn frankclaw_core::tool_services::MessageSender>) {
+        self.channels = Some(channels);
+    }
+
+    pub fn set_cron(&mut self, cron: Arc<dyn frankclaw_core::tool_services::CronManager>) {
+        self.cron = Some(cron);
+    }
+
+    pub fn set_workspace(&mut self, workspace: std::path::PathBuf) {
+        self.workspace = Some(workspace);
     }
 
     pub fn list_models(&self) -> &[ModelDef] {
@@ -527,6 +553,11 @@ impl Runtime {
                             session_key: Some(session_key.clone()),
                             sessions: self.sessions.clone(),
                             canvas: request.canvas.clone(),
+                            fetcher: self.fetcher.clone(),
+                            channels: self.channels.clone(),
+                            cron: self.cron.clone(),
+                            config: self.config_arc.clone(),
+                            workspace: self.workspace.clone(),
                         },
                     )
                     .await;
@@ -680,6 +711,11 @@ impl Runtime {
                     session_key: request.session_key,
                     sessions: self.sessions.clone(),
                     canvas: None,
+                    fetcher: self.fetcher.clone(),
+                    channels: self.channels.clone(),
+                    cron: self.cron.clone(),
+                    config: self.config_arc.clone(),
+                    workspace: self.workspace.clone(),
                 },
             )
             .await

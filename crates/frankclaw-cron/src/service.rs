@@ -252,6 +252,56 @@ impl CronService {
     }
 }
 
+#[async_trait::async_trait]
+impl frankclaw_core::tool_services::CronManager for CronService {
+    async fn list_jobs(&self) -> Vec<serde_json::Value> {
+        self.list()
+            .await
+            .into_iter()
+            .map(|job| {
+                serde_json::json!({
+                    "id": job.id,
+                    "schedule": job.schedule,
+                    "agent_id": job.agent_id,
+                    "session_key": job.session_key.as_str(),
+                    "prompt": job.prompt,
+                    "enabled": job.enabled,
+                    "created_at": job.created_at,
+                    "last_run": job.last_run,
+                })
+            })
+            .collect()
+    }
+
+    async fn add_job(
+        &self,
+        id: &str,
+        schedule: &str,
+        agent_id: &str,
+        session_key: &str,
+        prompt: &str,
+        enabled: bool,
+    ) -> Result<()> {
+        let job = CronJob {
+            id: id.to_string(),
+            schedule: schedule.to_string(),
+            agent_id: frankclaw_core::types::AgentId::new(agent_id),
+            session_key: frankclaw_core::types::SessionKey::from_raw(session_key),
+            prompt: prompt.to_string(),
+            enabled,
+            created_at: chrono::Utc::now(),
+            last_run: None,
+        };
+        self.add(job).await
+    }
+
+    async fn remove_job(&self, id: &str) -> Result<bool> {
+        let existed = self.list().await.iter().any(|j| j.id == id);
+        self.remove(id).await?;
+        Ok(existed)
+    }
+}
+
 fn load_jobs(path: &Path) -> Result<HashMap<String, CronJob>> {
     if !path.exists() {
         return Ok(HashMap::new());

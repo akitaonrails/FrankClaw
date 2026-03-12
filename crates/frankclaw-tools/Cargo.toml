@@ -17,6 +17,8 @@ uuid = { workspace = true }
 reqwest = { workspace = true }
 tokio-tungstenite = { workspace = true }
 futures-util = { workspace = true }
+html2text = { workspace = true }
+regex = { workspace = true }
 
 [dev-dependencies]
 axum = { workspace = true }

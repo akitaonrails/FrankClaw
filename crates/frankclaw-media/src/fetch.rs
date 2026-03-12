@@ -177,3 +177,18 @@ pub struct FetchedContent {
     pub bytes: Vec<u8>,
     pub content_type: String,
 }
+
+#[async_trait::async_trait]
+impl frankclaw_core::tool_services::Fetcher for SafeFetcher {
+    async fn fetch(&self, url: &str) -> frankclaw_core::error::Result<frankclaw_core::tool_services::FetchedContent> {
+        let parsed = Url::parse(url).map_err(|e| FrankClawError::InvalidRequest {
+            msg: format!("invalid URL: {e}"),
+        })?;
+        let content = self.fetch(&parsed).await?;
+        Ok(frankclaw_core::tool_services::FetchedContent {
+            bytes: content.bytes,
+            content_type: content.content_type,
+            final_url: parsed.to_string(),
+        })
+    }
+}

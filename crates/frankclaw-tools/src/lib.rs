@@ -1,7 +1,14 @@
 #![forbid(unsafe_code)]
 
 pub mod bash;
+pub mod config_tools;
+pub mod cron_tools;
+pub mod file;
 pub mod mcp;
+pub mod memory;
+pub mod messaging;
+pub mod sessions;
+pub mod web;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -18,10 +25,12 @@ use url::Url;
 
 use tokio::net::lookup_host;
 
+use frankclaw_core::config::FrankClawConfig;
 use frankclaw_core::error::{FrankClawError, Result};
 use frankclaw_core::media::is_safe_ip;
 use frankclaw_core::model::{ToolDef, ToolRiskLevel};
 use frankclaw_core::session::SessionStore;
+use frankclaw_core::tool_services::{CronManager, Fetcher, MessageSender};
 use frankclaw_core::types::{AgentId, SessionKey};
 
 /// Maximum time to wait for a single CDP command response.
@@ -36,6 +45,11 @@ pub struct ToolContext {
     pub session_key: Option<SessionKey>,
     pub sessions: Arc<dyn SessionStore>,
     pub canvas: Option<Arc<dyn frankclaw_core::canvas::CanvasService>>,
+    pub fetcher: Option<Arc<dyn Fetcher>>,
+    pub channels: Option<Arc<dyn MessageSender>>,
+    pub cron: Option<Arc<dyn CronManager>>,
+    pub config: Option<Arc<FrankClawConfig>>,
+    pub workspace: Option<std::path::PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -123,6 +137,27 @@ impl ToolRegistry {
         registry.register(Arc::new(BrowserSessionsTool::new(browser.clone())));
         registry.register(Arc::new(BrowserCloseTool::new(browser)));
         registry.register(Arc::new(bash::BashTool::from_env()));
+        // Web tools
+        registry.register(Arc::new(web::WebFetchTool));
+        registry.register(Arc::new(web::WebSearchTool));
+        // Session tools
+        registry.register(Arc::new(sessions::SessionsListTool));
+        registry.register(Arc::new(sessions::SessionsHistoryTool));
+        // File tools
+        registry.register(Arc::new(file::FileReadTool));
+        registry.register(Arc::new(file::FileWriteTool));
+        registry.register(Arc::new(file::FileEditTool));
+        // Messaging
+        registry.register(Arc::new(messaging::MessageSendTool));
+        // Cron tools
+        registry.register(Arc::new(cron_tools::CronListTool));
+        registry.register(Arc::new(cron_tools::CronAddTool));
+        registry.register(Arc::new(cron_tools::CronRemoveTool));
+        // Config tools
+        registry.register(Arc::new(config_tools::ConfigGetTool));
+        registry.register(Arc::new(config_tools::AgentsListTool));
+        // Memory tools
+        registry.register(Arc::new(memory::MemoryGetTool));
         registry
     }
 
@@ -194,6 +229,41 @@ impl Default for ToolRegistry {
     }
 }
 
+/// Create a test-only ToolContext with minimal services.
+#[cfg(test)]
+pub(crate) fn test_tool_context(workspace: Option<std::path::PathBuf>) -> ToolContext {
+    use frankclaw_core::session::{
+        PruningConfig, SessionEntry, SessionStore, TranscriptEntry,
+    };
+
+    #[derive(Default)]
+    struct NoopStore;
+
+    #[async_trait]
+    impl SessionStore for NoopStore {
+        async fn get(&self, _key: &SessionKey) -> Result<Option<SessionEntry>> { Ok(None) }
+        async fn upsert(&self, _entry: &SessionEntry) -> Result<()> { Ok(()) }
+        async fn delete(&self, _key: &SessionKey) -> Result<()> { Ok(()) }
+        async fn list(&self, _agent_id: &AgentId, _limit: usize, _offset: usize) -> Result<Vec<SessionEntry>> { Ok(vec![]) }
+        async fn append_transcript(&self, _key: &SessionKey, _entry: &TranscriptEntry) -> Result<()> { Ok(()) }
+        async fn get_transcript(&self, _key: &SessionKey, _limit: usize, _before: Option<u64>) -> Result<Vec<TranscriptEntry>> { Ok(vec![]) }
+        async fn clear_transcript(&self, _key: &SessionKey) -> Result<()> { Ok(()) }
+        async fn maintenance(&self, _config: &PruningConfig) -> Result<u64> { Ok(0) }
+    }
+
+    ToolContext {
+        agent_id: AgentId::default_agent(),
+        session_key: None,
+        sessions: Arc::new(NoopStore),
+        canvas: None,
+        fetcher: None,
+        channels: None,
+        cron: None,
+        config: None,
+        workspace,
+    }
+}
+
 impl ToolPolicy {
     pub fn from_env() -> Self {
         let approval_level = if let Ok(value) = std::env::var("FRANKCLAW_TOOL_APPROVAL") {
@@ -236,9 +306,11 @@ fn truthy_env(name: &str) -> bool {
 /// Returns the risk level assigned to a tool by name.
 pub fn tool_risk_level(tool_name: &str) -> ToolRiskLevel {
     match tool_name {
-        "browser.click" | "browser.type" | "browser.press" | "browser.select_option" | "bash" => {
+        "browser.click" | "browser.type" | "browser.press" | "browser.select_option" | "bash"
+        | "file.write" | "file.edit" | "message.send" | "cron.add" => {
             ToolRiskLevel::Mutating
         }
+        "cron.remove" => ToolRiskLevel::Destructive,
         _ => ToolRiskLevel::ReadOnly,
     }
 }
@@ -1701,6 +1773,11 @@ mod tests {
                     session_key: Some(key.clone()),
                     sessions: store as Arc<dyn SessionStore>,
                     canvas: None,
+                    fetcher: None,
+                    channels: None,
+                    cron: None,
+                    config: None,
+                    workspace: None,
                 },
             )
             .await
@@ -1724,6 +1801,11 @@ mod tests {
                     session_key: None,
                     sessions: Arc::new(MockSessionStore::default()),
                     canvas: None,
+                    fetcher: None,
+                    channels: None,
+                    cron: None,
+                    config: None,
+                    workspace: None,
                 },
             )
             .await
@@ -1770,6 +1852,11 @@ mod tests {
             session_key: Some(SessionKey::from_raw("default:web:browser-policy")),
             sessions: Arc::new(MockSessionStore::default()),
             canvas: None,
+            fetcher: None,
+            channels: None,
+            cron: None,
+            config: None,
+            workspace: None,
         };
         let allowed = vec!["browser.open".into(), "browser.click".into()];
 
@@ -1892,6 +1979,11 @@ mod tests {
             session_key: Some(SessionKey::from_raw("default:web:browser")),
             sessions: Arc::new(MockSessionStore::default()),
             canvas: None,
+            fetcher: None,
+            channels: None,
+            cron: None,
+            config: None,
+            workspace: None,
         };
         let allowed = vec![
             "browser.open".into(),
@@ -1951,6 +2043,11 @@ mod tests {
                     session_key: Some(SessionKey::from_raw("default:web:browser")),
                     sessions: Arc::new(MockSessionStore::default()),
                     canvas: None,
+                    fetcher: None,
+                    channels: None,
+                    cron: None,
+                    config: None,
+                    workspace: None,
                 },
             )
             .await
@@ -1967,6 +2064,11 @@ mod tests {
                     session_key: Some(SessionKey::from_raw("default:web:browser")),
                     sessions: Arc::new(MockSessionStore::default()),
                     canvas: None,
+                    fetcher: None,
+                    channels: None,
+                    cron: None,
+                    config: None,
+                    workspace: None,
                 },
             )
             .await
@@ -1988,6 +2090,11 @@ mod tests {
                     session_key: Some(SessionKey::from_raw("default:web:browser")),
                     sessions: Arc::new(MockSessionStore::default()),
                     canvas: None,
+                    fetcher: None,
+                    channels: None,
+                    cron: None,
+                    config: None,
+                    workspace: None,
                 },
             )
             .await
@@ -2004,6 +2111,11 @@ mod tests {
                     session_key: Some(SessionKey::from_raw("default:web:browser")),
                     sessions: Arc::new(MockSessionStore::default()),
                     canvas: None,
+                    fetcher: None,
+                    channels: None,
+                    cron: None,
+                    config: None,
+                    workspace: None,
                 },
             )
             .await
@@ -2025,6 +2137,11 @@ mod tests {
                     session_key: Some(SessionKey::from_raw("default:web:browser")),
                     sessions: Arc::new(MockSessionStore::default()),
                     canvas: None,
+                    fetcher: None,
+                    channels: None,
+                    cron: None,
+                    config: None,
+                    workspace: None,
                 },
             )
             .await
@@ -2045,6 +2162,11 @@ mod tests {
                     session_key: Some(SessionKey::from_raw("default:web:browser")),
                     sessions: Arc::new(MockSessionStore::default()),
                     canvas: None,
+                    fetcher: None,
+                    channels: None,
+                    cron: None,
+                    config: None,
+                    workspace: None,
                 },
             )
             .await
@@ -2061,6 +2183,11 @@ mod tests {
                     session_key: Some(SessionKey::from_raw("default:web:browser")),
                     sessions: Arc::new(MockSessionStore::default()),
                     canvas: None,
+                    fetcher: None,
+                    channels: None,
+                    cron: None,
+                    config: None,
+                    workspace: None,
                 },
             )
             .await
@@ -2132,6 +2259,11 @@ mod tests {
             session_key: Some(SessionKey::from_raw("default:web:real-browser")),
             sessions: Arc::new(MockSessionStore::default()),
             canvas: None,
+            fetcher: None,
+            channels: None,
+            cron: None,
+            config: None,
+            workspace: None,
         };
         let allowed = vec![
             "browser.open".into(),

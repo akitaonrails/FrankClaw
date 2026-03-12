@@ -597,6 +597,11 @@ mod tests {
             session_key: None,
             sessions: std::sync::Arc::new(NoopStore),
             canvas: None,
+            fetcher: None,
+            channels: None,
+            cron: None,
+            config: None,
+            workspace: None,
         }
     }
 }

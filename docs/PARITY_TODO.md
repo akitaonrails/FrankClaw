@@ -196,6 +196,9 @@ These are the core "brain" features that make OpenClaw's agent loop sophisticate
 - [x] Safer action model for clicks/forms/navigation
 - [x] Tool approvals for higher-risk tool families
 - [x] More first-party tools beyond session inspection
+- [x] LLM tool suite: web.fetch, web.search, sessions.list, sessions.history,
+  file.read, file.write, file.edit, message.send, cron.list, cron.add,
+  cron.remove, config.get, agents.list, memory.get (16 new tools)
 - [x] Better tool tracing and operator visibility
 
 ### Test Coverage

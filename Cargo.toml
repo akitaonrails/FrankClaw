@@ -103,6 +103,9 @@ uuid = { version = "1", features = ["v4", "serde"] }
 # URL
 url = { version = "2", features = ["serde"] }
 
+# HTML→text conversion
+html2text = "0.14"
+
 # Byte sizes
 bytesize = { version = "2", features = ["serde"] }
 

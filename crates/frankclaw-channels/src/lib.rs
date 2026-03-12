@@ -55,6 +55,43 @@ impl ChannelSet {
     }
 }
 
+#[async_trait::async_trait]
+impl frankclaw_core::tool_services::MessageSender for ChannelSet {
+    async fn send_text(
+        &self,
+        channel: &str,
+        account_id: &str,
+        to: &str,
+        text: &str,
+        thread_id: Option<&str>,
+        reply_to: Option<&str>,
+    ) -> frankclaw_core::error::Result<String> {
+        use frankclaw_core::channel::{OutboundMessage, SendResult};
+
+        let channel_id = ChannelId::new(channel);
+        let plugin = self.get(&channel_id).ok_or_else(|| {
+            FrankClawError::InvalidRequest {
+                msg: format!("channel '{}' not found or not enabled", channel),
+            }
+        })?;
+
+        let msg = OutboundMessage {
+            channel: channel_id,
+            account_id: account_id.to_string(),
+            to: to.to_string(),
+            thread_id: thread_id.map(String::from),
+            text: text.to_string(),
+            attachments: Vec::new(),
+            reply_to: reply_to.map(String::from),
+        };
+
+        match plugin.send(msg).await? {
+            SendResult::Sent { platform_message_id } => Ok(platform_message_id),
+            other => Ok(format!("{:?}", other)),
+        }
+    }
+}
+
 pub fn load_from_config(config: &FrankClawConfig) -> Result<ChannelSet> {
     let mut channels: HashMap<ChannelId, Arc<dyn ChannelPlugin>> = HashMap::new();
     let mut web_handle = None;
