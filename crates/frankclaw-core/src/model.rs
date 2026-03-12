@@ -77,12 +77,37 @@ pub struct CompletionRequest {
     pub tools: Vec<ToolDef>,
 }
 
+/// Risk classification for tools. Determines whether operator approval is needed.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ToolRiskLevel {
+    /// Read-only operations: always auto-approved.
+    #[default]
+    ReadOnly,
+    /// Mutating operations: require at least `Mutating` approval level.
+    Mutating,
+    /// Destructive operations: require explicit `Destructive` approval level.
+    Destructive,
+}
+
+impl std::fmt::Display for ToolRiskLevel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ReadOnly => write!(f, "readonly"),
+            Self::Mutating => write!(f, "mutating"),
+            Self::Destructive => write!(f, "destructive"),
+        }
+    }
+}
+
 /// Tool definition for function calling.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolDef {
     pub name: String,
     pub description: String,
     pub parameters: serde_json::Value,
+    #[serde(default)]
+    pub risk_level: ToolRiskLevel,
 }
 
 /// Streaming delta from a model.

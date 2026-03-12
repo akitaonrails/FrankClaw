@@ -1089,12 +1089,12 @@ fn collect_browser_tool_warnings_with_policy(
     if !browser_tools_enabled {
         return Vec::new();
     }
-    let browser_mutation_tools_enabled = config
+    let has_mutating_tools = config
         .agents
         .agents
         .values()
         .flat_map(|agent| agent.tools.iter())
-        .any(|tool| frankclaw_tools::tool_requires_operator_approval(tool));
+        .any(|tool| frankclaw_tools::tool_risk_level(tool) >= frankclaw_core::model::ToolRiskLevel::Mutating);
 
     let endpoint = browser_endpoint
         .map(str::trim)
@@ -1111,9 +1111,9 @@ fn collect_browser_tool_warnings_with_policy(
     };
 
     let mut warnings = Vec::new();
-    if browser_mutation_tools_enabled && !tool_policy.allow_browser_mutations {
+    if has_mutating_tools && !tool_policy.approval_level.approves(frankclaw_core::model::ToolRiskLevel::Mutating) {
         warnings.push(
-            "browser mutation tools are configured but blocked until FRANKCLAW_ALLOW_BROWSER_MUTATIONS=1 is set".into(),
+            "browser mutation tools are configured but blocked — set FRANKCLAW_TOOL_APPROVAL=mutating (or FRANKCLAW_ALLOW_BROWSER_MUTATIONS=1) to enable".into(),
         );
     }
     match parsed.host_str() {
@@ -1161,7 +1161,7 @@ fn browser_runtime_status_with_policy(
     browser_endpoint: Option<&str>,
     policy: frankclaw_tools::ToolPolicy,
 ) -> Option<String> {
-    let warnings = collect_browser_tool_warnings_with_policy(config, browser_endpoint, policy);
+    let warnings = collect_browser_tool_warnings_with_policy(config, browser_endpoint, policy.clone());
     if warnings.is_empty() {
         if config
             .agents
@@ -1170,14 +1170,14 @@ fn browser_runtime_status_with_policy(
             .flat_map(|agent| agent.tools.iter())
             .any(|tool| tool.starts_with("browser."))
         {
-            let mutation_state = if config
+            let has_mutating = config
                 .agents
                 .agents
                 .values()
                 .flat_map(|agent| agent.tools.iter())
-                .any(|tool| frankclaw_tools::tool_requires_operator_approval(tool))
-            {
-                if policy.allow_browser_mutations {
+                .any(|tool| frankclaw_tools::tool_risk_level(tool) >= frankclaw_core::model::ToolRiskLevel::Mutating);
+            let mutation_state = if has_mutating {
+                if policy.approval_level.approves(frankclaw_core::model::ToolRiskLevel::Mutating) {
                     "mutations enabled"
                 } else {
                     "mutations gated"
@@ -2652,20 +2652,36 @@ fn audit_tool_policies(
         }
     }
 
-    let browser_mutations = frankclaw_tools::ToolPolicy::from_env().allow_browser_mutations;
-    let has_browser_mutation_tools = config
+    let policy = frankclaw_tools::ToolPolicy::from_env();
+    let has_mutating_tools = config
         .agents
         .agents
         .values()
         .flat_map(|agent| agent.tools.iter())
-        .any(|tool| frankclaw_tools::tool_requires_operator_approval(tool));
+        .any(|tool| frankclaw_tools::tool_risk_level(tool) >= frankclaw_core::model::ToolRiskLevel::Mutating);
 
-    if has_browser_mutation_tools && browser_mutations {
+    findings.push(Finding {
+        severity: Severity::Info,
+        category: "tools",
+        message: format!("Tool approval level: {}", policy.approval_level),
+        remediation: "Set FRANKCLAW_TOOL_APPROVAL=readonly|mutating|destructive to control".into(),
+    });
+
+    if has_mutating_tools && policy.approval_level.approves(frankclaw_core::model::ToolRiskLevel::Mutating) {
         findings.push(Finding {
             severity: Severity::Medium,
             category: "tools",
-            message: "Browser mutation tools are enabled — agents can click, type, and navigate".into(),
-            remediation: "Unset FRANKCLAW_ALLOW_BROWSER_MUTATIONS if browser interaction is not needed".into(),
+            message: "Mutating tools are approved — agents can click, type, and run shell commands".into(),
+            remediation: "Set FRANKCLAW_TOOL_APPROVAL=readonly if mutation is not needed".into(),
+        });
+    }
+
+    if policy.approval_level.approves(frankclaw_core::model::ToolRiskLevel::Destructive) {
+        findings.push(Finding {
+            severity: Severity::High,
+            category: "tools",
+            message: "Destructive tools are approved — agents can perform irreversible operations".into(),
+            remediation: "Set FRANKCLAW_TOOL_APPROVAL=mutating or readonly unless destructive operations are intended".into(),
         });
     }
 }
@@ -3095,14 +3111,12 @@ mod tests {
         let warnings = collect_browser_tool_warnings_with_policy(
             &config,
             Some("http://127.0.0.1:9222/"),
-            frankclaw_tools::ToolPolicy {
-                allow_browser_mutations: false,
-            },
+            frankclaw_tools::ToolPolicy::default(),
         );
 
         assert!(warnings
             .iter()
-            .any(|warning| warning.contains("FRANKCLAW_ALLOW_BROWSER_MUTATIONS=1")));
+            .any(|warning| warning.contains("FRANKCLAW_TOOL_APPROVAL=mutating")));
     }
 
     #[test]
@@ -3118,12 +3132,10 @@ mod tests {
         let gated = browser_runtime_status_with_policy(
             &config,
             Some("http://127.0.0.1:9222/"),
-            frankclaw_tools::ToolPolicy {
-                allow_browser_mutations: false,
-            },
+            frankclaw_tools::ToolPolicy::default(),
         )
         .expect("status should exist");
-        assert!(gated.contains("blocked until FRANKCLAW_ALLOW_BROWSER_MUTATIONS=1"));
+        assert!(gated.contains("blocked"));
 
         let listener = std::net::TcpListener::bind("127.0.0.1:0")
             .expect("listener should bind");
@@ -3132,7 +3144,8 @@ mod tests {
             &config,
             Some(&endpoint),
             frankclaw_tools::ToolPolicy {
-                allow_browser_mutations: true,
+                approval_level: frankclaw_tools::ApprovalLevel::Mutating,
+                approved_tools: std::collections::HashSet::new(),
             },
         )
         .expect("status should exist");

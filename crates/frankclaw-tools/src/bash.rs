@@ -14,7 +14,7 @@ use tokio::process::Command;
 use tracing::warn;
 
 use frankclaw_core::error::{FrankClawError, Result};
-use frankclaw_core::model::ToolDef;
+use frankclaw_core::model::{ToolDef, ToolRiskLevel};
 
 use crate::{Tool, ToolContext};
 
@@ -226,6 +226,7 @@ impl Tool for BashTool {
                 },
                 "required": ["command"]
             }),
+            risk_level: ToolRiskLevel::Mutating,
         }
     }
 

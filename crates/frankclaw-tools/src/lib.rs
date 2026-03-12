@@ -19,7 +19,7 @@ use tokio::net::lookup_host;
 
 use frankclaw_core::error::{FrankClawError, Result};
 use frankclaw_core::media::is_safe_ip;
-use frankclaw_core::model::ToolDef;
+use frankclaw_core::model::{ToolDef, ToolRiskLevel};
 use frankclaw_core::session::SessionStore;
 use frankclaw_core::types::{AgentId, SessionKey};
 
@@ -54,9 +54,42 @@ pub struct ToolRegistry {
     policy: ToolPolicy,
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+/// What risk level the operator has approved for automatic tool execution.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ApprovalLevel {
+    /// Only read-only tools are auto-approved (default, most restrictive).
+    #[default]
+    ReadOnly,
+    /// Read-only and mutating tools are auto-approved.
+    Mutating,
+    /// All tools are auto-approved (least restrictive).
+    Destructive,
+}
+
+impl std::fmt::Display for ApprovalLevel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ReadOnly => write!(f, "readonly"),
+            Self::Mutating => write!(f, "mutating"),
+            Self::Destructive => write!(f, "destructive"),
+        }
+    }
+}
+
+impl ApprovalLevel {
+    pub fn approves(&self, risk: ToolRiskLevel) -> bool {
+        match risk {
+            ToolRiskLevel::ReadOnly => true,
+            ToolRiskLevel::Mutating => matches!(self, Self::Mutating | Self::Destructive),
+            ToolRiskLevel::Destructive => matches!(self, Self::Destructive),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
 pub struct ToolPolicy {
-    pub allow_browser_mutations: bool,
+    pub approval_level: ApprovalLevel,
+    pub approved_tools: std::collections::HashSet<String>,
 }
 
 impl ToolRegistry {
@@ -123,14 +156,6 @@ impl ToolRegistry {
                 msg: format!("tool '{}' is not allowed for agent '{}'", name, ctx.agent_id),
             });
         }
-        if self.policy.blocks(name) {
-            return Err(FrankClawError::AgentRuntime {
-                msg: format!(
-                    "tool '{}' requires explicit operator approval via FRANKCLAW_ALLOW_BROWSER_MUTATIONS=1",
-                    name
-                ),
-            });
-        }
 
         let tool = self
             .tools
@@ -138,6 +163,17 @@ impl ToolRegistry {
             .ok_or_else(|| FrankClawError::InvalidRequest {
                 msg: format!("unknown tool '{}'", name),
             })?;
+
+        let risk_level = tool.definition().risk_level;
+        if !self.policy.is_approved(name, risk_level) {
+            return Err(FrankClawError::AgentRuntime {
+                msg: format!(
+                    "tool '{}' requires {} approval. Set FRANKCLAW_TOOL_APPROVAL={} to enable.",
+                    name, risk_level, risk_level,
+                ),
+            });
+        }
+
         let output = tool.invoke(args, ctx).await?;
         Ok(ToolOutput {
             name: name.to_string(),
@@ -154,13 +190,30 @@ impl Default for ToolRegistry {
 
 impl ToolPolicy {
     pub fn from_env() -> Self {
+        let approval_level = if let Ok(value) = std::env::var("FRANKCLAW_TOOL_APPROVAL") {
+            match value.trim().to_ascii_lowercase().as_str() {
+                "mutating" => ApprovalLevel::Mutating,
+                "destructive" => ApprovalLevel::Destructive,
+                _ => ApprovalLevel::ReadOnly,
+            }
+        } else if truthy_env("FRANKCLAW_ALLOW_BROWSER_MUTATIONS") {
+            // Backward compat: legacy env var maps to Mutating.
+            ApprovalLevel::Mutating
+        } else {
+            ApprovalLevel::default()
+        };
+
         Self {
-            allow_browser_mutations: truthy_env("FRANKCLAW_ALLOW_BROWSER_MUTATIONS"),
+            approval_level,
+            approved_tools: std::collections::HashSet::new(),
         }
     }
 
-    pub fn blocks(&self, tool_name: &str) -> bool {
-        tool_requires_operator_approval(tool_name) && !self.allow_browser_mutations
+    pub fn is_approved(&self, tool_name: &str, risk_level: ToolRiskLevel) -> bool {
+        if self.approved_tools.contains(tool_name) {
+            return true;
+        }
+        self.approval_level.approves(risk_level)
     }
 }
 
@@ -174,8 +227,14 @@ fn truthy_env(name: &str) -> bool {
     }
 }
 
-pub fn tool_requires_operator_approval(tool_name: &str) -> bool {
-    matches!(tool_name, "browser.click" | "browser.type" | "browser.press")
+/// Returns the risk level assigned to a tool by name.
+pub fn tool_risk_level(tool_name: &str) -> ToolRiskLevel {
+    match tool_name {
+        "browser.click" | "browser.type" | "browser.press" | "browser.select_option" | "bash" => {
+            ToolRiskLevel::Mutating
+        }
+        _ => ToolRiskLevel::ReadOnly,
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -806,6 +865,7 @@ impl Tool for SessionInspectTool {
                     }
                 }
             }),
+            risk_level: ToolRiskLevel::ReadOnly,
         }
     }
 
@@ -848,6 +908,7 @@ impl Tool for BrowserOpenTool {
                     "session_id": { "type": "string", "description": "Optional browser session identifier. Defaults to the current chat session." }
                 }
             }),
+            risk_level: ToolRiskLevel::ReadOnly,
         }
     }
 
@@ -881,6 +942,7 @@ impl Tool for BrowserExtractTool {
                     "max_chars": { "type": "integer", "minimum": 1, "maximum": 8000, "description": "Maximum number of visible text characters to return." }
                 }
             }),
+            risk_level: ToolRiskLevel::ReadOnly,
         }
     }
 
@@ -911,6 +973,7 @@ impl Tool for BrowserSnapshotTool {
                     "max_chars": { "type": "integer", "minimum": 1, "maximum": 32000, "description": "Maximum number of HTML characters to return." }
                 }
             }),
+            risk_level: ToolRiskLevel::ReadOnly,
         }
     }
 
@@ -942,6 +1005,7 @@ impl Tool for BrowserClickTool {
                     "selector": { "type": "string", "description": "CSS selector for the target element." }
                 }
             }),
+            risk_level: ToolRiskLevel::Mutating,
         }
     }
 
@@ -977,6 +1041,7 @@ impl Tool for BrowserTypeTool {
                     "text": { "type": "string", "description": "Replacement text value." }
                 }
             }),
+            risk_level: ToolRiskLevel::Mutating,
         }
     }
 
@@ -1018,6 +1083,7 @@ impl Tool for BrowserWaitTool {
                     "timeout_ms": { "type": "integer", "minimum": 50, "maximum": 30000, "description": "Maximum time to wait before failing." }
                 }
             }),
+            risk_level: ToolRiskLevel::ReadOnly,
         }
     }
 
@@ -1062,6 +1128,7 @@ impl Tool for BrowserPressTool {
                     "key": { "type": "string", "description": "Allowed key: Enter, Tab, Escape, ArrowDown, ArrowUp." }
                 }
             }),
+            risk_level: ToolRiskLevel::Mutating,
         }
     }
 
@@ -1100,6 +1167,7 @@ impl Tool for BrowserSessionsTool {
                 "type": "object",
                 "properties": {}
             }),
+            risk_level: ToolRiskLevel::ReadOnly,
         }
     }
 
@@ -1133,6 +1201,7 @@ impl Tool for BrowserCloseTool {
                     "session_id": { "type": "string", "description": "Optional browser session identifier. Defaults to the current chat session." }
                 }
             }),
+            risk_level: ToolRiskLevel::ReadOnly,
         }
     }
 
@@ -1496,7 +1565,54 @@ mod tests {
             .expect_err("browser.click should require explicit approval");
         assert!(err
             .to_string()
-            .contains("FRANKCLAW_ALLOW_BROWSER_MUTATIONS=1"));
+            .contains("requires mutating approval"));
+    }
+
+    #[test]
+    fn approval_level_readonly_approves_only_readonly() {
+        let level = ApprovalLevel::ReadOnly;
+        assert!(level.approves(ToolRiskLevel::ReadOnly));
+        assert!(!level.approves(ToolRiskLevel::Mutating));
+        assert!(!level.approves(ToolRiskLevel::Destructive));
+    }
+
+    #[test]
+    fn approval_level_mutating_approves_readonly_and_mutating() {
+        let level = ApprovalLevel::Mutating;
+        assert!(level.approves(ToolRiskLevel::ReadOnly));
+        assert!(level.approves(ToolRiskLevel::Mutating));
+        assert!(!level.approves(ToolRiskLevel::Destructive));
+    }
+
+    #[test]
+    fn approval_level_destructive_approves_all() {
+        let level = ApprovalLevel::Destructive;
+        assert!(level.approves(ToolRiskLevel::ReadOnly));
+        assert!(level.approves(ToolRiskLevel::Mutating));
+        assert!(level.approves(ToolRiskLevel::Destructive));
+    }
+
+    #[test]
+    fn policy_approved_tools_override_level() {
+        let policy = ToolPolicy {
+            approval_level: ApprovalLevel::ReadOnly,
+            approved_tools: std::collections::HashSet::from(["browser.click".into()]),
+        };
+        assert!(policy.is_approved("browser.click", ToolRiskLevel::Mutating));
+        assert!(!policy.is_approved("browser.type", ToolRiskLevel::Mutating));
+        assert!(policy.is_approved("browser.extract", ToolRiskLevel::ReadOnly));
+    }
+
+    #[test]
+    fn tool_risk_level_classification() {
+        use frankclaw_core::model::ToolRiskLevel;
+        assert_eq!(tool_risk_level("browser.click"), ToolRiskLevel::Mutating);
+        assert_eq!(tool_risk_level("browser.type"), ToolRiskLevel::Mutating);
+        assert_eq!(tool_risk_level("browser.press"), ToolRiskLevel::Mutating);
+        assert_eq!(tool_risk_level("bash"), ToolRiskLevel::Mutating);
+        assert_eq!(tool_risk_level("browser.open"), ToolRiskLevel::ReadOnly);
+        assert_eq!(tool_risk_level("browser.extract"), ToolRiskLevel::ReadOnly);
+        assert_eq!(tool_risk_level("session.inspect"), ToolRiskLevel::ReadOnly);
     }
 
     #[tokio::test]
@@ -1528,7 +1644,8 @@ mod tests {
         let mut registry = ToolRegistry {
             tools: HashMap::new(),
             policy: ToolPolicy {
-                allow_browser_mutations: true,
+                approval_level: ApprovalLevel::Mutating,
+                approved_tools: std::collections::HashSet::new(),
             },
         };
         registry.register(Arc::new(BrowserOpenTool::new(client.clone())));
@@ -1770,7 +1887,8 @@ mod tests {
         });
 
         let registry = ToolRegistry::with_policy(ToolPolicy {
-            allow_browser_mutations: true,
+            approval_level: ApprovalLevel::Mutating,
+            approved_tools: std::collections::HashSet::new(),
         });
         let ctx = ToolContext {
             agent_id: AgentId::default_agent(),
