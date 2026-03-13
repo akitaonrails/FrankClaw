@@ -99,6 +99,9 @@ pub enum Method {
     NodesPairApprove,
     NodesPairReject,
 
+    // Usage
+    UsageGet,
+
     // Health
     HealthProbe,
 }

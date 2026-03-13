@@ -377,6 +377,12 @@ impl Runtime {
 
         let mut remaining_tool_calls = MAX_TOOL_CALLS_PER_TURN;
         let mut tool_tracker = ToolCallTracker::new();
+        let mut total_usage = Usage {
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_read_tokens: None,
+            cache_write_tokens: None,
+        };
         let turn_deadline = tokio::time::Instant::now()
             + std::time::Duration::from_secs(TURN_SAFETY_TIMEOUT_SECS);
 
@@ -421,6 +427,9 @@ impl Runtime {
                 completion_future.await?
             };
 
+            // Accumulate usage across all rounds.
+            accumulate_usage(&mut total_usage, &response.usage);
+
             if response.tool_calls.is_empty() {
                 self.append_transcript_entry(
                     &session_key,
@@ -430,11 +439,16 @@ impl Runtime {
                     None,
                 )
                 .await?;
+
+                // Persist cumulative usage in session metadata.
+                self.update_session_usage(&session_key, &total_usage, &model_id)
+                    .await;
+
                 return Ok(ChatResponse {
                     session_key,
                     model_id,
                     content: response.content,
-                    usage: response.usage,
+                    usage: total_usage,
                 });
             }
 
@@ -1119,6 +1133,46 @@ impl Runtime {
             )
             .await
     }
+
+    /// Update cumulative usage stats in session metadata after a chat turn.
+    async fn update_session_usage(
+        &self,
+        session_key: &SessionKey,
+        turn_usage: &Usage,
+        model_id: &str,
+    ) {
+        let Ok(Some(mut session)) = self.sessions.get(session_key).await else {
+            return;
+        };
+        let meta = session.metadata.as_object_mut();
+        let meta = match meta {
+            Some(m) => m,
+            None => {
+                session.metadata = serde_json::json!({});
+                session.metadata.as_object_mut().unwrap()
+            }
+        };
+
+        // Accumulate totals.
+        let prev_input = meta.get("total_input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+        let prev_output = meta.get("total_output_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+        let prev_turns = meta.get("total_turns").and_then(|v| v.as_u64()).unwrap_or(0);
+
+        meta.insert("total_input_tokens".into(), (prev_input + turn_usage.input_tokens as u64).into());
+        meta.insert("total_output_tokens".into(), (prev_output + turn_usage.output_tokens as u64).into());
+        meta.insert("total_turns".into(), (prev_turns + 1).into());
+        meta.insert("last_model".into(), model_id.into());
+
+        // Calculate cost if available.
+        if let Some((input_cost, output_cost)) = frankclaw_models::costs::model_cost(model_id) {
+            let turn_cost = (turn_usage.input_tokens as f64 * input_cost)
+                + (turn_usage.output_tokens as f64 * output_cost);
+            let prev_cost = meta.get("total_cost_usd").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            meta.insert("total_cost_usd".into(), serde_json::json!(prev_cost + turn_cost));
+        }
+
+        let _ = self.sessions.upsert(&session).await;
+    }
 }
 
 /// Track tool call patterns to detect loops where the model repeatedly calls
@@ -1161,6 +1215,22 @@ impl ToolCallTracker {
             );
         }
         Ok(())
+    }
+}
+
+/// Accumulate token usage from a model response into a running total.
+fn accumulate_usage(total: &mut Usage, delta: &Usage) {
+    total.input_tokens += delta.input_tokens;
+    total.output_tokens += delta.output_tokens;
+    match (&mut total.cache_read_tokens, delta.cache_read_tokens) {
+        (Some(t), Some(d)) => *t += d,
+        (slot @ None, Some(d)) => *slot = Some(d),
+        _ => {}
+    }
+    match (&mut total.cache_write_tokens, delta.cache_write_tokens) {
+        (Some(t), Some(d)) => *t += d,
+        (slot @ None, Some(d)) => *slot = Some(d),
+        _ => {}
     }
 }
 
@@ -2696,5 +2766,26 @@ mod tests {
         assert!(result.is_err());
 
         let _ = std::fs::remove_file(temp);
+    }
+
+    #[test]
+    fn accumulate_usage_sums_tokens() {
+        let mut total = Usage {
+            input_tokens: 10,
+            output_tokens: 5,
+            cache_read_tokens: Some(2),
+            cache_write_tokens: None,
+        };
+        let delta = Usage {
+            input_tokens: 20,
+            output_tokens: 15,
+            cache_read_tokens: Some(3),
+            cache_write_tokens: Some(1),
+        };
+        accumulate_usage(&mut total, &delta);
+        assert_eq!(total.input_tokens, 30);
+        assert_eq!(total.output_tokens, 20);
+        assert_eq!(total.cache_read_tokens, Some(5));
+        assert_eq!(total.cache_write_tokens, Some(1));
     }
 }

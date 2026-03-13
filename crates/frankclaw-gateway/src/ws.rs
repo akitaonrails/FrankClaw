@@ -222,6 +222,9 @@ async fn dispatch_method(
         Method::SessionsDelete => {
             crate::methods::sessions_delete(state, request).await
         }
+        Method::UsageGet => {
+            crate::methods::usage_get(state, request).await
+        }
         Method::SessionsPatch => {
             crate::methods::sessions_patch(state, request).await
         }

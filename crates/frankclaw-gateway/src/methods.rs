@@ -629,6 +629,86 @@ fn parse_canvas_blocks(
     serde_json::from_value(value.clone()).map_err(|_| "invalid canvas blocks payload")
 }
 
+/// Handle `usage.get` method — return aggregated usage stats for sessions.
+pub async fn usage_get(
+    state: &Arc<GatewayState>,
+    request: RequestFrame,
+) -> ResponseFrame {
+    let agent_id = request
+        .params
+        .get("agent_id")
+        .and_then(|v| v.as_str())
+        .map(AgentId::new)
+        .unwrap_or_else(AgentId::default_agent);
+
+    let limit = request
+        .params
+        .get("limit")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(50)
+        .min(200) as usize;
+
+    let offset = request
+        .params
+        .get("offset")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as usize;
+
+    match state.sessions.list(&agent_id, limit, offset).await {
+        Ok(sessions) => {
+            let mut total_input_tokens: u64 = 0;
+            let mut total_output_tokens: u64 = 0;
+            let mut total_turns: u64 = 0;
+            let mut total_cost_usd: f64 = 0.0;
+
+            let session_usage: Vec<serde_json::Value> = sessions
+                .iter()
+                .map(|s| {
+                    let input = s.metadata.get("total_input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+                    let output = s.metadata.get("total_output_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+                    let turns = s.metadata.get("total_turns").and_then(|v| v.as_u64()).unwrap_or(0);
+                    let cost = s.metadata.get("total_cost_usd").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                    let model = s.metadata.get("last_model").and_then(|v| v.as_str()).unwrap_or("");
+
+                    total_input_tokens += input;
+                    total_output_tokens += output;
+                    total_turns += turns;
+                    total_cost_usd += cost;
+
+                    serde_json::json!({
+                        "session_key": s.key.as_str(),
+                        "channel": s.channel.as_str(),
+                        "created_at": s.created_at,
+                        "last_message_at": s.last_message_at,
+                        "input_tokens": input,
+                        "output_tokens": output,
+                        "total_tokens": input + output,
+                        "turns": turns,
+                        "cost_usd": cost,
+                        "last_model": model,
+                    })
+                })
+                .collect();
+
+            ResponseFrame::ok(
+                request.id,
+                serde_json::json!({
+                    "sessions": session_usage,
+                    "totals": {
+                        "input_tokens": total_input_tokens,
+                        "output_tokens": total_output_tokens,
+                        "total_tokens": total_input_tokens + total_output_tokens,
+                        "turns": total_turns,
+                        "cost_usd": total_cost_usd,
+                    },
+                    "count": session_usage.len(),
+                }),
+            )
+        }
+        Err(err) => ResponseFrame::err(request.id, 500, err.to_string()),
+    }
+}
+
 /// Handle `sessions.delete` method.
 pub async fn sessions_delete(
     state: &Arc<GatewayState>,
@@ -1523,6 +1603,53 @@ mod tests {
         )
         .await;
         assert_eq!(response.error.as_ref().map(|e| e.code), Some(404));
+
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[tokio::test]
+    async fn usage_get_returns_session_usage() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "frankclaw-gateway-methods-usage-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let (state, sessions) = build_test_state(&temp_dir).await;
+        let session_key = SessionKey::from_raw("agent:main:web:default:user-usage");
+
+        let entry = SessionEntry {
+            key: session_key.clone(),
+            agent_id: AgentId::default_agent(),
+            channel: ChannelId::new("web"),
+            account_id: "default".into(),
+            scoping: SessionScoping::PerChannelPeer,
+            created_at: chrono::Utc::now(),
+            last_message_at: None,
+            thread_id: None,
+            metadata: serde_json::json!({
+                "total_input_tokens": 100,
+                "total_output_tokens": 50,
+                "total_turns": 3,
+                "total_cost_usd": 0.0025,
+                "last_model": "gpt-4o",
+            }),
+        };
+        sessions.upsert(&entry).await.expect("session should upsert");
+
+        let response = usage_get(
+            &state,
+            RequestFrame {
+                id: RequestId::Text("usage-1".into()),
+                method: Method::UsageGet,
+                params: serde_json::json!({}),
+            },
+        )
+        .await;
+        assert!(response.error.is_none(), "usage_get should succeed");
+        let result = response.result.unwrap();
+        assert_eq!(result["totals"]["input_tokens"], 100);
+        assert_eq!(result["totals"]["output_tokens"], 50);
+        assert_eq!(result["totals"]["turns"], 3);
+        assert_eq!(result["count"], 1);
 
         let _ = std::fs::remove_dir_all(temp_dir);
     }
