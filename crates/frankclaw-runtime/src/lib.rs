@@ -612,6 +612,7 @@ impl Runtime {
                         continue;
                     }
                 };
+                let tool_images = tool_output.image_content;
                 let raw_content = serde_json::to_string(&serde_json::json!({
                     "tool": tool_output.name,
                     "output": tool_output.output,
@@ -670,10 +671,18 @@ impl Runtime {
                     })),
                 )
                 .await?;
-                request_messages.push(CompletionMessage::tool_result(
-                    &tool_call.id,
-                    tool_content,
-                ));
+                if tool_images.is_empty() {
+                    request_messages.push(CompletionMessage::tool_result(
+                        &tool_call.id,
+                        tool_content,
+                    ));
+                } else {
+                    request_messages.push(CompletionMessage::tool_result_with_images(
+                        &tool_call.id,
+                        tool_content,
+                        tool_images,
+                    ));
+                }
                 next_seq += 1;
             }
 

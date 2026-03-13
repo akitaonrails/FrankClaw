@@ -130,6 +130,21 @@ impl CompletionMessage {
             image_content: Vec::new(),
         }
     }
+
+    /// Create a tool result message with attached images (for vision-capable models).
+    pub fn tool_result_with_images(
+        tool_call_id: impl Into<String>,
+        content: impl Into<String>,
+        images: Vec<ImageContent>,
+    ) -> Self {
+        Self {
+            role: Role::Tool,
+            content: content.into(),
+            tool_calls: Vec::new(),
+            tool_call_id: Some(tool_call_id.into()),
+            image_content: images,
+        }
+    }
 }
 
 /// Response format for structured outputs.

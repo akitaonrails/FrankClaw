@@ -7,6 +7,7 @@ pub mod file;
 pub mod mcp;
 pub mod memory;
 pub mod messaging;
+pub mod image;
 pub mod pdf;
 pub mod sessions;
 pub mod web;
@@ -29,7 +30,7 @@ use tokio::net::lookup_host;
 use frankclaw_core::config::FrankClawConfig;
 use frankclaw_core::error::{FrankClawError, Result};
 use frankclaw_core::media::is_safe_ip;
-use frankclaw_core::model::{ToolDef, ToolRiskLevel};
+use frankclaw_core::model::{ImageContent, ToolDef, ToolRiskLevel};
 use frankclaw_core::session::SessionStore;
 use frankclaw_core::tool_services::{CronManager, Fetcher, MessageSender};
 use frankclaw_core::types::{AgentId, SessionKey};
@@ -57,6 +58,8 @@ pub struct ToolContext {
 pub struct ToolOutput {
     pub name: String,
     pub output: serde_json::Value,
+    /// Optional image content to attach to the tool result message for vision models.
+    pub image_content: Vec<ImageContent>,
 }
 
 #[async_trait]
@@ -161,6 +164,8 @@ impl ToolRegistry {
         registry.register(Arc::new(memory::MemoryGetTool));
         // PDF tools
         registry.register(Arc::new(pdf::PdfReadTool));
+        // Image tools
+        registry.register(Arc::new(image::ImageDescribeTool));
         registry
     }
 
@@ -218,10 +223,15 @@ impl ToolRegistry {
             });
         }
 
-        let output = tool.invoke(args, ctx).await?;
+        let mut output = tool.invoke(args, ctx).await?;
+
+        // Extract image content from tool output if present (used by image.describe).
+        let image_content = extract_image_content(&mut output);
+
         Ok(ToolOutput {
             name: name.to_string(),
             output,
+            image_content,
         })
     }
 }
@@ -230,6 +240,23 @@ impl Default for ToolRegistry {
     fn default() -> Self {
         Self::with_builtins()
     }
+}
+
+/// Extract `_image_content` from a tool's JSON output and convert to `ImageContent` structs.
+/// The `_image_content` key is removed from the output to avoid sending raw base64 to the LLM
+/// as text (it will be sent as proper image content parts instead).
+fn extract_image_content(output: &mut serde_json::Value) -> Vec<ImageContent> {
+    let arr = match output.as_object_mut().and_then(|obj| obj.remove("_image_content")) {
+        Some(serde_json::Value::Array(arr)) => arr,
+        _ => return Vec::new(),
+    };
+    arr.into_iter()
+        .filter_map(|v| {
+            let mime_type = v.get("mime_type")?.as_str()?.to_string();
+            let data = v.get("data")?.as_str()?.to_string();
+            Some(ImageContent { mime_type, data })
+        })
+        .collect()
 }
 
 /// Create a test-only ToolContext with minimal services.
