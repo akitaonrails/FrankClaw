@@ -76,6 +76,14 @@ pub struct ChatResponse {
 }
 
 #[derive(Debug, Clone)]
+pub struct CompactResult {
+    pub pruned_count: usize,
+    pub summary: Option<String>,
+    pub estimated_tokens_before: u32,
+    pub estimated_tokens_after: u32,
+}
+
+#[derive(Debug, Clone)]
 pub struct ToolRequest {
     pub agent_id: Option<AgentId>,
     pub session_key: Option<SessionKey>,
@@ -849,6 +857,189 @@ impl Runtime {
             activity = activity.split_off(activity.len() - limit);
         }
         Ok(activity)
+    }
+
+    /// Manually compact a session's conversation history.
+    ///
+    /// This prunes old messages and optionally uses the LLM to generate a real
+    /// summary of the pruned content (instead of just a marker).
+    pub async fn compact_session(
+        &self,
+        session_key: &SessionKey,
+        agent_id: Option<&AgentId>,
+    ) -> Result<CompactResult> {
+        let (agent_id, agent) = self.resolve_agent(agent_id)?;
+        let model_id = self.resolve_model_id(&agent, None)?;
+        let model_def = self
+            .model_defs
+            .iter()
+            .find(|m| m.id == model_id)
+            .cloned()
+            .ok_or_else(|| FrankClawError::AgentRuntime {
+                msg: format!("model {model_id} not found"),
+            })?;
+
+        // Load full transcript.
+        let entries = self
+            .sessions
+            .get_transcript(session_key, 10_000, None)
+            .await?;
+        if entries.is_empty() {
+            return Ok(CompactResult {
+                pruned_count: 0,
+                summary: None,
+                estimated_tokens_before: 0,
+                estimated_tokens_after: 0,
+            });
+        }
+
+        let messages: Vec<CompletionMessage> = entries
+            .iter()
+            .map(|entry| transcript_entry_to_message(entry))
+            .collect();
+
+        let allowed_tools = self.tools.definitions(&agent.tools).unwrap_or_default();
+        let system_prompt = self.build_system_prompt(
+            &agent_id, &agent, &model_id, &allowed_tools, None, None,
+        );
+
+        let tokens_before = context::estimate_messages_tokens(&messages);
+        let budget = context::available_input_budget(&model_def, system_prompt.as_deref());
+
+        if tokens_before <= budget {
+            return Ok(CompactResult {
+                pruned_count: 0,
+                summary: None,
+                estimated_tokens_before: tokens_before,
+                estimated_tokens_after: tokens_before,
+            });
+        }
+
+        // Run context optimization (pruning).
+        let context_result = context::optimize_context(
+            messages.clone(),
+            &model_def,
+            system_prompt.as_deref(),
+        );
+
+        // Try LLM-based summarization of the pruned messages.
+        let pruned_messages = &messages[..context_result.pruned_count];
+        let summary = if !pruned_messages.is_empty() {
+            match self.generate_compaction_summary(pruned_messages, &model_id).await {
+                Ok(s) => Some(s),
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        "LLM summarization failed, falling back to marker"
+                    );
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        // Build the compacted message list to persist.
+        let mut compacted = context_result.messages;
+
+        // Replace the generic marker with real summary if available.
+        if let Some(ref summary_text) = summary {
+            if !compacted.is_empty() && compacted[0].role == Role::User {
+                compacted[0] = CompletionMessage::text(
+                    Role::User,
+                    format!(
+                        "[Conversation summary — {} earlier messages compacted]\n\n{}",
+                        context_result.pruned_count, summary_text
+                    ),
+                );
+            }
+        }
+
+        let tokens_after = context::estimate_messages_tokens(&compacted);
+
+        // Persist: clear old transcript and write compacted version.
+        self.sessions.clear_transcript(session_key).await?;
+        for (i, msg) in compacted.iter().enumerate() {
+            self.append_transcript_entry(
+                session_key,
+                i as u64 + 1,
+                msg.role,
+                msg.content.clone(),
+                None,
+            )
+            .await?;
+        }
+
+        tracing::info!(
+            session = %session_key,
+            pruned = context_result.pruned_count,
+            tokens_before,
+            tokens_after,
+            has_summary = summary.is_some(),
+            "session compacted"
+        );
+
+        Ok(CompactResult {
+            pruned_count: context_result.pruned_count,
+            summary,
+            estimated_tokens_before: tokens_before,
+            estimated_tokens_after: tokens_after,
+        })
+    }
+
+    /// Call the LLM to produce a summary of pruned messages.
+    async fn generate_compaction_summary(
+        &self,
+        pruned_messages: &[CompletionMessage],
+        model_id: &str,
+    ) -> Result<String> {
+        // Build a text representation of the pruned conversation.
+        let mut conversation = String::new();
+        for msg in pruned_messages {
+            let role_label = match msg.role {
+                Role::User => "User",
+                Role::Assistant => "Assistant",
+                Role::System => "System",
+                Role::Tool => "Tool",
+            };
+            conversation.push_str(&format!("{role_label}: {}\n\n", msg.content));
+            // Cap conversation text to avoid token exhaustion during summarization.
+            if conversation.len() > 80_000 {
+                conversation.push_str("[... earlier messages omitted ...]\n");
+                break;
+            }
+        }
+
+        let prompt = prompts::render(prompts::COMPACTION_SUMMARIZE, &[
+            ("conversation", &conversation),
+        ]);
+
+        let summary_request = frankclaw_core::model::CompletionRequest {
+            model_id: model_id.to_string(),
+            system: Some(prompt),
+            messages: vec![CompletionMessage::text(
+                Role::User,
+                "Summarize the conversation above.",
+            )],
+            tools: Vec::new(),
+            max_tokens: Some(1024),
+            temperature: Some(0.3),
+            thinking_budget: None,
+            parallel_tool_calls: None,
+            seed: None,
+            response_format: None,
+            reasoning_effort: None,
+        };
+
+        let response = self.models.complete(summary_request, None).await?;
+        let summary = response.content.trim().to_string();
+
+        // Sanity: cap summary length.
+        if summary.len() > 4000 {
+            Ok(summary.chars().take(4000).collect())
+        } else {
+            Ok(summary)
+        }
     }
 
     /// Handle a spawn_subagent tool call by running chat() recursively.

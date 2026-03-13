@@ -231,6 +231,9 @@ async fn dispatch_method(
         Method::SessionsPatch => {
             crate::methods::sessions_patch(state, request).await
         }
+        Method::SessionsCompact => {
+            crate::methods::sessions_compact(state, request).await
+        }
         _ => ResponseFrame::err(
             request.id,
             501,

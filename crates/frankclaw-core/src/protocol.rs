@@ -73,6 +73,7 @@ pub enum Method {
     SessionsPatch,
     SessionsReset,
     SessionsDelete,
+    SessionsCompact,
 
     // Models
     ModelsList,
@@ -123,6 +124,7 @@ impl Method {
             | Self::SessionsPatch
             | Self::SessionsReset
             | Self::SessionsDelete
+            | Self::SessionsCompact
             | Self::CronAdd
             | Self::CronUpdate
             | Self::CronRemove

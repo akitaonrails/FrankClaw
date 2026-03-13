@@ -1736,3 +1736,54 @@ mod tests {
         let _ = std::fs::remove_dir_all(temp_dir);
     }
 }
+
+/// Handle `sessions.compact` method.
+pub async fn sessions_compact(
+    state: &Arc<GatewayState>,
+    request: RequestFrame,
+) -> ResponseFrame {
+    let session_key = match request.params.get("session_key").and_then(|v| v.as_str()) {
+        Some(key) => SessionKey::from_raw(key),
+        None => {
+            return ResponseFrame::err(request.id, 400, "session_key is required");
+        }
+    };
+
+    let agent_id = request
+        .params
+        .get("agent_id")
+        .and_then(|v| v.as_str())
+        .map(AgentId::new);
+
+    match state
+        .runtime
+        .compact_session(&session_key, agent_id.as_ref())
+        .await
+    {
+        Ok(result) => {
+            // Broadcast session update.
+            let event = Frame::Event(EventFrame {
+                event: EventType::SessionUpdated,
+                payload: serde_json::json!({
+                    "session_key": session_key.as_str(),
+                    "action": "compacted",
+                }),
+            });
+            if let Ok(json) = serde_json::to_string(&event) {
+                let _ = state.broadcast.send(json);
+            }
+
+            ResponseFrame::ok(
+                request.id,
+                serde_json::json!({
+                    "status": "ok",
+                    "pruned_count": result.pruned_count,
+                    "has_summary": result.summary.is_some(),
+                    "estimated_tokens_before": result.estimated_tokens_before,
+                    "estimated_tokens_after": result.estimated_tokens_after,
+                }),
+            )
+        }
+        Err(e) => ResponseFrame::err(request.id, 500, format!("compaction failed: {e}")),
+    }
+}

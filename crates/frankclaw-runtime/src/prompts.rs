@@ -24,6 +24,7 @@ pub const SUBAGENT_MAX_DEPTH: &str = include_str!("../prompts/subagent_max_depth
 // -- Context engine --
 
 pub const CONTEXT_COMPACTION: &str = include_str!("../prompts/context_compaction.md");
+pub const COMPACTION_SUMMARIZE: &str = include_str!("../prompts/compaction_summarize.md");
 
 /// Replace `{key}` placeholders in a template with provided values.
 ///
@@ -104,6 +105,11 @@ mod tests {
     }
 
     #[test]
+    fn compaction_summarize_template_has_placeholder() {
+        assert!(COMPACTION_SUMMARIZE.contains("{conversation}"));
+    }
+
+    #[test]
     fn agent_channel_template_has_placeholders() {
         assert!(AGENT_CHANNEL.contains("{channel}"));
         assert!(AGENT_CHANNEL.contains("{features}"));
@@ -122,6 +128,7 @@ mod tests {
             ("SUBAGENT_CAN_SPAWN", SUBAGENT_CAN_SPAWN),
             ("SUBAGENT_MAX_DEPTH", SUBAGENT_MAX_DEPTH),
             ("CONTEXT_COMPACTION", CONTEXT_COMPACTION),
+            ("COMPACTION_SUMMARIZE", COMPACTION_SUMMARIZE),
         ] {
             assert!(!template.trim().is_empty(), "{name} should not be empty");
         }
