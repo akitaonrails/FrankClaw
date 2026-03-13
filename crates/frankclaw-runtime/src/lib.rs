@@ -999,6 +999,14 @@ impl Runtime {
             }
         }
 
+        // Section 2b: Workspace bootstrap files (SOUL.md, IDENTITY.md, etc.)
+        if let Some(ref ws) = self.workspace {
+            let bootstrap = read_workspace_bootstrap_files(ws);
+            if !bootstrap.is_empty() {
+                sections.push(bootstrap);
+            }
+        }
+
         // Section 3: Available tools (with descriptions so the model knows its capabilities)
         if !tools.is_empty() {
             let tool_descriptions: Vec<String> = tools
@@ -1099,6 +1107,7 @@ impl Runtime {
         agent: &AgentDef,
         requested: Option<&str>,
     ) -> Result<String> {
+
         if let Some(model_id) = requested {
             return Ok(model_id.to_string());
         }
@@ -1290,6 +1299,82 @@ fn accumulate_usage(total: &mut Usage, delta: &Usage) {
         (Some(t), Some(d)) => *t += d,
         (slot @ None, Some(d)) => *slot = Some(d),
         _ => {}
+    }
+}
+
+/// Bootstrap file names recognized in a workspace directory.
+/// These are read (if present) and injected into the system prompt.
+const BOOTSTRAP_FILES: &[&str] = &[
+    "SOUL.md",
+    "IDENTITY.md",
+    "USER.md",
+    "BOOTSTRAP.md",
+    "MEMORY.md",
+];
+
+/// Maximum total size of all bootstrap files combined (150 KB).
+const MAX_BOOTSTRAP_TOTAL_BYTES: usize = 150 * 1024;
+
+/// Maximum size of a single bootstrap file (50 KB).
+const MAX_BOOTSTRAP_FILE_BYTES: usize = 50 * 1024;
+
+/// Read recognized workspace bootstrap files and return them as a combined string.
+/// Files that don't exist are silently skipped. Content is sanitized before inclusion.
+fn read_workspace_bootstrap_files(workspace: &std::path::Path) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    let mut total_bytes: usize = 0;
+
+    for filename in BOOTSTRAP_FILES {
+        let path = workspace.join(filename);
+        let content = match std::fs::read_to_string(&path) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+
+        if content.trim().is_empty() {
+            continue;
+        }
+
+        // Strip YAML front matter (---\n...\n---)
+        let content = strip_yaml_front_matter(&content);
+
+        // Per-file size limit
+        let content = if content.len() > MAX_BOOTSTRAP_FILE_BYTES {
+            let truncated: String = content.chars().take(MAX_BOOTSTRAP_FILE_BYTES).collect();
+            format!("{}\n\n[... truncated, file too large ...]", truncated)
+        } else {
+            content
+        };
+
+        // Check total budget
+        if total_bytes + content.len() > MAX_BOOTSTRAP_TOTAL_BYTES {
+            break;
+        }
+
+        total_bytes += content.len();
+        let sanitized = sanitize::sanitize_for_prompt(&content);
+        parts.push(format!("## {filename}\n\n{sanitized}"));
+    }
+
+    if parts.is_empty() {
+        return String::new();
+    }
+
+    format!("# Workspace Context\n\n{}", parts.join("\n\n"))
+}
+
+/// Strip YAML front matter delimited by `---` at the start of a string.
+fn strip_yaml_front_matter(content: &str) -> String {
+    let trimmed = content.trim_start();
+    if !trimmed.starts_with("---") {
+        return content.to_string();
+    }
+    // Find the closing ---
+    if let Some(end) = trimmed[3..].find("\n---") {
+        let after = &trimmed[3 + end + 4..]; // skip past \n---
+        after.trim_start_matches('\n').to_string()
+    } else {
+        content.to_string()
     }
 }
 
@@ -2907,5 +2992,86 @@ mod tests {
         assert_eq!(total.output_tokens, 20);
         assert_eq!(total.cache_read_tokens, Some(5));
         assert_eq!(total.cache_write_tokens, Some(1));
+    }
+
+    #[test]
+    fn bootstrap_reads_existing_files() {
+        let dir = std::env::temp_dir().join(format!("fc-bootstrap-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        std::fs::write(dir.join("SOUL.md"), "You are a helpful assistant.").unwrap();
+        std::fs::write(dir.join("IDENTITY.md"), "Name: TestBot").unwrap();
+
+        let result = read_workspace_bootstrap_files(&dir);
+        assert!(result.contains("# Workspace Context"));
+        assert!(result.contains("## SOUL.md"));
+        assert!(result.contains("You are a helpful assistant."));
+        assert!(result.contains("## IDENTITY.md"));
+        assert!(result.contains("Name: TestBot"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn bootstrap_skips_missing_files() {
+        let dir = std::env::temp_dir().join(format!("fc-bootstrap-empty-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let result = read_workspace_bootstrap_files(&dir);
+        assert!(result.is_empty());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn bootstrap_strips_yaml_front_matter() {
+        let dir = std::env::temp_dir().join(format!("fc-bootstrap-yaml-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        std::fs::write(
+            dir.join("SOUL.md"),
+            "---\ntitle: Soul\nauthor: test\n---\nActual content here.",
+        )
+        .unwrap();
+
+        let result = read_workspace_bootstrap_files(&dir);
+        assert!(result.contains("Actual content here."));
+        assert!(!result.contains("title: Soul"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn bootstrap_truncates_large_files() {
+        let dir = std::env::temp_dir().join(format!("fc-bootstrap-big-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // Write a file larger than MAX_BOOTSTRAP_FILE_BYTES (50KB)
+        let large_content = "A".repeat(60 * 1024);
+        std::fs::write(dir.join("SOUL.md"), &large_content).unwrap();
+
+        let result = read_workspace_bootstrap_files(&dir);
+        assert!(result.contains("[... truncated, file too large ...]"));
+        // Should still be under total budget
+        assert!(result.len() < MAX_BOOTSTRAP_TOTAL_BYTES + 1024);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn strip_yaml_front_matter_works() {
+        assert_eq!(
+            strip_yaml_front_matter("---\nkey: val\n---\nBody text"),
+            "Body text"
+        );
+        assert_eq!(
+            strip_yaml_front_matter("No front matter here"),
+            "No front matter here"
+        );
+        // Unclosed front matter is left as-is
+        assert_eq!(
+            strip_yaml_front_matter("---\nkey: val\nNo closing"),
+            "---\nkey: val\nNo closing"
+        );
     }
 }
