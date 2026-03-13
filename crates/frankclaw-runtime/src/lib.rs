@@ -1502,10 +1502,57 @@ fn build_providers(
                     provider.id.clone(),
                     provider.base_url.clone(),
                 )),
+                // OpenAI-compatible providers with default base URLs.
+                "google" | "gemini" => Arc::new(OpenAiProvider::new(
+                    provider.id.clone(),
+                    provider
+                        .base_url
+                        .clone()
+                        .unwrap_or_else(|| "https://generativelanguage.googleapis.com/v1beta/openai".to_string()),
+                    resolve_secret(provider, "GOOGLE_API_KEY")?,
+                    provider.models.clone(),
+                )),
+                "openrouter" => Arc::new(OpenAiProvider::new(
+                    provider.id.clone(),
+                    provider
+                        .base_url
+                        .clone()
+                        .unwrap_or_else(|| "https://openrouter.ai/api/v1".to_string()),
+                    resolve_secret(provider, "OPENROUTER_API_KEY")?,
+                    provider.models.clone(),
+                )),
+                "groq" => Arc::new(OpenAiProvider::new(
+                    provider.id.clone(),
+                    provider
+                        .base_url
+                        .clone()
+                        .unwrap_or_else(|| "https://api.groq.com/openai/v1".to_string()),
+                    resolve_secret(provider, "GROQ_API_KEY")?,
+                    provider.models.clone(),
+                )),
+                "together" => Arc::new(OpenAiProvider::new(
+                    provider.id.clone(),
+                    provider
+                        .base_url
+                        .clone()
+                        .unwrap_or_else(|| "https://api.together.xyz/v1".to_string()),
+                    resolve_secret(provider, "TOGETHER_API_KEY")?,
+                    provider.models.clone(),
+                )),
+                "deepseek" => Arc::new(OpenAiProvider::new(
+                    provider.id.clone(),
+                    provider
+                        .base_url
+                        .clone()
+                        .unwrap_or_else(|| "https://api.deepseek.com/v1".to_string()),
+                    resolve_secret(provider, "DEEPSEEK_API_KEY")?,
+                    provider.models.clone(),
+                )),
                 other => {
                     return Err(FrankClawError::ConfigValidation {
                         msg: format!(
-                            "unsupported model provider api '{}'; expected openai, anthropic, or ollama",
+                            "unsupported model provider api '{}'; expected openai, anthropic, ollama, \
+                             google, openrouter, groq, together, or deepseek",
                             other
                         ),
                     });
