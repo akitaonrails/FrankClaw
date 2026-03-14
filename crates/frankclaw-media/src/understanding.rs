@@ -178,16 +178,19 @@ impl VisionProvider {
         api_base: impl Into<String>,
         api_key: secrecy::SecretString,
         model: impl Into<String>,
-    ) -> Self {
-        Self {
-            client: reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(60))
-                .build()
-                .expect("invariant: HTTP client build should not fail"),
+    ) -> Result<Self> {
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(60))
+            .build()
+            .map_err(|e| FrankClawError::Internal {
+                msg: format!("failed to build HTTP client: {e}"),
+            })?;
+        Ok(Self {
+            client,
             api_base: api_base.into(),
             api_key,
             model: model.into(),
-        }
+        })
     }
 
     /// Build the OpenAI-compatible vision request body.
@@ -295,16 +298,19 @@ impl WhisperProvider {
         api_base: impl Into<String>,
         api_key: secrecy::SecretString,
         model: impl Into<String>,
-    ) -> Self {
-        Self {
-            client: reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(120))
-                .build()
-                .expect("invariant: HTTP client build should not fail"),
+    ) -> Result<Self> {
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(120))
+            .build()
+            .map_err(|e| FrankClawError::Internal {
+                msg: format!("failed to build HTTP client: {e}"),
+            })?;
+        Ok(Self {
+            client,
             api_base: api_base.into(),
             api_key,
             model: model.into(),
-        }
+        })
     }
 }
 

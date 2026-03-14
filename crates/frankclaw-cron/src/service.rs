@@ -16,6 +16,13 @@ use frankclaw_core::types::{AgentId, SessionKey};
 
 use crate::{RunLog, RunStatus};
 
+/// Async function that executes a cron job.
+pub type JobRunner = Arc<
+    dyn Fn(CronJob) -> Pin<Box<dyn Future<Output = Result<()>> + Send>>
+        + Send
+        + Sync,
+>;
+
 /// Default timeout for a single cron job execution.
 const JOB_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(600);
 
@@ -71,11 +78,7 @@ impl CronService {
     /// Start the cron tick loop.
     pub async fn start(
         &self,
-        job_runner: Arc<
-            dyn Fn(CronJob) -> Pin<Box<dyn Future<Output = Result<()>> + Send>>
-                + Send
-                + Sync,
-        >,
+        job_runner: JobRunner,
     ) {
         let jobs = self.jobs.clone();
         let path = self.path.clone();

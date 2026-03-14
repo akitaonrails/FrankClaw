@@ -1489,7 +1489,9 @@ fn open_media_store(
     .context("failed to open media store")?;
 
     // Attach VirusTotal scanner if API key is available.
-    if let Some(scanner) = frankclaw_media::virustotal::VirusTotalScanner::from_env() {
+    if let Some(scanner) = frankclaw_media::virustotal::VirusTotalScanner::from_env()
+        .context("failed to build VirusTotal scanner")?
+    {
         tracing::info!("VirusTotal file scanning enabled");
         store = store.with_scanner(std::sync::Arc::new(scanner));
     }
@@ -2690,7 +2692,7 @@ fn audit_tool_policies(
 }
 
 fn audit_file_scanning(findings: &mut Vec<Finding>) {
-    if frankclaw_media::virustotal::VirusTotalScanner::from_env().is_some() {
+    if frankclaw_media::virustotal::VirusTotalScanner::from_env().ok().flatten().is_some() {
         findings.push(Finding {
             severity: Severity::Info,
             category: "media",

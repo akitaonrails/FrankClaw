@@ -168,24 +168,26 @@ pub trait ChannelPlugin: Send + Sync + 'static {
     /// Send a message.
     async fn send(&self, msg: OutboundMessage) -> Result<SendResult>;
 
+    /// Build a channel error for this adapter.
+    fn channel_err(&self, msg: String) -> crate::error::FrankClawError {
+        crate::error::FrankClawError::Channel {
+            channel: self.id(),
+            msg,
+        }
+    }
+
     /// Edit a previously sent message (if supported).
     async fn edit_message(
         &self,
         _target: &EditMessageTarget,
         _new_text: &str,
     ) -> Result<()> {
-        Err(crate::error::FrankClawError::Channel {
-            channel: self.id(),
-            msg: "edit not supported".into(),
-        })
+        Err(self.channel_err("edit not supported".into()))
     }
 
     /// Delete a previously sent message (if supported).
     async fn delete_message(&self, _target: &DeleteMessageTarget) -> Result<()> {
-        Err(crate::error::FrankClawError::Channel {
-            channel: self.id(),
-            msg: "delete not supported".into(),
-        })
+        Err(self.channel_err("delete not supported".into()))
     }
 
     /// Start streaming a response (if supported).
@@ -193,10 +195,7 @@ pub trait ChannelPlugin: Send + Sync + 'static {
         &self,
         _msg: &OutboundMessage,
     ) -> Result<StreamHandle> {
-        Err(crate::error::FrankClawError::Channel {
-            channel: self.id(),
-            msg: "streaming not supported".into(),
-        })
+        Err(self.channel_err("streaming not supported".into()))
     }
 
     /// Update an in-progress stream.
@@ -205,10 +204,7 @@ pub trait ChannelPlugin: Send + Sync + 'static {
         _handle: &StreamHandle,
         _text: &str,
     ) -> Result<()> {
-        Err(crate::error::FrankClawError::Channel {
-            channel: self.id(),
-            msg: "streaming not supported".into(),
-        })
+        Err(self.channel_err("streaming not supported".into()))
     }
 
     /// Finalize a stream.
@@ -217,9 +213,6 @@ pub trait ChannelPlugin: Send + Sync + 'static {
         _handle: &StreamHandle,
         _final_text: &str,
     ) -> Result<()> {
-        Err(crate::error::FrankClawError::Channel {
-            channel: self.id(),
-            msg: "streaming not supported".into(),
-        })
+        Err(self.channel_err("streaming not supported".into()))
     }
 }

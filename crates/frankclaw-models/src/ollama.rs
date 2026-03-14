@@ -23,21 +23,23 @@ pub struct OllamaProvider {
 }
 
 impl OllamaProvider {
-    pub fn new(id: impl Into<String>, base_url: Option<String>) -> Self {
+    pub fn new(id: impl Into<String>, base_url: Option<String>) -> Result<Self> {
         let client = Client::builder()
             .timeout(std::time::Duration::from_secs(300))
             .build()
-            .expect("failed to build HTTP client");
+            .map_err(|e| FrankClawError::Internal {
+                msg: format!("failed to build HTTP client: {e}"),
+            })?;
 
         let base_url = normalize_ollama_url(
             &base_url.unwrap_or_else(|| DEFAULT_OLLAMA_URL.to_string()),
         );
 
-        Self {
+        Ok(Self {
             id: id.into(),
             client,
             base_url,
-        }
+        })
     }
 }
 
@@ -211,7 +213,8 @@ mod tests {
 
     #[test]
     fn ollama_provider_uses_normalized_url() {
-        let provider = OllamaProvider::new("test", Some("http://localhost:11434/v1/".into()));
+        let provider = OllamaProvider::new("test", Some("http://localhost:11434/v1/".into()))
+            .expect("failed to build provider");
         assert_eq!(provider.base_url, "http://localhost:11434");
     }
 }

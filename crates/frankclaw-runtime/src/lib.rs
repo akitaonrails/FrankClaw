@@ -1218,7 +1218,13 @@ async fn fetch_image_attachments(
 ) -> Vec<ImageContent> {
     use base64::Engine;
 
-    let fetcher = frankclaw_media::SafeFetcher::new(MAX_VISION_IMAGE_BYTES);
+    let fetcher = match frankclaw_media::SafeFetcher::new(MAX_VISION_IMAGE_BYTES) {
+        Ok(f) => f,
+        Err(e) => {
+            tracing::error!(error = %e, "failed to build image fetcher");
+            return Vec::new();
+        }
+    };
     let mut images = Vec::new();
 
     for attachment in attachments {
@@ -1293,16 +1299,16 @@ fn build_providers(
                         .unwrap_or_else(|| "https://api.openai.com/v1".to_string()),
                     resolve_secret(provider, "OPENAI_API_KEY")?,
                     provider.models.clone(),
-                )),
+                )?),
                 "anthropic" => Arc::new(AnthropicProvider::new(
                     provider.id.clone(),
                     resolve_secret(provider, "ANTHROPIC_API_KEY")?,
                     provider.models.clone(),
-                )),
+                )?),
                 "ollama" => Arc::new(OllamaProvider::new(
                     provider.id.clone(),
                     provider.base_url.clone(),
-                )),
+                )?),
                 other => {
                     return Err(FrankClawError::ConfigValidation {
                         msg: format!(

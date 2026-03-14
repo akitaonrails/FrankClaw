@@ -36,18 +36,15 @@ pub struct SlackChannel {
 }
 
 impl SlackChannel {
-    pub fn new(app_token: SecretString, bot_token: SecretString) -> Self {
-        let client = Client::builder()
-            .timeout(std::time::Duration::from_secs(60))
-            .build()
-            .expect("failed to build HTTP client");
+    pub fn new(app_token: SecretString, bot_token: SecretString) -> Result<Self> {
+        let client = crate::build_channel_http_client()?;
 
-        Self {
+        Ok(Self {
             app_token,
             bot_token,
             client,
             bot_user_id: Mutex::new(None),
-        }
+        })
     }
 
     fn app_auth_header(&self) -> String {
@@ -65,32 +62,20 @@ impl SlackChannel {
             .header("authorization", self.app_auth_header())
             .send()
             .await
-            .map_err(|e| FrankClawError::Channel {
-                channel: self.id(),
-                msg: format!("socket mode connection open failed: {e}"),
-            })?;
+            .map_err(|e| self.channel_err(format!("socket mode connection open failed: {e}")))?;
 
-        let body: serde_json::Value = resp.json().await.map_err(|e| FrankClawError::Channel {
-            channel: self.id(),
-            msg: format!("invalid socket mode response: {e}"),
-        })?;
+        let body: serde_json::Value = resp.json().await.map_err(|e| self.channel_err(format!("invalid socket mode response: {e}")))?;
         if body["ok"].as_bool() != Some(true) {
-            return Err(FrankClawError::Channel {
-                channel: self.id(),
-                msg: body["error"]
+            return Err(self.channel_err(body["error"]
                     .as_str()
                     .unwrap_or("slack socket mode request failed")
-                    .to_string(),
-            });
+                    .to_string()));
         }
 
         body["url"]
             .as_str()
             .map(str::to_string)
-            .ok_or_else(|| FrankClawError::Channel {
-                channel: self.id(),
-                msg: "slack socket mode response missing url".into(),
-            })
+            .ok_or_else(|| self.channel_err("slack socket mode response missing url".into()))
     }
 
     async fn populate_bot_user_id(&self) -> Result<()> {
@@ -100,23 +85,14 @@ impl SlackChannel {
             .header("authorization", self.bot_auth_header())
             .send()
             .await
-            .map_err(|e| FrankClawError::Channel {
-                channel: self.id(),
-                msg: format!("slack auth test failed: {e}"),
-            })?;
+            .map_err(|e| self.channel_err(format!("slack auth test failed: {e}")))?;
 
-        let body: serde_json::Value = resp.json().await.map_err(|e| FrankClawError::Channel {
-            channel: self.id(),
-            msg: format!("invalid slack auth test response: {e}"),
-        })?;
+        let body: serde_json::Value = resp.json().await.map_err(|e| self.channel_err(format!("invalid slack auth test response: {e}")))?;
         if body["ok"].as_bool() != Some(true) {
-            return Err(FrankClawError::Channel {
-                channel: self.id(),
-                msg: body["error"]
+            return Err(self.channel_err(body["error"]
                     .as_str()
                     .unwrap_or("slack auth test failed")
-                    .to_string(),
-            });
+                    .to_string()));
         }
 
         *self.bot_user_id.lock().await = body["user_id"].as_str().map(str::to_string);
@@ -131,17 +107,11 @@ impl SlackChannel {
         let socket_url = self.socket_mode_url().await?;
         let (socket, _) = tokio_tungstenite::connect_async(socket_url)
             .await
-            .map_err(|e| FrankClawError::Channel {
-                channel: self.id(),
-                msg: format!("slack socket mode connect failed: {e}"),
-            })?;
+            .map_err(|e| self.channel_err(format!("slack socket mode connect failed: {e}")))?;
         let (mut ws_tx, mut ws_rx) = socket.split();
 
         while let Some(frame) = ws_rx.next().await {
-            let frame = frame.map_err(|e| FrankClawError::Channel {
-                channel: self.id(),
-                msg: format!("slack socket mode read failed: {e}"),
-            })?;
+            let frame = frame.map_err(|e| self.channel_err(format!("slack socket mode read failed: {e}")))?;
             let payload = parse_socket_frame(self.id(), frame)?;
 
             if let Some(envelope_id) = payload["envelope_id"].as_str() {
@@ -152,10 +122,7 @@ impl SlackChannel {
                             .into(),
                     ))
                     .await
-                    .map_err(|e| FrankClawError::Channel {
-                        channel: self.id(),
-                        msg: format!("slack socket mode ack failed: {e}"),
-                    })?;
+                    .map_err(|e| self.channel_err(format!("slack socket mode ack failed: {e}")))?;
             }
 
             if payload["type"].as_str() != Some("events_api") {
@@ -170,10 +137,7 @@ impl SlackChannel {
             }
         }
 
-        Err(FrankClawError::Channel {
-            channel: self.id(),
-            msg: "slack socket mode closed".into(),
-        })
+        Err(self.channel_err("slack socket mode closed".into()))
     }
 
     async fn send_with_attachments(&self, msg: &OutboundMessage) -> Result<SendResult> {
@@ -282,10 +246,7 @@ impl SlackChannel {
             ))
             .send()
             .await
-            .map_err(|e| FrankClawError::Channel {
-                channel: self.id(),
-                msg: format!("slack complete upload failed: {e}"),
-            })?;
+            .map_err(|e| self.channel_err(format!("slack complete upload failed: {e}")))?;
 
         if complete_resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
             let retry_after = complete_resp
@@ -299,10 +260,7 @@ impl SlackChannel {
         }
 
         let complete_body: serde_json::Value =
-            complete_resp.json().await.map_err(|e| FrankClawError::Channel {
-                channel: self.id(),
-                msg: format!("invalid slack complete upload response: {e}"),
-            })?;
+            complete_resp.json().await.map_err(|e| self.channel_err(format!("invalid slack complete upload response: {e}")))?;
         if complete_body["ok"].as_bool() == Some(true) {
             let platform_message_id = complete_body["files"]
                 .as_array()
@@ -399,10 +357,7 @@ impl ChannelPlugin for SlackChannel {
             .json(&build_send_body(&msg))
             .send()
             .await
-            .map_err(|e| FrankClawError::Channel {
-                channel: self.id(),
-                msg: format!("slack send failed: {e}"),
-            })?;
+            .map_err(|e| self.channel_err(format!("slack send failed: {e}")))?;
 
         if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
             let retry_after = resp
@@ -415,10 +370,7 @@ impl ChannelPlugin for SlackChannel {
             });
         }
 
-        let body: serde_json::Value = resp.json().await.map_err(|e| FrankClawError::Channel {
-            channel: self.id(),
-            msg: format!("invalid slack send response: {e}"),
-        })?;
+        let body: serde_json::Value = resp.json().await.map_err(|e| self.channel_err(format!("invalid slack send response: {e}")))?;
         if body["ok"].as_bool() == Some(true) {
             Ok(SendResult::Sent {
                 platform_message_id: body["ts"].as_str().unwrap_or_default().to_string(),
@@ -439,25 +391,16 @@ impl ChannelPlugin for SlackChannel {
             .json(&build_edit_body(target, new_text))
             .send()
             .await
-            .map_err(|e| FrankClawError::Channel {
-                channel: self.id(),
-                msg: format!("slack edit failed: {e}"),
-            })?;
+            .map_err(|e| self.channel_err(format!("slack edit failed: {e}")))?;
 
-        let body: serde_json::Value = resp.json().await.map_err(|e| FrankClawError::Channel {
-            channel: self.id(),
-            msg: format!("invalid slack edit response: {e}"),
-        })?;
+        let body: serde_json::Value = resp.json().await.map_err(|e| self.channel_err(format!("invalid slack edit response: {e}")))?;
         if body["ok"].as_bool() == Some(true) {
             Ok(())
         } else {
-            Err(FrankClawError::Channel {
-                channel: self.id(),
-                msg: body["error"]
+            Err(self.channel_err(body["error"]
                     .as_str()
                     .unwrap_or("unknown slack edit failure")
-                    .to_string(),
-            })
+                    .to_string()))
         }
     }
 
@@ -473,10 +416,7 @@ impl ChannelPlugin for SlackChannel {
             SendResult::RateLimited { retry_after_secs } => Err(FrankClawError::RateLimited {
                 retry_after_secs: retry_after_secs.unwrap_or(1),
             }),
-            SendResult::Failed { reason } => Err(FrankClawError::Channel {
-                channel: self.id(),
-                msg: reason,
-            }),
+            SendResult::Failed { reason } => Err(self.channel_err(reason)),
         }
     }
 
@@ -513,25 +453,16 @@ impl ChannelPlugin for SlackChannel {
             .json(&build_delete_body(target))
             .send()
             .await
-            .map_err(|e| FrankClawError::Channel {
-                channel: self.id(),
-                msg: format!("slack delete failed: {e}"),
-            })?;
+            .map_err(|e| self.channel_err(format!("slack delete failed: {e}")))?;
 
-        let body: serde_json::Value = resp.json().await.map_err(|e| FrankClawError::Channel {
-            channel: self.id(),
-            msg: format!("invalid slack delete response: {e}"),
-        })?;
+        let body: serde_json::Value = resp.json().await.map_err(|e| self.channel_err(format!("invalid slack delete response: {e}")))?;
         if body["ok"].as_bool() == Some(true) {
             Ok(())
         } else {
-            Err(FrankClawError::Channel {
-                channel: self.id(),
-                msg: body["error"]
+            Err(self.channel_err(body["error"]
                     .as_str()
                     .unwrap_or("unknown slack delete failure")
-                    .to_string(),
-            })
+                    .to_string()))
         }
     }
 }

@@ -33,19 +33,16 @@ impl WhatsAppChannel {
         phone_number_id: String,
         verify_token: SecretString,
         app_secret: Option<SecretString>,
-    ) -> Self {
-        let client = Client::builder()
-            .timeout(std::time::Duration::from_secs(60))
-            .build()
-            .expect("failed to build HTTP client");
+    ) -> Result<Self> {
+        let client = crate::build_channel_http_client()?;
 
-        Self {
+        Ok(Self {
             access_token,
             phone_number_id: phone_number_id.trim().to_string(),
             verify_token,
             app_secret,
             client,
-        }
+        })
     }
 
     pub fn verify_token_matches(&self, candidate: &str) -> bool {
@@ -95,10 +92,7 @@ impl WhatsAppChannel {
         let part = reqwest::multipart::Part::bytes(bytes)
             .file_name(filename)
             .mime_str(&attachment.mime_type)
-            .map_err(|e| FrankClawError::Channel {
-                channel: channel.clone(),
-                msg: format!("invalid attachment mime type: {e}"),
-            })?;
+            .map_err(|e| self.channel_err(format!("invalid attachment mime type: {e}")))?;
         let form = reqwest::multipart::Form::new()
             .text("messaging_product", "whatsapp")
             .part("file", part);
@@ -109,33 +103,21 @@ impl WhatsAppChannel {
             .multipart(form)
             .send()
             .await
-            .map_err(|e| FrankClawError::Channel {
-                channel: channel.clone(),
-                msg: format!("whatsapp media upload failed: {e}"),
-            })?;
+            .map_err(|e| self.channel_err(format!("whatsapp media upload failed: {e}")))?;
 
         let status = resp.status();
-        let body: serde_json::Value = resp.json().await.map_err(|e| FrankClawError::Channel {
-            channel: channel.clone(),
-            msg: format!("invalid whatsapp media upload response: {e}"),
-        })?;
+        let body: serde_json::Value = resp.json().await.map_err(|e| self.channel_err(format!("invalid whatsapp media upload response: {e}")))?;
         if !status.is_success() {
-            return Err(FrankClawError::Channel {
-                channel,
-                msg: body["error"]["message"]
+            return Err(self.channel_err(body["error"]["message"]
                     .as_str()
                     .unwrap_or("unknown whatsapp media upload failure")
-                    .to_string(),
-            });
+                    .to_string()));
         }
 
         body["id"]
             .as_str()
             .map(str::to_string)
-            .ok_or_else(|| FrankClawError::Channel {
-                channel: self.id(),
-                msg: "whatsapp media upload response missing id".into(),
-            })
+            .ok_or_else(|| self.channel_err("whatsapp media upload response missing id".into()))
     }
 }
 
@@ -209,10 +191,7 @@ impl ChannelPlugin for WhatsAppChannel {
             .json(&body)
             .send()
             .await
-            .map_err(|e| FrankClawError::Channel {
-                channel: self.id(),
-                msg: format!("whatsapp send failed: {e}"),
-            })?;
+            .map_err(|e| self.channel_err(format!("whatsapp send failed: {e}")))?;
 
         if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
             let retry_after = resp
@@ -226,10 +205,7 @@ impl ChannelPlugin for WhatsAppChannel {
         }
 
         let status = resp.status();
-        let body: serde_json::Value = resp.json().await.map_err(|e| FrankClawError::Channel {
-            channel: self.id(),
-            msg: format!("invalid whatsapp send response: {e}"),
-        })?;
+        let body: serde_json::Value = resp.json().await.map_err(|e| self.channel_err(format!("invalid whatsapp send response: {e}")))?;
 
         if status.is_success() {
             let message_id = body["messages"]
@@ -775,7 +751,7 @@ mod tests {
             "12345".into(),
             SecretString::from("verify-token".to_string()),
             Some(SecretString::from("app-secret".to_string())),
-        );
+        ).expect("channel should build");
         let body = br#"{"entry":[{"id":"1"}]}"#;
 
         let mut mac =
@@ -799,7 +775,7 @@ mod tests {
             "12345".into(),
             SecretString::from("verify-token".to_string()),
             Some(SecretString::from("app-secret".to_string())),
-        );
+        ).expect("channel should build");
         let body = br#"{"entry":[{"id":"1"}]}"#;
 
         assert!(matches!(

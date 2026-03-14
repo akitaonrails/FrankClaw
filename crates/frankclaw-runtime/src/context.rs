@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 //! Context engine: manages conversation context within model token budgets.
 //!
 //! Handles token estimation, message pruning, and context compaction so that

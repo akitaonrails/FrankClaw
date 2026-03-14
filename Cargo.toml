@@ -94,6 +94,10 @@ tokio-util = { version = "0.7", features = ["rt"] }
 thiserror = "2"
 anyhow = "1"
 
+# Derive macros
+strum = { version = "0.26", features = ["derive"] }
+derive_more = { version = "1", features = ["display"] }
+
 # Config
 dirs = "6"
 

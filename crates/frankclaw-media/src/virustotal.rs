@@ -38,23 +38,28 @@ pub struct VirusTotalScanner {
 
 impl VirusTotalScanner {
     /// Create a scanner from an explicit API key.
-    pub fn new(api_key: SecretString) -> Self {
+    pub fn new(api_key: SecretString) -> Result<Self> {
         let client = Client::builder()
             .timeout(Duration::from_secs(60))
             .build()
-            .expect("invariant: reqwest client should build");
-        Self { client, api_key }
+            .map_err(|e| FrankClawError::Internal {
+                msg: format!("failed to build HTTP client: {e}"),
+            })?;
+        Ok(Self { client, api_key })
     }
 
     /// Try to create a scanner from the `VIRUSTOTAL_API_KEY` env var.
-    /// Returns `None` if the variable is not set or empty.
-    pub fn from_env() -> Option<Self> {
-        let key = std::env::var("VIRUSTOTAL_API_KEY").ok()?;
+    /// Returns `Ok(None)` if the variable is not set or empty.
+    pub fn from_env() -> Result<Option<Self>> {
+        let key = match std::env::var("VIRUSTOTAL_API_KEY") {
+            Ok(k) => k,
+            Err(_) => return Ok(None),
+        };
         let trimmed = key.trim().to_string();
         if trimmed.is_empty() {
-            return None;
+            return Ok(None);
         }
-        Some(Self::new(SecretString::from(trimmed)))
+        Ok(Some(Self::new(SecretString::from(trimmed))?))
     }
 
     /// Upload a file and get the analysis ID.
@@ -264,7 +269,7 @@ mod tests {
         // (If the test runner happens to have it set, this test is a no-op.)
         let key_was_set = std::env::var("VIRUSTOTAL_API_KEY").is_ok();
         if !key_was_set {
-            assert!(VirusTotalScanner::from_env().is_none());
+            assert!(VirusTotalScanner::from_env().expect("should not error").is_none());
         }
     }
 

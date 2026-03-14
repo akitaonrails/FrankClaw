@@ -116,7 +116,8 @@ async fn openai_health_check() {
     let model = openai_model();
     eprintln!("Using endpoint: {base}, model: {model}");
 
-    let provider = OpenAiProvider::new("openai-smoke", &base, key, vec![model]);
+    let provider = OpenAiProvider::new("openai-smoke", &base, key, vec![model])
+        .expect("failed to build provider");
     assert!(provider.health().await, "OpenAI-compatible health check should pass");
 }
 
@@ -125,7 +126,8 @@ async fn openai_health_check() {
 async fn openai_list_models() {
     let key = openai_key().expect("OPENAI_API_KEY must be set");
     let base = openai_base_url();
-    let provider = OpenAiProvider::new("openai-smoke", &base, key, vec![openai_model()]);
+    let provider = OpenAiProvider::new("openai-smoke", &base, key, vec![openai_model()])
+        .expect("failed to build provider");
 
     let models = provider.list_models().await.expect("should list models");
     assert!(!models.is_empty(), "should return at least one model");
@@ -140,7 +142,8 @@ async fn openai_simple_completion() {
     let model = openai_model();
     eprintln!("Using endpoint: {base}, model: {model}");
 
-    let provider = OpenAiProvider::new("openai-smoke", &base, key, vec![model.clone()]);
+    let provider = OpenAiProvider::new("openai-smoke", &base, key, vec![model.clone()])
+        .expect("failed to build provider");
 
     let request = simple_request(&model, "Reply with exactly the word 'pong'. Nothing else.");
     let response = provider
@@ -164,7 +167,8 @@ async fn openai_streaming_completion() {
     let key = openai_key().expect("OPENAI_API_KEY must be set");
     let base = openai_base_url();
     let model = openai_model();
-    let provider = OpenAiProvider::new("openai-smoke", &base, key, vec![model.clone()]);
+    let provider = OpenAiProvider::new("openai-smoke", &base, key, vec![model.clone()])
+        .expect("failed to build provider");
 
     let request = simple_request(&model, "Reply with exactly 'hello world'.");
     let (tx, mut rx) = tokio::sync::mpsc::channel::<StreamDelta>(64);
@@ -202,7 +206,8 @@ async fn anthropic_health_check() {
         "anthropic-smoke",
         key,
         vec!["claude-haiku-4-5-20251001".into()],
-    );
+    )
+    .expect("failed to build provider");
 
     assert!(provider.health().await, "Anthropic health check should pass");
 }
@@ -215,7 +220,8 @@ async fn anthropic_list_models() {
         "anthropic-smoke",
         key,
         vec!["claude-haiku-4-5-20251001".into()],
-    );
+    )
+    .expect("failed to build provider");
 
     let models = provider.list_models().await.expect("should list models");
     assert!(!models.is_empty(), "should return at least one model");
@@ -229,7 +235,8 @@ async fn anthropic_simple_completion() {
         "anthropic-smoke",
         key,
         vec!["claude-haiku-4-5-20251001".into()],
-    );
+    )
+    .expect("failed to build provider");
 
     let request = simple_request(
         "claude-haiku-4-5-20251001",
@@ -258,7 +265,8 @@ async fn anthropic_streaming_completion() {
         "anthropic-smoke",
         key,
         vec!["claude-haiku-4-5-20251001".into()],
-    );
+    )
+    .expect("failed to build provider");
 
     let request = simple_request(
         "claude-haiku-4-5-20251001",
@@ -294,7 +302,8 @@ async fn anthropic_system_prompt() {
         "anthropic-smoke",
         key,
         vec!["claude-haiku-4-5-20251001".into()],
-    );
+    )
+    .expect("failed to build provider");
 
     let request = CompletionRequest {
         model_id: "claude-haiku-4-5-20251001".into(),
@@ -334,7 +343,8 @@ async fn ollama_health_check() {
         return;
     }
 
-    let provider = OllamaProvider::new("ollama-smoke", None::<String>);
+    let provider = OllamaProvider::new("ollama-smoke", None::<String>)
+        .expect("failed to build provider");
     assert!(provider.health().await, "Ollama health check should pass");
 }
 
@@ -346,7 +356,8 @@ async fn ollama_list_models() {
         return;
     }
 
-    let provider = OllamaProvider::new("ollama-smoke", None::<String>);
+    let provider = OllamaProvider::new("ollama-smoke", None::<String>)
+        .expect("failed to build provider");
     let models = provider.list_models().await.expect("should list models");
     // Ollama may have zero models if none are pulled — that's OK
     eprintln!("Ollama reports {} model(s)", models.len());
@@ -360,7 +371,8 @@ async fn ollama_simple_completion() {
         return;
     }
 
-    let provider = OllamaProvider::new("ollama-smoke", None::<String>);
+    let provider = OllamaProvider::new("ollama-smoke", None::<String>)
+        .expect("failed to build provider");
     let models = provider.list_models().await.expect("should list models");
     if models.is_empty() {
         eprintln!("SKIP: No Ollama models pulled");
@@ -393,14 +405,14 @@ async fn failover_chain_tries_providers_in_order() {
             &openai_base_url(),
             key,
             vec![openai_model()],
-        )));
+        ).expect("failed to build provider")));
     }
     if let Some(key) = anthropic_key() {
         providers.push(Arc::new(AnthropicProvider::new(
             "anthropic",
             key,
             vec!["claude-haiku-4-5-20251001".into()],
-        )));
+        ).expect("failed to build provider")));
     }
 
     assert!(
@@ -431,7 +443,8 @@ async fn openai_invalid_key_returns_auth_error() {
         &base,
         SecretString::from("sk-invalid-key-for-testing".to_string()),
         vec![model.clone()],
-    );
+    )
+    .expect("failed to build provider");
 
     let request = simple_request(&model, "test");
     let err = provider
@@ -455,7 +468,8 @@ async fn anthropic_invalid_key_returns_auth_error() {
         "anthropic-bad-key",
         SecretString::from("sk-ant-invalid-key-for-testing".to_string()),
         vec!["claude-haiku-4-5-20251001".into()],
-    );
+    )
+    .expect("failed to build provider");
 
     let request = simple_request("claude-haiku-4-5-20251001", "test");
     let err = provider

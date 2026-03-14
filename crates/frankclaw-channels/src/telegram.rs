@@ -32,13 +32,10 @@ pub struct TelegramChannel {
 }
 
 impl TelegramChannel {
-    pub fn new(bot_token: SecretString) -> Self {
-        let client = Client::builder()
-            .timeout(std::time::Duration::from_secs(60))
-            .build()
-            .expect("failed to build HTTP client");
+    pub fn new(bot_token: SecretString) -> Result<Self> {
+        let client = crate::build_channel_http_client()?;
 
-        Self::with_client(bot_token, client)
+        Ok(Self::with_client(bot_token, client))
     }
 
     pub(crate) fn with_client(bot_token: SecretString, client: Client) -> Self {
@@ -114,15 +111,9 @@ impl TelegramChannel {
                 .send()
                 .await
         }
-        .map_err(|e| FrankClawError::Channel {
-            channel: self.id(),
-            msg: format!("send failed: {e}"),
-        })?;
+        .map_err(|e| self.channel_err(format!("send failed: {e}")))?;
 
-        let data: serde_json::Value = resp.json().await.map_err(|e| FrankClawError::Channel {
-            channel: self.id(),
-            msg: format!("invalid response: {e}"),
-        })?;
+        let data: serde_json::Value = resp.json().await.map_err(|e| self.channel_err(format!("invalid response: {e}")))?;
 
         if data["ok"].as_bool() == Some(true) {
             let msg_id = data["result"]["message_id"]
@@ -213,17 +204,9 @@ impl TelegramChannel {
             .json(&body)
             .send()
             .await
-            .map_err(|e| FrankClawError::Channel {
-                channel: self.id(),
-                msg: format!("poll failed: {e}"),
-            })?;
+            .map_err(|e| self.channel_err(format!("poll failed: {e}")))?;
 
-        let data: serde_json::Value = resp.json().await.map_err(|e| {
-            FrankClawError::Channel {
-                channel: self.id(),
-                msg: format!("invalid response: {e}"),
-            }
-        })?;
+        let data: serde_json::Value = resp.json().await.map_err(|e| self.channel_err(format!("invalid response: {e}")))?;
 
         if let Some(updates) = data["result"].as_array() {
             for update in updates {
@@ -440,15 +423,9 @@ impl ChannelPlugin for TelegramChannel {
             .json(&body)
             .send()
             .await
-            .map_err(|e| FrankClawError::Channel {
-                channel: self.id(),
-                msg: format!("edit failed: {e}"),
-            })?;
+            .map_err(|e| self.channel_err(format!("edit failed: {e}")))?;
 
-        let data: serde_json::Value = resp.json().await.map_err(|e| FrankClawError::Channel {
-            channel: self.id(),
-            msg: format!("invalid response: {e}"),
-        })?;
+        let data: serde_json::Value = resp.json().await.map_err(|e| self.channel_err(format!("invalid response: {e}")))?;
 
         if data["ok"].as_bool() == Some(true) {
             return Ok(());
@@ -463,10 +440,7 @@ impl ChannelPlugin for TelegramChannel {
             return Ok(());
         }
 
-        Err(FrankClawError::Channel {
-            channel: self.id(),
-            msg: description.to_string(),
-        })
+        Err(self.channel_err(description.to_string()))
     }
 
     async fn stream_start(&self, msg: &OutboundMessage) -> Result<frankclaw_core::channel::StreamHandle> {
@@ -481,10 +455,7 @@ impl ChannelPlugin for TelegramChannel {
             SendResult::RateLimited { retry_after_secs } => Err(FrankClawError::RateLimited {
                 retry_after_secs: retry_after_secs.unwrap_or(1),
             }),
-            SendResult::Failed { reason } => Err(FrankClawError::Channel {
-                channel: self.id(),
-                msg: reason,
-            }),
+            SendResult::Failed { reason } => Err(self.channel_err(reason)),
         }
     }
 
@@ -521,26 +492,17 @@ impl ChannelPlugin for TelegramChannel {
             .json(&body)
             .send()
             .await
-            .map_err(|e| FrankClawError::Channel {
-                channel: self.id(),
-                msg: format!("delete failed: {e}"),
-            })?;
+            .map_err(|e| self.channel_err(format!("delete failed: {e}")))?;
 
-        let data: serde_json::Value = resp.json().await.map_err(|e| FrankClawError::Channel {
-            channel: self.id(),
-            msg: format!("invalid response: {e}"),
-        })?;
+        let data: serde_json::Value = resp.json().await.map_err(|e| self.channel_err(format!("invalid response: {e}")))?;
 
         if data["ok"].as_bool() == Some(true) {
             Ok(())
         } else {
-            Err(FrankClawError::Channel {
-                channel: self.id(),
-                msg: data["description"]
+            Err(self.channel_err(data["description"]
                     .as_str()
                     .unwrap_or("unknown telegram delete error")
-                    .to_string(),
-            })
+                    .to_string()))
         }
     }
 }
@@ -815,7 +777,7 @@ mod tests {
 
     #[test]
     fn parse_message_uses_topic_thread_id_when_present() {
-        let channel = TelegramChannel::new(SecretString::from("token".to_string()));
+        let channel = TelegramChannel::new(SecretString::from("token".to_string())).expect("channel should build");
         let inbound = channel
             .parse_message(&serde_json::json!({
                 "message_id": 99,
@@ -1126,7 +1088,7 @@ mod tests {
 
     #[test]
     fn parse_message_uses_caption_and_collects_media_attachments() {
-        let channel = TelegramChannel::new(SecretString::from("token".to_string()));
+        let channel = TelegramChannel::new(SecretString::from("token".to_string())).expect("channel should build");
         let inbound = channel
             .parse_message(&serde_json::json!({
                 "message_id": 100,
@@ -1155,7 +1117,7 @@ mod tests {
 
     #[test]
     fn parse_message_falls_back_to_media_placeholder_without_text() {
-        let channel = TelegramChannel::new(SecretString::from("token".to_string()));
+        let channel = TelegramChannel::new(SecretString::from("token".to_string())).expect("channel should build");
         let inbound = channel
             .parse_message(&serde_json::json!({
                 "message_id": 101,
@@ -1181,7 +1143,7 @@ mod tests {
 
     #[test]
     fn parse_message_matches_contract_fixture_shape() {
-        let channel = TelegramChannel::new(SecretString::from("token".to_string()));
+        let channel = TelegramChannel::new(SecretString::from("token".to_string())).expect("channel should build");
         let inbound = channel
             .parse_message(&fixture("message_with_photo"))
             .expect("fixture should parse");

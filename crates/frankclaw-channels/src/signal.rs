@@ -25,17 +25,14 @@ pub struct SignalChannel {
 }
 
 impl SignalChannel {
-    pub fn new(base_url: String, account: Option<String>) -> Self {
-        let client = Client::builder()
-            .timeout(std::time::Duration::from_secs(60))
-            .build()
-            .expect("failed to build HTTP client");
+    pub fn new(base_url: String, account: Option<String>) -> Result<Self> {
+        let client = crate::build_channel_http_client()?;
 
-        Self {
+        Ok(Self {
             base_url: normalize_base_url(&base_url),
             account: account.map(|value| value.trim().to_string()).filter(|value| !value.is_empty()),
             client,
-        }
+        })
     }
 
     fn endpoint(&self, path: &str) -> String {
@@ -43,12 +40,7 @@ impl SignalChannel {
     }
 
     fn events_url(&self) -> Result<url::Url> {
-        let mut url = url::Url::parse(&self.endpoint(SIGNAL_API_PATH_EVENTS)).map_err(|e| {
-            FrankClawError::Channel {
-                channel: self.id(),
-                msg: format!("invalid signal events url: {e}"),
-            }
-        })?;
+        let mut url = url::Url::parse(&self.endpoint(SIGNAL_API_PATH_EVENTS)).map_err(|e| self.channel_err(format!("invalid signal events url: {e}")))?;
         if let Some(account) = self.account.as_deref() {
             url.query_pairs_mut().append_pair("account", account);
         }
@@ -65,29 +57,17 @@ impl SignalChannel {
             .header("accept", "text/event-stream")
             .send()
             .await
-            .map_err(|e| FrankClawError::Channel {
-                channel: self.id(),
-                msg: format!("signal event stream connect failed: {e}"),
-            })?;
+            .map_err(|e| self.channel_err(format!("signal event stream connect failed: {e}")))?;
 
         if !resp.status().is_success() {
-            return Err(FrankClawError::Channel {
-                channel: self.id(),
-                msg: format!("signal event stream returned HTTP {}", resp.status()),
-            });
+            return Err(self.channel_err(format!("signal event stream returned HTTP {}", resp.status())));
         }
 
         let mut parser = SignalSseParser::default();
         let mut stream = resp.bytes_stream();
         while let Some(chunk) = stream.next().await {
-            let chunk = chunk.map_err(|e| FrankClawError::Channel {
-                channel: self.id(),
-                msg: format!("signal event stream read failed: {e}"),
-            })?;
-            let text = std::str::from_utf8(&chunk).map_err(|e| FrankClawError::Channel {
-                channel: self.id(),
-                msg: format!("signal event stream sent invalid UTF-8: {e}"),
-            })?;
+            let chunk = chunk.map_err(|e| self.channel_err(format!("signal event stream read failed: {e}")))?;
+            let text = std::str::from_utf8(&chunk).map_err(|e| self.channel_err(format!("signal event stream sent invalid UTF-8: {e}")))?;
             for event in parser.push(text) {
                 if let Some(inbound) = parse_receive_event(&event, self.account.as_deref()) {
                     if inbound_tx.send(inbound).await.is_err() {
@@ -105,10 +85,7 @@ impl SignalChannel {
             }
         }
 
-        Err(FrankClawError::Channel {
-            channel: self.id(),
-            msg: "signal event stream closed".into(),
-        })
+        Err(self.channel_err("signal event stream closed".into()))
     }
 }
 
@@ -181,10 +158,7 @@ impl ChannelPlugin for SignalChannel {
             .json(&body)
             .send()
             .await
-            .map_err(|e| FrankClawError::Channel {
-                channel: self.id(),
-                msg: format!("signal send failed: {e}"),
-            })?;
+            .map_err(|e| self.channel_err(format!("signal send failed: {e}")))?;
 
         if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
             let retry_after = resp
@@ -204,10 +178,7 @@ impl ChannelPlugin for SignalChannel {
             });
         }
 
-        let rpc: SignalRpcResponse = resp.json().await.map_err(|e| FrankClawError::Channel {
-            channel: self.id(),
-            msg: format!("invalid signal send response: {e}"),
-        })?;
+        let rpc: SignalRpcResponse = resp.json().await.map_err(|e| self.channel_err(format!("invalid signal send response: {e}")))?;
 
         if let Some(error) = rpc.error {
             return Ok(SendResult::Failed {

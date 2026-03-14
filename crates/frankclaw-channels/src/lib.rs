@@ -15,6 +15,7 @@ pub mod web;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use reqwest::Client;
 use secrecy::SecretString;
 use serde_json::Value;
 
@@ -22,6 +23,19 @@ use frankclaw_core::channel::ChannelPlugin;
 use frankclaw_core::config::{ChannelConfig, FrankClawConfig};
 use frankclaw_core::error::{FrankClawError, Result};
 use frankclaw_core::types::ChannelId;
+
+/// Default timeout for channel HTTP clients (seconds).
+const CHANNEL_HTTP_TIMEOUT_SECS: u64 = 60;
+
+/// Build the standard HTTP client used by channel adapters.
+pub fn build_channel_http_client() -> Result<Client> {
+    Client::builder()
+        .timeout(std::time::Duration::from_secs(CHANNEL_HTTP_TIMEOUT_SECS))
+        .build()
+        .map_err(|e| FrankClawError::Internal {
+            msg: format!("failed to build channel HTTP client: {e}"),
+        })
+}
 
 pub struct ChannelSet {
     channels: HashMap<ChannelId, Arc<dyn ChannelPlugin>>,
@@ -106,7 +120,7 @@ fn build_channel(channel_id: &ChannelId, channel_config: &ChannelConfig) -> Resu
                 "telegram",
             )?;
             Ok(LoadedChannel::Standard(Arc::new(
-                telegram::TelegramChannel::new(bot_token),
+                telegram::TelegramChannel::new(bot_token)?,
             )))
         }
         "discord" => {
@@ -119,7 +133,7 @@ fn build_channel(channel_id: &ChannelId, channel_config: &ChannelConfig) -> Resu
                 "discord",
             )?;
             Ok(LoadedChannel::Standard(Arc::new(
-                discord::DiscordChannel::new(bot_token),
+                discord::DiscordChannel::new(bot_token)?,
             )))
         }
         "signal" => {
@@ -138,7 +152,7 @@ fn build_channel(channel_id: &ChannelId, channel_config: &ChannelConfig) -> Resu
                 &["account_env", "signal_number_env"],
             )?;
             Ok(LoadedChannel::Standard(Arc::new(
-                signal::SignalChannel::new(base_url, account_id),
+                signal::SignalChannel::new(base_url, account_id)?,
             )))
         }
         "whatsapp" => {
@@ -177,7 +191,7 @@ fn build_channel(channel_id: &ChannelId, channel_config: &ChannelConfig) -> Resu
                     phone_number_id,
                     verify_token,
                     app_secret,
-                ),
+                )?,
             )))
         }
         "slack" => {
@@ -197,7 +211,7 @@ fn build_channel(channel_id: &ChannelId, channel_config: &ChannelConfig) -> Resu
                 "slack",
             )?;
             Ok(LoadedChannel::Standard(Arc::new(
-                slack::SlackChannel::new(app_token, bot_token),
+                slack::SlackChannel::new(app_token, bot_token)?,
             )))
         }
         "email" => {

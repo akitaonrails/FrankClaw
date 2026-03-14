@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use std::fmt;
 
 /// Maximum length for identifiers (agent, channel, account, session key).
 /// Prevents memory exhaustion from maliciously long strings.
@@ -15,7 +14,7 @@ fn clamp_id(s: String) -> String {
 }
 
 /// Strongly-typed channel identifier.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, derive_more::Display)]
 #[serde(transparent)]
 pub struct ChannelId(String);
 
@@ -28,14 +27,8 @@ impl ChannelId {
     }
 }
 
-impl fmt::Display for ChannelId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
 /// Strongly-typed agent identifier.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, derive_more::Display)]
 #[serde(transparent)]
 pub struct AgentId(String);
 
@@ -51,14 +44,8 @@ impl AgentId {
     }
 }
 
-impl fmt::Display for AgentId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
 /// Session key: `{agent_id}:{channel}:{account_id}`
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, derive_more::Display)]
 #[serde(transparent)]
 pub struct SessionKey(String);
 
@@ -97,21 +84,10 @@ impl SessionKey {
     }
 }
 
-impl fmt::Display for SessionKey {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
 /// Unique identifier for a WebSocket connection.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, derive_more::Display)]
+#[display("conn-{_0}")]
 pub struct ConnId(pub u64);
-
-impl fmt::Display for ConnId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "conn-{}", self.0)
-    }
-}
 
 /// Request identifier for RPC correlation.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -132,7 +108,7 @@ pub enum Role {
 }
 
 /// Media identifier (UUID v4).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, derive_more::Display)]
 #[serde(transparent)]
 pub struct MediaId(uuid::Uuid);
 
@@ -149,12 +125,6 @@ impl MediaId {
 impl Default for MediaId {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-impl fmt::Display for MediaId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
     }
 }
 

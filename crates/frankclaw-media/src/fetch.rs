@@ -21,16 +21,18 @@ pub struct SafeFetcher {
 }
 
 impl SafeFetcher {
-    pub fn new(max_bytes: u64) -> Self {
+    pub fn new(max_bytes: u64) -> Result<Self> {
         // Disable automatic redirects — we follow them manually so we can
         // validate each intermediate URL through the SSRF checker.
         let client = Client::builder()
             .timeout(std::time::Duration::from_secs(30))
             .redirect(reqwest::redirect::Policy::none())
             .build()
-            .expect("failed to build HTTP client");
+            .map_err(|e| FrankClawError::Internal {
+                msg: format!("failed to build HTTP client: {e}"),
+            })?;
 
-        Self { client, max_bytes }
+        Ok(Self { client, max_bytes })
     }
 
     /// Fetch a URL with SSRF protection.

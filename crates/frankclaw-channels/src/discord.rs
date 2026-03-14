@@ -34,17 +34,14 @@ pub struct DiscordChannel {
 }
 
 impl DiscordChannel {
-    pub fn new(bot_token: SecretString) -> Self {
-        let client = Client::builder()
-            .timeout(std::time::Duration::from_secs(60))
-            .build()
-            .expect("failed to build HTTP client");
+    pub fn new(bot_token: SecretString) -> Result<Self> {
+        let client = crate::build_channel_http_client()?;
 
-        Self {
+        Ok(Self {
             bot_token,
             client,
             bot_user_id: Mutex::new(None),
-        }
+        })
     }
 
     fn auth_header(&self) -> String {
@@ -58,22 +55,13 @@ impl DiscordChannel {
             .header("authorization", self.auth_header())
             .send()
             .await
-            .map_err(|e| FrankClawError::Channel {
-                channel: self.id(),
-                msg: format!("gateway discovery failed: {e}"),
-            })?;
+            .map_err(|e| self.channel_err(format!("gateway discovery failed: {e}")))?;
 
-        let body: serde_json::Value = resp.json().await.map_err(|e| FrankClawError::Channel {
-            channel: self.id(),
-            msg: format!("invalid gateway discovery response: {e}"),
-        })?;
+        let body: serde_json::Value = resp.json().await.map_err(|e| self.channel_err(format!("invalid gateway discovery response: {e}")))?;
 
         let url = body["url"]
             .as_str()
-            .ok_or_else(|| FrankClawError::Channel {
-                channel: self.id(),
-                msg: "discord gateway discovery did not return a url".into(),
-            })?;
+            .ok_or_else(|| self.channel_err("discord gateway discovery did not return a url".into()))?;
 
         Ok(format!("{url}/?v={DISCORD_GATEWAY_VERSION}&encoding=json"))
     }
@@ -85,10 +73,7 @@ impl DiscordChannel {
         let gateway_url = self.gateway_url().await?;
         let (socket, _) = tokio_tungstenite::connect_async(gateway_url)
             .await
-            .map_err(|e| FrankClawError::Channel {
-                channel: self.id(),
-                msg: format!("gateway connect failed: {e}"),
-            })?;
+            .map_err(|e| self.channel_err(format!("gateway connect failed: {e}")))?;
         let (mut ws_tx, mut ws_rx) = socket.split();
 
         let hello = tokio::time::timeout(
@@ -96,16 +81,10 @@ impl DiscordChannel {
             next_json_frame(self.id(), &mut ws_rx),
         )
         .await
-        .map_err(|_| FrankClawError::Channel {
-            channel: self.id(),
-            msg: "discord gateway HELLO timeout after 30s".into(),
-        })??;
+        .map_err(|_| self.channel_err("discord gateway HELLO timeout after 30s".into()))??;
         let heartbeat_interval_ms = hello["d"]["heartbeat_interval"]
             .as_u64()
-            .ok_or_else(|| FrankClawError::Channel {
-                channel: self.id(),
-                msg: "discord hello payload missing heartbeat interval".into(),
-            })?;
+            .ok_or_else(|| self.channel_err("discord hello payload missing heartbeat interval".into()))?;
 
         ws_tx
             .send(Message::Text(
@@ -125,10 +104,7 @@ impl DiscordChannel {
                 .into(),
             ))
             .await
-            .map_err(|e| FrankClawError::Channel {
-                channel: self.id(),
-                msg: format!("identify failed: {e}"),
-            })?;
+            .map_err(|e| self.channel_err(format!("identify failed: {e}")))?;
 
         let seq = Arc::new(AtomicI64::new(-1));
         let heartbeat_seq = seq.clone();
@@ -149,22 +125,13 @@ impl DiscordChannel {
                     ws_tx
                         .send(Message::Text(payload.to_string().into()))
                         .await
-                        .map_err(|e| FrankClawError::Channel {
-                            channel: self.id(),
-                            msg: format!("heartbeat failed: {e}"),
-                        })?;
+                        .map_err(|e| self.channel_err(format!("heartbeat failed: {e}")))?;
                 }
                 frame = ws_rx.next() => {
                     let Some(frame) = frame else {
-                        return Err(FrankClawError::Channel {
-                            channel: self.id(),
-                            msg: "discord gateway closed".into(),
-                        });
+                        return Err(self.channel_err("discord gateway closed".into()));
                     };
-                    let frame = frame.map_err(|e| FrankClawError::Channel {
-                        channel: self.id(),
-                        msg: format!("discord gateway read failed: {e}"),
-                    })?;
+                    let frame = frame.map_err(|e| self.channel_err(format!("discord gateway read failed: {e}")))?;
                     let payload = parse_gateway_message(self.id(), frame)?;
                     if let Some(next_seq) = payload["s"].as_i64() {
                         seq.store(next_seq, Ordering::Relaxed);
@@ -192,16 +159,10 @@ impl DiscordChannel {
                             }
                         }
                         Some(7) => {
-                            return Err(FrankClawError::Channel {
-                                channel: self.id(),
-                                msg: "discord requested reconnect".into(),
-                            });
+                            return Err(self.channel_err("discord requested reconnect".into()));
                         }
                         Some(9) => {
-                            return Err(FrankClawError::Channel {
-                                channel: self.id(),
-                                msg: "discord gateway session invalid".into(),
-                            });
+                            return Err(self.channel_err("discord gateway session invalid".into()));
                         }
                         _ => {}
                     }
@@ -221,17 +182,11 @@ impl DiscordChannel {
         } else {
             request.multipart(build_send_form(&msg)?).send().await
         }
-        .map_err(|e| FrankClawError::Channel {
-            channel: self.id(),
-            msg: format!("send failed: {e}"),
-        })?;
+        .map_err(|e| self.channel_err(format!("send failed: {e}")))?;
 
         if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
             let body: serde_json::Value =
-                resp.json().await.map_err(|e| FrankClawError::Channel {
-                    channel: self.id(),
-                    msg: format!("invalid rate limit response: {e}"),
-                })?;
+                resp.json().await.map_err(|e| self.channel_err(format!("invalid rate limit response: {e}")))?;
             return Ok(SendResult::RateLimited {
                 retry_after_secs: body["retry_after"]
                     .as_f64()
@@ -240,10 +195,7 @@ impl DiscordChannel {
         }
 
         let status = resp.status();
-        let body: serde_json::Value = resp.json().await.map_err(|e| FrankClawError::Channel {
-            channel: self.id(),
-            msg: format!("invalid response: {e}"),
-        })?;
+        let body: serde_json::Value = resp.json().await.map_err(|e| self.channel_err(format!("invalid response: {e}")))?;
 
         if status.is_success() {
             Ok(SendResult::Sent {
@@ -370,25 +322,16 @@ impl ChannelPlugin for DiscordChannel {
             .json(&body)
             .send()
             .await
-            .map_err(|e| FrankClawError::Channel {
-                channel: self.id(),
-                msg: format!("discord edit failed: {e}"),
-            })?;
+            .map_err(|e| self.channel_err(format!("discord edit failed: {e}")))?;
 
         if resp.status().is_success() {
             Ok(())
         } else {
-            let body: serde_json::Value = resp.json().await.map_err(|e| FrankClawError::Channel {
-                channel: self.id(),
-                msg: format!("invalid discord edit response: {e}"),
-            })?;
-            Err(FrankClawError::Channel {
-                channel: self.id(),
-                msg: body["message"]
+            let body: serde_json::Value = resp.json().await.map_err(|e| self.channel_err(format!("invalid discord edit response: {e}")))?;
+            Err(self.channel_err(body["message"]
                     .as_str()
                     .unwrap_or("unknown discord edit failure")
-                    .to_string(),
-            })
+                    .to_string()))
         }
     }
 
@@ -404,10 +347,7 @@ impl ChannelPlugin for DiscordChannel {
             SendResult::RateLimited { retry_after_secs } => Err(FrankClawError::RateLimited {
                 retry_after_secs: retry_after_secs.unwrap_or(1),
             }),
-            SendResult::Failed { reason } => Err(FrankClawError::Channel {
-                channel: self.id(),
-                msg: reason,
-            }),
+            SendResult::Failed { reason } => Err(self.channel_err(reason)),
         }
     }
 
@@ -447,25 +387,16 @@ impl ChannelPlugin for DiscordChannel {
             .header("authorization", self.auth_header())
             .send()
             .await
-            .map_err(|e| FrankClawError::Channel {
-                channel: self.id(),
-                msg: format!("discord delete failed: {e}"),
-            })?;
+            .map_err(|e| self.channel_err(format!("discord delete failed: {e}")))?;
 
         if resp.status().is_success() {
             Ok(())
         } else {
-            let body: serde_json::Value = resp.json().await.map_err(|e| FrankClawError::Channel {
-                channel: self.id(),
-                msg: format!("invalid discord delete response: {e}"),
-            })?;
-            Err(FrankClawError::Channel {
-                channel: self.id(),
-                msg: body["message"]
+            let body: serde_json::Value = resp.json().await.map_err(|e| self.channel_err(format!("invalid discord delete response: {e}")))?;
+            Err(self.channel_err(body["message"]
                     .as_str()
                     .unwrap_or("unknown discord delete failure")
-                    .to_string(),
-            })
+                    .to_string()))
         }
     }
 }

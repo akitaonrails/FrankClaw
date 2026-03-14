@@ -79,12 +79,14 @@ enum McpTransportInner {
 
 impl McpClient {
     /// Create a new HTTP-based MCP client.
-    pub fn new_http(name: String, url: String, headers: HashMap<String, String>) -> Self {
+    pub fn new_http(name: String, url: String, headers: HashMap<String, String>) -> Result<Self> {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(30))
             .build()
-            .expect("reqwest client should build");
-        Self {
+            .map_err(|e| FrankClawError::Internal {
+                msg: format!("failed to build HTTP client: {e}"),
+            })?;
+        Ok(Self {
             name,
             transport: McpTransportInner::Http {
                 url,
@@ -94,7 +96,7 @@ impl McpClient {
             next_id: AtomicU64::new(1),
             initialized: RwLock::new(false),
             tools_cache: RwLock::new(None),
-        }
+        })
     }
 
     /// Create a new stdio-based MCP client by spawning a process.
@@ -153,7 +155,7 @@ impl McpClient {
     pub async fn from_config(config: &McpServerConfig) -> Result<Self> {
         match &config.transport {
             McpTransport::Http { url, headers } => {
-                Ok(Self::new_http(config.name.clone(), url.clone(), headers.clone()))
+                Self::new_http(config.name.clone(), url.clone(), headers.clone())
             }
             McpTransport::Stdio { command, args, env } => {
                 Self::new_stdio(config.name.clone(), command, args, env).await
@@ -587,7 +589,7 @@ mod tests {
             "test".into(),
             "http://localhost:1234".into(),
             HashMap::new(),
-        ));
+        ).expect("client should build"));
         let wrapper = McpToolWrapper::new("myserver".into(), client, tool);
         let def = wrapper.definition();
         assert_eq!(def.name, "myserver_read_file");
@@ -611,7 +613,7 @@ mod tests {
             "test".into(),
             "http://localhost:1234".into(),
             HashMap::new(),
-        ));
+        ).expect("client should build"));
         let wrapper = McpToolWrapper::new("srv".into(), client, tool);
         assert_eq!(wrapper.definition().risk_level, ToolRiskLevel::ReadOnly);
     }
@@ -631,7 +633,7 @@ mod tests {
             "test".into(),
             "http://localhost:1234".into(),
             HashMap::new(),
-        ));
+        ).expect("client should build"));
         let wrapper = McpToolWrapper::new("srv".into(), client, tool);
         assert_eq!(wrapper.definition().risk_level, ToolRiskLevel::Destructive);
     }
@@ -642,7 +644,7 @@ mod tests {
             "test".into(),
             "http://localhost:1234".into(),
             HashMap::new(),
-        );
+        ).expect("client should build");
         assert_eq!(client.next_id(), 1);
         assert_eq!(client.next_id(), 2);
         assert_eq!(client.next_id(), 3);

@@ -10,7 +10,7 @@ use tokio::sync::Mutex;
 use tracing::{info, warn};
 
 use frankclaw_core::channel::*;
-use frankclaw_core::error::{FrankClawError, Result};
+use frankclaw_core::error::Result;
 use frankclaw_core::types::ChannelId;
 
 /// Default IMAP port (TLS).
@@ -91,10 +91,7 @@ impl EmailChannel {
         let addr = format!("{}:{}", self.imap_server, self.imap_port);
         let tcp_stream = tokio::net::TcpStream::connect(&addr)
             .await
-            .map_err(|e| FrankClawError::Channel {
-                channel: ChannelId::new("email"),
-                msg: format!("IMAP TCP connect to {addr} failed: {e}"),
-            })?;
+            .map_err(|e| self.channel_err(format!("IMAP TCP connect to {addr} failed: {e}")))?;
 
         let mut root_store = rustls::RootCertStore::empty();
         root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
@@ -105,27 +102,18 @@ impl EmailChannel {
 
         let connector = tokio_rustls::TlsConnector::from(Arc::new(tls_config));
         let server_name = rustls_pki_types::ServerName::try_from(self.imap_server.clone())
-            .map_err(|e| FrankClawError::Channel {
-                channel: ChannelId::new("email"),
-                msg: format!("invalid IMAP server name: {e}"),
-            })?;
+            .map_err(|e| self.channel_err(format!("invalid IMAP server name: {e}")))?;
 
         let tls_stream = connector
             .connect(server_name, tcp_stream)
             .await
-            .map_err(|e| FrankClawError::Channel {
-                channel: ChannelId::new("email"),
-                msg: format!("IMAP TLS handshake failed: {e}"),
-            })?;
+            .map_err(|e| self.channel_err(format!("IMAP TLS handshake failed: {e}")))?;
 
         let client = async_imap::Client::new(tls_stream);
         let session = client
             .login(&self.imap_user, self.imap_password.expose_secret())
             .await
-            .map_err(|(e, _)| FrankClawError::Channel {
-                channel: ChannelId::new("email"),
-                msg: format!("IMAP login failed: {e}"),
-            })?;
+            .map_err(|(e, _)| self.channel_err(format!("IMAP login failed: {e}")))?;
 
         Ok(session)
     }
@@ -157,15 +145,9 @@ impl EmailChannel {
     ) -> Result<()> {
         let mut session = self.connect_imap().await?;
 
-        session.select("INBOX").await.map_err(|e| FrankClawError::Channel {
-            channel: ChannelId::new("email"),
-            msg: format!("IMAP select INBOX failed: {e}"),
-        })?;
+        session.select("INBOX").await.map_err(|e| self.channel_err(format!("IMAP select INBOX failed: {e}")))?;
 
-        let unseen = session.search("UNSEEN").await.map_err(|e| FrankClawError::Channel {
-            channel: ChannelId::new("email"),
-            msg: format!("IMAP search UNSEEN failed: {e}"),
-        })?;
+        let unseen = session.search("UNSEEN").await.map_err(|e| self.channel_err(format!("IMAP search UNSEEN failed: {e}")))?;
 
         if unseen.is_empty() {
             let _ = session.logout().await;
@@ -179,12 +161,7 @@ impl EmailChannel {
             .join(",");
 
         use futures_util::StreamExt;
-        let mut fetch_stream = session.fetch(&seq_set, "RFC822").await.map_err(|e| {
-            FrankClawError::Channel {
-                channel: ChannelId::new("email"),
-                msg: format!("IMAP fetch failed: {e}"),
-            }
-        })?;
+        let mut fetch_stream = session.fetch(&seq_set, "RFC822").await.map_err(|e| self.channel_err(format!("IMAP fetch failed: {e}")))?;
 
         let mut processed_seqs = Vec::new();
         while let Some(fetch_result) = fetch_stream.next().await {
@@ -376,18 +353,12 @@ impl ChannelPlugin for EmailChannel {
         let from: lettre::message::Mailbox = self
             .smtp_from
             .parse()
-            .map_err(|e| FrankClawError::Channel {
-                channel: ChannelId::new("email"),
-                msg: format!("invalid smtp_from address: {e}"),
-            })?;
+            .map_err(|e| self.channel_err(format!("invalid smtp_from address: {e}")))?;
 
         let to: lettre::message::Mailbox = msg
             .to
             .parse()
-            .map_err(|e| FrankClawError::Channel {
-                channel: ChannelId::new("email"),
-                msg: format!("invalid recipient address '{}': {e}", msg.to),
-            })?;
+            .map_err(|e| self.channel_err(format!("invalid recipient address '{}': {e}", msg.to)))?;
 
         let subject = msg
             .thread_id
@@ -402,10 +373,7 @@ impl ChannelPlugin for EmailChannel {
         let email = builder
             .header(ContentType::TEXT_PLAIN)
             .body(msg.text.clone())
-            .map_err(|e| FrankClawError::Channel {
-                channel: ChannelId::new("email"),
-                msg: format!("failed to build email: {e}"),
-            })?;
+            .map_err(|e| self.channel_err(format!("failed to build email: {e}")))?;
 
         let creds = Credentials::new(
             self.smtp_user.clone(),
@@ -413,18 +381,12 @@ impl ChannelPlugin for EmailChannel {
         );
 
         let mailer = AsyncSmtpTransport::<Tokio1Executor>::relay(&self.smtp_server)
-            .map_err(|e| FrankClawError::Channel {
-                channel: ChannelId::new("email"),
-                msg: format!("SMTP relay setup failed: {e}"),
-            })?
+            .map_err(|e| self.channel_err(format!("SMTP relay setup failed: {e}")))?
             .port(self.smtp_port)
             .credentials(creds)
             .build();
 
-        let response = mailer.send(email).await.map_err(|e| FrankClawError::Channel {
-            channel: ChannelId::new("email"),
-            msg: format!("SMTP send failed: {e}"),
-        })?;
+        let response = mailer.send(email).await.map_err(|e| self.channel_err(format!("SMTP send failed: {e}")))?;
 
         Ok(SendResult::Sent {
             platform_message_id: response.message().collect::<Vec<_>>().join(" "),

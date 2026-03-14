@@ -8,7 +8,7 @@ pub use job::{
     repair_stuck_job, JobContext, JobState, RepairResult, StateTransition, StuckJob,
     DEFAULT_MAX_REPAIR_ATTEMPTS,
 };
-pub use service::{CronJob, CronService};
+pub use service::{CronJob, CronService, JobRunner};
 pub use triggers::{
     matches_event_trigger, matches_system_event, FireCheck, RoutineAction, SystemEvent,
     TriggerGuardrails, TriggerState, TriggerType, DEFAULT_COOLDOWN_SECS, DEFAULT_MAX_CONCURRENT,

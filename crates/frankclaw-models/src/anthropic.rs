@@ -27,18 +27,20 @@ impl AnthropicProvider {
         id: impl Into<String>,
         api_key: SecretString,
         models: Vec<String>,
-    ) -> Self {
+    ) -> Result<Self> {
         let client = Client::builder()
             .timeout(std::time::Duration::from_secs(120))
             .build()
-            .expect("failed to build HTTP client");
+            .map_err(|e| FrankClawError::Internal {
+                msg: format!("failed to build HTTP client: {e}"),
+            })?;
 
-        Self {
+        Ok(Self {
             id: id.into(),
             client,
             api_key,
             models,
-        }
+        })
     }
 }
 

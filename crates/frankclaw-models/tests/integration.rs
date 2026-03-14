@@ -92,7 +92,8 @@ async fn circuit_breaker_closes_after_successes() {
     let base = openai_base_url();
     let model = openai_model();
 
-    let provider = Arc::new(OpenAiProvider::new("openai-cb", &base, key, vec![model.clone()]));
+    let provider = Arc::new(OpenAiProvider::new("openai-cb", &base, key, vec![model.clone()])
+        .expect("failed to build provider"));
     let chain = FailoverChain::new(vec![provider], 30);
 
     // Make a successful call — circuit should stay closed
@@ -137,7 +138,7 @@ async fn failover_chain_skips_bad_provider_uses_good() {
         &base,
         SecretString::from("sk-invalid-key".to_string()),
         vec![model.clone()],
-    ));
+    ).expect("failed to build provider"));
 
     // Second provider: good key (should succeed)
     let good_provider = Arc::new(OpenAiProvider::new(
@@ -145,7 +146,7 @@ async fn failover_chain_skips_bad_provider_uses_good() {
         &base,
         oai_key,
         vec![model.clone()],
-    ));
+    ).expect("failed to build provider"));
 
     let chain = FailoverChain::new(vec![bad_provider, good_provider], 30);
 
@@ -171,7 +172,8 @@ async fn cache_returns_identical_response_on_second_call() {
     let base = openai_base_url();
     let model = openai_model();
 
-    let provider = OpenAiProvider::new("openai-cache", &base, key, vec![model.clone()]);
+    let provider = OpenAiProvider::new("openai-cache", &base, key, vec![model.clone()])
+        .expect("failed to build provider");
     let cache = ResponseCache::new(ResponseCacheConfig {
         ttl: Duration::from_secs(60),
         max_entries: 10,
@@ -205,7 +207,8 @@ async fn cache_miss_for_different_prompts() {
     let base = openai_base_url();
     let model = openai_model();
 
-    let provider = OpenAiProvider::new("openai-cache2", &base, key, vec![model.clone()]);
+    let provider = OpenAiProvider::new("openai-cache2", &base, key, vec![model.clone()])
+        .expect("failed to build provider");
     let cache = ResponseCache::new(ResponseCacheConfig::default());
 
     let request1 = simple_request(&model, "What is 2+2?");
@@ -231,7 +234,8 @@ async fn cost_guard_tracks_real_api_usage() {
     let base = openai_base_url();
     let model = openai_model();
 
-    let provider = OpenAiProvider::new("openai-cost", &base, key, vec![model.clone()]);
+    let provider = OpenAiProvider::new("openai-cost", &base, key, vec![model.clone()])
+        .expect("failed to build provider");
     let guard = CostGuard::new(CostGuardConfig {
         max_cost_per_day_cents: Some(100_00), // $100 — won't hit this
         max_actions_per_hour: None,
@@ -414,7 +418,8 @@ async fn anthropic_streaming_with_system_prompt() {
         "anthropic-stream-sys",
         key,
         vec!["claude-haiku-4-5-20251001".into()],
-    );
+    )
+    .expect("failed to build provider");
 
     let request = CompletionRequest {
         model_id: "claude-haiku-4-5-20251001".into(),
@@ -473,7 +478,7 @@ async fn end_to_end_failover_with_cache_and_cost_tracking() {
             &openai_base_url(),
             key,
             vec![m],
-        )));
+        ).expect("failed to build provider")));
     }
     if let Some(key) = anthropic_key() {
         if model.is_empty() {
@@ -483,7 +488,7 @@ async fn end_to_end_failover_with_cache_and_cost_tracking() {
             "anthropic",
             key,
             vec!["claude-haiku-4-5-20251001".into()],
-        )));
+        ).expect("failed to build provider")));
     }
 
     assert!(!providers.is_empty(), "At least one API key must be set");
@@ -555,7 +560,8 @@ async fn both_providers_agree_on_simple_math() {
 
     if let Some(key) = openai_key() {
         let model = openai_model();
-        let provider = OpenAiProvider::new("openai-math", &openai_base_url(), key, vec![model.clone()]);
+        let provider = OpenAiProvider::new("openai-math", &openai_base_url(), key, vec![model.clone()])
+            .expect("failed to build provider");
         let request = simple_request(&model, "What is 7*8? Reply with just the number.");
         if let Ok(response) = provider.complete(request, None).await {
             results.push(("openai".into(), response.content.clone()));
@@ -568,7 +574,8 @@ async fn both_providers_agree_on_simple_math() {
             "anthropic-math",
             key,
             vec!["claude-haiku-4-5-20251001".into()],
-        );
+        )
+        .expect("failed to build provider");
         let request = simple_request(
             "claude-haiku-4-5-20251001",
             "What is 7*8? Reply with just the number.",

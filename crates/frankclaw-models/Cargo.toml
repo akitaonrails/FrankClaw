@@ -20,3 +20,4 @@ chrono = { workspace = true }
 rand = { workspace = true }
 sha2 = { workspace = true }
 regex = { workspace = true }
+strum = { workspace = true }
