@@ -8,7 +8,7 @@ FrankClaw is a security-hardened Rust rewrite of OpenClaw (a TypeScript AI assis
 
 ```bash
 cargo check          # Type-check the whole workspace
-cargo test           # Run all tests (~700)
+cargo test           # Run all tests (~825)
 cargo build          # Build everything (debug)
 cargo build -r       # Build release (LTO, stripped)
 cargo build -p frankclaw  # Build just the CLI binary
@@ -24,15 +24,15 @@ The binary is at `target/debug/frankclaw` (or `target/release/frankclaw`).
 |-------|---------|
 | `frankclaw-core` | Shared types, traits, error hierarchy, SSRF IP blocklist |
 | `frankclaw-crypto` | ChaCha20-Poly1305 encryption, Argon2id hashing, HMAC-SHA256 KDF |
-| `frankclaw-gateway` | Axum WS+HTTP server, auth middleware, rate limiter, broadcast, tunnel support |
+| `frankclaw-gateway` | Axum WS+HTTP server, auth middleware, rate limiter, broadcast, tunnel support, 8-tab web console, webhook limiter |
 | `frankclaw-sessions` | SQLite session store with encrypted-at-rest transcripts |
 | `frankclaw-models` | OpenAI, Anthropic, Ollama providers with failover, circuit breaker, caching, cost tracking, smart routing, leak detection |
 | `frankclaw-channels` | Channel adapters (Telegram, Web, Discord, Slack, Signal, WhatsApp) |
-| `frankclaw-runtime` | Agent runtime, prompt templates (markdown), subagent orchestration, context compaction |
-| `frankclaw-tools` | Tool registry, bash execution (with optional ai-jail sandbox), browser tools (CDP), MCP client |
-| `frankclaw-memory` | Vector search traits (LanceDB backend TBD) |
+| `frankclaw-runtime` | Agent runtime, prompt templates (markdown), subagent orchestration, context compaction, hooks wiring |
+| `frankclaw-tools` | Tool registry, bash execution (with optional ai-jail sandbox), browser tools (CDP), MCP client, audio transcription |
+| `frankclaw-memory` | SQLite FTS5 + vector memory store with embedding providers (OpenAI, Ollama), caching, file sync |
 | `frankclaw-cron` | Scheduled jobs with event triggers, job state machine, and self-repair |
-| `frankclaw-media` | File store with SSRF-safe fetcher, filename sanitization |
+| `frankclaw-media` | File store with SSRF-safe fetcher, filename sanitization, multi-provider media understanding (vision + transcription) |
 | `frankclaw-plugin-sdk` | Channel plugin registry |
 | `frankclaw-cli` | CLI binary entry point (setup, doctor, audit, start/stop, gateway, chat REPL) |
 

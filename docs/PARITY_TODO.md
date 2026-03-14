@@ -3,9 +3,10 @@
 This file tracks the remaining distance between FrankClaw and the broader OpenClaw feature surface.
 It should stay current as features land, are deferred, or are explicitly dropped.
 
-**Last verified**: 2026-03-12 — systematic directory-by-directory audit of OpenClaw `src/` (~192k LOC
-across ~2,864 non-test TypeScript files) against FrankClaw (~30k LOC across 13 Rust crates).
+**Last verified**: 2026-03-14 — systematic directory-by-directory audit of OpenClaw `src/` (~192k LOC
+across ~2,864 non-test TypeScript files) against FrankClaw (~35k LOC across 13 Rust crates).
 IronClaw feature adoption complete (12 features across 4 phases).
+OpenClaw parity phase complete (14 features: web UI enrichment + backend features).
 
 ## Current Position
 
@@ -27,16 +28,17 @@ It now has a working hardened core with:
 - job state machine with self-repair
 - interactive REPL (`frankclaw chat`)
 - DM pairing and stricter channel defaults
-- local console UI
-- cron reuse
-- signed webhooks
+- rich 8-tab web console with dark mode, tool approval, usage analytics, logs viewer
+- cron reuse with gateway RPC wiring
+- signed webhooks with JSON path extraction, templates, rate limiting
 - bounded tool execution
 - local Canvas host
 - operator onboarding and install helpers
 
-FrankClaw covers the **core message-to-model flow** well but is missing many
-of OpenClaw's advanced subsystems. The gap is primarily in runtime intelligence,
-extensibility, and multimodal capabilities — not the transport/plumbing layer.
+FrankClaw now covers the **core message-to-model flow** comprehensively with a rich
+web console, memory/RAG, multi-provider media understanding, webhook transforms,
+and full hook wiring. The remaining gap is primarily long-tail channel breadth and
+voice — not architecture, runtime intelligence, or the transport layer.
 
 ## Implemented Core and Surfaces
 
@@ -55,6 +57,20 @@ extensibility, and multimodal capabilities — not the transport/plumbing layer.
 - [x] Selector-based browser actions (`click`, `type`, `wait`, `press`)
 - [x] Browser session visibility and close control (`sessions`, `close`)
 - [x] Provider SSE streaming for OpenAI/Anthropic/Ollama
+- [x] Rich web console with 8 tabs (Connect, Chat, Canvas, System, Usage, Agents, Cron, Logs)
+- [x] Dark/light mode toggle with system preference detection and FOUC prevention
+- [x] Tool approval inline UI with Allow Once/Always/Deny controls
+- [x] Image paste upload in chat
+- [x] Usage analytics with CSV export
+- [x] Agent management (read-only config view)
+- [x] Logs viewer with level filters, text search, auto-scroll, ring buffer
+- [x] Focus mode (full viewport chat)
+- [x] Resizable markdown sidebar for tool output
+- [x] Cron job management (list, add, remove, run now) via gateway RPC
+- [x] Webhook JSON path extraction, templates, per-mapping rate limiting and concurrency
+- [x] Memory/RAG with SQLite FTS5, embedding providers, file sync
+- [x] Hook lifecycle wiring in runtime (message.received/sent, tool.before/after)
+- [x] Multi-provider media understanding with fallback chain (OpenAI, Anthropic, Ollama vision + Whisper)
 
 ## Implemented Channels
 
@@ -90,10 +106,11 @@ These are the core "brain" features that make OpenClaw's agent loop sophisticate
 
 ### Multimodal & Content Understanding
 
-- [x] **Media Understanding** — Vision description via OpenAI-compatible vision API, audio
-  transcription via Whisper API, media kind classification, attachment processing pipeline
-  with size limits and graceful error handling. (`frankclaw-media/src/understanding.rs`,
-  `frankclaw-core/src/media.rs`)
+- [x] **Media Understanding** — Multi-provider vision (OpenAI, Anthropic, Ollama) and audio
+  transcription (Whisper), fallback chain, media kind classification, attachment processing
+  pipeline with size limits and graceful error handling, `audio.transcribe` tool, configurable
+  via `MediaUnderstandingConfig`. (`frankclaw-media/src/understanding.rs`,
+  `frankclaw-tools/src/audio.rs`, `frankclaw-core/src/media.rs`)
 
 - [x] **Link Understanding** — SSRF-safe URL extraction from messages with deduplication,
   markdown link stripping, and private IP/hostname blocking. (`frankclaw-core/src/links.rs`)
@@ -102,9 +119,10 @@ These are the core "brain" features that make OpenClaw's agent loop sophisticate
 
 ### Extensibility & Hooks
 
-- [x] **Hooks System** — Event-driven hook registry with 5 event types (command, session, agent,
-  gateway, message), async fire-and-forget execution, general and specific event matching,
-  30s timeout per handler, typed event constructors. (`frankclaw-core/src/hooks.rs`)
+- [x] **Hooks System** — Event-driven hook registry with 6 event types (command, session, agent,
+  gateway, message, tool), async fire-and-forget execution, general and specific event matching,
+  30s timeout per handler, typed event constructors. Wired into runtime: message.received/sent,
+  tool.before/after. (`frankclaw-core/src/hooks.rs`, `frankclaw-runtime/src/lib.rs`)
 
 - [x] **Gmail Integration** — **SKIPPED**: complex Google Pub/Sub integration for a niche channel.
 
@@ -132,9 +150,10 @@ These are the core "brain" features that make OpenClaw's agent loop sophisticate
   backoff on failure, automatic recovery on cooldown expiry, and provider-level key management.
   (`frankclaw-core/src/api_keys.rs`)
 
-- [x] **Vector Memory Backend** — **DEFERRED**: traits are defined in `frankclaw-memory`.
-  A concrete backend (LanceDB) should be added when there's a real use case to drive
-  design decisions, not speculatively.
+- [x] **Memory/RAG System** — SQLite FTS5 + cosine vector search with hybrid scoring,
+  embedding providers (OpenAI, Ollama) with SHA-256 caching, paragraph-based chunking
+  with line tracking, file syncer with content hash change detection.
+  (`frankclaw-memory/src/store.rs`, `embedding.rs`, `chunking.rs`, `sync.rs`)
 
 ### Channel Features
 
@@ -320,5 +339,3 @@ Skipped IronClaw features (don't fit architecture or lower priority):
 - Companion node/app surfaces
 - Voice
 - Distro-specific installers
-- Secrets audit CLI
-- Full TUI (FrankClaw has basic console; OpenClaw has full interactive client with session tabs, token display, syntax highlighting)

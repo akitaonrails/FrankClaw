@@ -14,11 +14,14 @@ What's at parity:
 - Cost tracking with daily budget guards
 - Credential leak detection (12 patterns scanned in all LLM/tool output)
 - Extended thinking support for Claude 3.7+ and o1-style models
-- Media pipeline with vision/audio understanding
+- Multi-provider media understanding: OpenAI, Anthropic, Ollama vision + Whisper transcription with fallback chain
+- Memory/RAG: SQLite FTS5 + vector search with embedding providers, file sync
+- Rich 8-tab web console: dark mode, tool approval UI, usage analytics, agent management, cron jobs, logs viewer, focus mode
+- Webhook transforms: JSON path extraction, templates, per-mapping rate limiting and concurrency control
 - Canvas host with revision conflict detection
 - Browser automation (CDP-based, 9 tools)
 - Bash tool with allowlist + sandbox (ai-jail)
-- 3-tier tool risk levels (ReadOnly → Mutating → Destructive) with per-tool approval overrides
+- 3-tier tool risk levels (ReadOnly → Mutating → Destructive) with per-tool approval overrides and inline approval UI
 - Tunnel support: Cloudflare Tunnel, ngrok, and custom commands for webhook exposure
 - Job state machine with self-repair for background tasks
 - Event-driven routine triggers (cron, message pattern, system events, manual)
@@ -54,6 +57,10 @@ For channel setup, see [CHANNEL_SETUP.md](docs/CHANNEL_SETUP.md), `examples/chan
 - **Operator support** — interactive setup wizard, doctor diagnostics, security audit with severity ratings, process management (start/stop daemon), status, remote exposure checks, onboarding, and systemd unit generation
 - **Docker runtime** — `docker compose up -d` starts the gateway, headless Chromium, and Cloudflare tunnel in one command
 - **Prompt templates** — All LLM-facing text lives in editable markdown files, embedded at compile time
+- **Media understanding** — Multi-provider vision (OpenAI, Anthropic, Ollama) and audio transcription (Whisper) with ordered fallback chain, configurable via `understanding` config section
+- **Memory/RAG** — SQLite FTS5 full-text search + cosine vector similarity with hybrid scoring, embedding providers (OpenAI, Ollama) with SHA-256 caching, paragraph-based chunking, automatic file sync
+- **Rich web console** — 8-tab interface (Connect, Chat, Canvas, System, Usage, Agents, Cron, Logs) with dark/light mode, tool approval cards, image paste, usage analytics with CSV export, focus mode, resizable markdown sidebar
+- **Webhook transforms** — JSON path extraction from nested payloads, message templates, per-mapping concurrency limits and fixed-window rate limiting
 - **Media pipeline** — File handling with SSRF protection, filename sanitization, and optional VirusTotal malware scanning
 - **Internationalized CLI** — 9 locales (en, pt-BR, pt-PT, es, fr, de, it, ja, ko) via `FRANKCLAW_LANG`
 - **Plugin system** — Trait-based channel and provider adapters
@@ -94,15 +101,15 @@ For channel setup, see [CHANNEL_SETUP.md](docs/CHANNEL_SETUP.md), `examples/chan
 |-------|-------------|
 | `frankclaw-core` | Shared types, traits, error hierarchy, SSRF IP blocklist |
 | `frankclaw-crypto` | ChaCha20-Poly1305 encryption, Argon2id hashing, HMAC-SHA256 key derivation |
-| `frankclaw-gateway` | Axum WebSocket + HTTP server, auth, rate limiting, config hot-reload, tunnel support |
+| `frankclaw-gateway` | Axum WebSocket + HTTP server, auth, rate limiting, config hot-reload, tunnel support, 8-tab web console, webhook limiter |
 | `frankclaw-sessions` | SQLite session store with optional encrypted transcripts |
 | `frankclaw-models` | AI provider adapters (OpenAI, Anthropic, Ollama) with failover, circuit breaker, caching, cost tracking, smart routing |
 | `frankclaw-channels` | Messaging channel adapters (Web, Telegram, Discord, Slack, Signal, WhatsApp, Email) |
-| `frankclaw-runtime` | Agent runtime, prompt templates, subagent orchestration, context compaction |
-| `frankclaw-tools` | Tool registry, bash execution (with optional ai-jail sandbox), browser tools, MCP client |
-| `frankclaw-memory` | Vector search traits for long-term memory |
+| `frankclaw-runtime` | Agent runtime, prompt templates, subagent orchestration, context compaction, hooks wiring |
+| `frankclaw-tools` | Tool registry, bash execution (with optional ai-jail sandbox), browser tools, MCP client, audio transcription |
+| `frankclaw-memory` | SQLite FTS5 + vector memory store with embedding providers (OpenAI, Ollama), caching, file sync |
 | `frankclaw-cron` | Scheduled jobs with event triggers, job state machine, and self-repair |
-| `frankclaw-media` | File storage with SSRF-safe HTTP fetcher and optional VirusTotal malware scanning |
+| `frankclaw-media` | File storage with SSRF-safe HTTP fetcher, optional VirusTotal malware scanning, multi-provider media understanding (vision + transcription) |
 | `frankclaw-plugin-sdk` | Plugin registry for extending channels and tools |
 | `frankclaw-cli` | CLI binary with all subcommands |
 
@@ -454,7 +461,7 @@ The config file and `.env` may contain API keys and tokens. **Mitigation:** `060
 | **Channel adapters** | WASM-based plugin channels | 7 native compiled-in adapters (Web, Telegram, Discord, Slack, Signal, WhatsApp, Email) |
 | **Tool approval** | Capability-based permissions per workspace | 3-tier risk levels (ReadOnly/Mutating/Destructive) with per-tool overrides |
 | **Encryption at rest** | AES-256-GCM credential vault | ChaCha20-Poly1305 for sessions, config, and credentials |
-| **Memory / search** | PostgreSQL pgvector + FTS with reciprocal rank fusion | Vector search trait (LanceDB backend planned), SQLite FTS |
+| **Memory / search** | PostgreSQL pgvector + FTS with reciprocal rank fusion | SQLite FTS5 + cosine vector search with hybrid scoring, embedding providers (OpenAI, Ollama), file sync |
 | **LLM resilience** | Circuit breaker + retry + smart routing | Circuit breaker + retry with exponential backoff + jitter, smart routing (13-dimension complexity scorer), response caching, cost tracking with budget guards |
 | **MCP integration** | JSON-RPC client (stdio, HTTP, Unix socket) | JSON-RPC 2.0 client (stdio, HTTP) with tool wrapping and risk level mapping |
 | **Default AI provider** | NEAR AI (with OpenRouter, Together, Fireworks, Ollama) | Any OpenAI-compatible API, Anthropic, Ollama |
@@ -552,6 +559,18 @@ FrankClaw uses a single JSON config file. All fields have secure defaults.
     "ttl_hours": 2
   },
 
+  // Media understanding (vision + transcription)
+  "understanding": {
+    "enabled": false,
+    "vision_provider": "openai",       // "openai", "anthropic", "ollama", or "none"
+    "vision_model": "gpt-4o",
+    "vision_api_key_ref": "OPENAI_API_KEY",
+    "transcription_provider": "openai", // "openai" or "none"
+    "transcription_model": "whisper-1",
+    "transcription_api_key_ref": "OPENAI_API_KEY",
+    "auto_transcribe_voice": false
+  },
+
   // Logging
   "logging": {
     "level": "info",           // trace, debug, info, warn, error
@@ -624,7 +643,7 @@ frankclaw/
 │   ├── frankclaw-sessions/    # SQLite session store
 │   ├── frankclaw-models/      # AI model providers
 │   ├── frankclaw-channels/    # Messaging channel adapters
-│   ├── frankclaw-memory/      # Vector memory traits
+│   ├── frankclaw-memory/      # SQLite FTS5 + vector memory store
 │   ├── frankclaw-cron/        # Scheduled jobs
 │   ├── frankclaw-runtime/     # Agent runtime & prompt templates
 │   ├── frankclaw-tools/       # Tool registry, bash & browser tools
@@ -662,7 +681,11 @@ See [PARITY_TODO.md](docs/PARITY_TODO.md) for the current parity tracker.
 - [x] Tunnel support (Cloudflare, ngrok, custom)
 - [x] Job state machine with self-repair
 - [x] Event-driven routine triggers
-- [ ] LanceDB vector memory backend
+- [x] Memory/RAG with SQLite FTS5 + vector search
+- [x] Multi-provider media understanding (vision + transcription)
+- [x] Rich web console (8 tabs, dark mode, tool approval, analytics)
+- [x] Webhook transforms (JSON path, templates, rate limiting)
+- [x] Hook lifecycle wiring (message + tool events)
 - [ ] Long-tail attachment/media edge cases on supported channels
 - [ ] Companion nodes and apps
 - [ ] Voice
