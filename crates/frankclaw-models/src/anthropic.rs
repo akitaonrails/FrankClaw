@@ -720,13 +720,8 @@ mod tests {
             messages: vec![CompletionMessage::text(Role::User, "think hard")],
             max_tokens: Some(4096),
             temperature: Some(0.5),
-            system: None,
-            tools: vec![],
             thinking_budget: Some(10000),
-            parallel_tool_calls: None,
-            seed: None,
-            response_format: None,
-            reasoning_effort: None,
+            ..Default::default()
         };
         let body = build_request_body(&request);
         assert_eq!(body["thinking"]["type"], "enabled");
@@ -742,13 +737,7 @@ mod tests {
             messages: vec![CompletionMessage::text(Role::User, "hello")],
             max_tokens: Some(4096),
             temperature: Some(0.7),
-            system: None,
-            tools: vec![],
-            thinking_budget: None,
-            parallel_tool_calls: None,
-            seed: None,
-            response_format: None,
-            reasoning_effort: None,
+            ..Default::default()
         };
         let body = build_request_body(&request);
         assert!(body.get("thinking").is_none());
@@ -770,14 +759,7 @@ mod tests {
                 }],
             )],
             max_tokens: Some(4096),
-            temperature: None,
-            system: None,
-            tools: vec![],
-            thinking_budget: None,
-            parallel_tool_calls: None,
-            seed: None,
-            response_format: None,
-            reasoning_effort: None,
+            ..Default::default()
         };
         let body = build_request_body(&request);
         let msg = &body["messages"][0];
@@ -811,14 +793,7 @@ mod tests {
                 ],
             )],
             max_tokens: Some(4096),
-            temperature: None,
-            system: None,
-            tools: vec![],
-            thinking_budget: None,
-            parallel_tool_calls: None,
-            seed: None,
-            response_format: None,
-            reasoning_effort: None,
+            ..Default::default()
         };
         let body = build_request_body(&request);
         let content = body["messages"][0]["content"]
@@ -835,14 +810,7 @@ mod tests {
             model_id: "claude-sonnet-4-6".into(),
             messages: vec![CompletionMessage::text(Role::User, "hello")],
             max_tokens: Some(4096),
-            temperature: None,
-            system: None,
-            tools: vec![],
-            thinking_budget: None,
-            parallel_tool_calls: None,
-            seed: None,
-            response_format: None,
-            reasoning_effort: None,
+            ..Default::default()
         };
         let body = build_request_body(&request);
         let msg = &body["messages"][0];
@@ -856,14 +824,8 @@ mod tests {
             model_id: "claude-sonnet-4-6".into(),
             messages: vec![CompletionMessage::text(Role::User, "hello")],
             max_tokens: Some(4096),
-            temperature: None,
             system: Some("You are a helpful assistant.".into()),
-            tools: vec![],
-            thinking_budget: None,
-            parallel_tool_calls: None,
-            seed: None,
-            response_format: None,
-            reasoning_effort: None,
+            ..Default::default()
         };
         let body = build_request_body(&request);
 
@@ -881,14 +843,7 @@ mod tests {
             model_id: "claude-sonnet-4-6".into(),
             messages: vec![CompletionMessage::text(Role::User, "hello")],
             max_tokens: Some(4096),
-            temperature: None,
-            system: None,
-            tools: vec![],
-            thinking_budget: None,
-            parallel_tool_calls: None,
-            seed: None,
-            response_format: None,
-            reasoning_effort: None,
+            ..Default::default()
         };
         let body = build_request_body(&request);
         assert!(body.get("system").is_none());

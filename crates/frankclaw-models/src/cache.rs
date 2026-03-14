@@ -228,15 +228,7 @@ mod tests {
         CompletionRequest {
             model_id: "test-model".into(),
             messages: vec![CompletionMessage::text(Role::User, "hello")],
-            max_tokens: None,
-            temperature: None,
-            system: None,
-            tools: vec![],
-            thinking_budget: None,
-            parallel_tool_calls: None,
-            seed: None,
-            response_format: None,
-            reasoning_effort: None,
+            ..Default::default()
         }
     }
 
@@ -245,15 +237,7 @@ mod tests {
         CompletionRequest {
             model_id: "test-model".into(),
             messages: vec![CompletionMessage::text(Role::User, "goodbye")],
-            max_tokens: None,
-            temperature: None,
-            system: None,
-            tools: vec![],
-            thinking_budget: None,
-            parallel_tool_calls: None,
-            seed: None,
-            response_format: None,
-            reasoning_effort: None,
+            ..Default::default()
         }
     }
 
@@ -262,20 +246,13 @@ mod tests {
         CompletionRequest {
             model_id: "test-model".into(),
             messages: vec![CompletionMessage::text(Role::User, "use tool")],
-            max_tokens: None,
-            temperature: None,
-            system: None,
             tools: vec![ToolDef {
                 name: "test_tool".into(),
                 description: "a tool".into(),
                 parameters: serde_json::json!({}),
                 risk_level: Default::default(),
             }],
-            thinking_budget: None,
-            parallel_tool_calls: None,
-            seed: None,
-            response_format: None,
-            reasoning_effort: None,
+            ..Default::default()
         }
     }
 
@@ -424,15 +401,7 @@ mod tests {
         let third = CompletionRequest {
             model_id: "test-model".into(),
             messages: vec![CompletionMessage::text(Role::User, "third")],
-            max_tokens: None,
-            temperature: None,
-            system: None,
-            tools: vec![],
-            thinking_budget: None,
-            parallel_tool_calls: None,
-            seed: None,
-            response_format: None,
-            reasoning_effort: None,
+            ..Default::default()
         };
         cache.store(&third, &dummy_response);
         assert_eq!(cache.len(), 2);

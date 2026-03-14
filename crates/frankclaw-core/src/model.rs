@@ -141,7 +141,7 @@ pub enum ResponseFormat {
 }
 
 /// Request to a model provider.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct CompletionRequest {
     pub model_id: String,
     pub messages: Vec<CompletionMessage>,
