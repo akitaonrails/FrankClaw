@@ -156,7 +156,7 @@ impl EmailChannel {
 
         let seq_set = unseen
             .iter()
-            .map(|id| id.to_string())
+            .map(std::string::ToString::to_string)
             .collect::<Vec<_>>()
             .join(",");
 
@@ -197,7 +197,7 @@ impl EmailChannel {
         if !processed_seqs.is_empty() {
             let seen_set = processed_seqs
                 .iter()
-                .map(|id| id.to_string())
+                .map(std::string::ToString::to_string)
                 .collect::<Vec<_>>()
                 .join(",");
             if let Err(e) = session.store(&seen_set, "+FLAGS (\\Seen)").await {
@@ -255,12 +255,10 @@ impl EmailChannel {
             attachments: Vec::new(),
             platform_message_id: parsed.message_id().map(str::to_string),
             timestamp: parsed
-                .date()
-                .map(|d| {
+                .date().map_or_else(chrono::Utc::now, |d| {
                     chrono::DateTime::from_timestamp(d.to_timestamp(), 0)
                         .unwrap_or_else(chrono::Utc::now)
-                })
-                .unwrap_or_else(chrono::Utc::now),
+                }),
         })
     }
 }

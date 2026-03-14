@@ -460,8 +460,7 @@ fn split_telegram_attachment_batches(
     for attachment in attachments {
         let attachment_kind = telegram_attachment_batch_kind(&attachment.mime_type);
         let compatible = current_kind
-            .map(|kind| kind == attachment_kind)
-            .unwrap_or(true);
+            .is_none_or(|kind| kind == attachment_kind);
         if !compatible || current.len() >= 10 {
             if !current.is_empty() {
                 batches.push(std::mem::take(&mut current));
@@ -673,13 +672,12 @@ fn pseudo_stream_steps(text: &str) -> Vec<String> {
     let mut steps = Vec::new();
     for ratio in [1usize, 2usize] {
         let target = (total * ratio) / 3;
-        if let Some(candidate) = preview_slice(text, target) {
-            if steps.last() != Some(&candidate) {
+        if let Some(candidate) = preview_slice(text, target)
+            && steps.last() != Some(&candidate) {
                 steps.push(candidate);
             }
-        }
     }
-    if steps.last().map(|value| value.as_str()) != Some(text) {
+    if steps.last().map(std::string::String::as_str) != Some(text) {
         steps.push(text.to_string());
     }
     steps

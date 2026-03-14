@@ -81,11 +81,10 @@ impl Tunnel {
 
 impl Drop for Tunnel {
     fn drop(&mut self) {
-        if let Ok(mut guard) = self.child.try_lock() {
-            if let Some(ref mut child) = *guard {
+        if let Ok(mut guard) = self.child.try_lock()
+            && let Some(ref mut child) = *guard {
                 let _ = child.start_kill();
             }
-        }
     }
 }
 
@@ -94,7 +93,7 @@ impl Drop for Tunnel {
 // ---------------------------------------------------------------------------
 
 async fn start_cloudflare(token: &str, host: &str, port: u16) -> Result<Tunnel> {
-    let origin = format!("http://{}:{}", host, port);
+    let origin = format!("http://{host}:{port}");
 
     let mut child = Command::new("cloudflared")
         .args([
@@ -152,7 +151,7 @@ async fn start_ngrok(
     host: &str,
     port: u16,
 ) -> Result<Tunnel> {
-    let target = format!("{}:{}", host, port);
+    let target = format!("{host}:{port}");
 
     let mut cmd = Command::new("ngrok");
     cmd.args(["http", &target])
@@ -186,13 +185,9 @@ async fn start_ngrok(
     }
 
     // Scan stdout for URL in logfmt output (url=https://...).
-    let url = extract_url_from_stream(stdout, "url=https://", Duration::from_secs(15)).await
-        .or_else(|_| {
-            // Fallback: try plain https:// prefix.
-            Err(FrankClawError::Internal {
+    let url = extract_url_from_stream(stdout, "url=https://", Duration::from_secs(15)).await.map_err(|_| FrankClawError::Internal {
                 msg: "ngrok did not output a public URL within 15 seconds".into(),
-            })
-        })?;
+            })?;
 
     // Clean up "url=" prefix if present.
     let url = url
@@ -269,7 +264,7 @@ async fn start_custom(
                 while let Ok(Some(_)) = lines.next_line().await {}
             });
         }
-        format!("http://{}:{}", host, port)
+        format!("http://{host}:{port}")
     };
 
     info!(tunnel = "custom", url = %url, "tunnel started");

@@ -8,22 +8,19 @@ use crate::types::{AgentId, ChannelId, Role, SessionKey};
 /// How sessions are scoped for an agent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum SessionScoping {
     /// One session per sender (default).
     Main,
     /// Separate session per DM peer.
     PerPeer,
     /// Separate per channel + peer combination.
+    #[default]
     PerChannelPeer,
     /// Single shared session across all senders.
     Global,
 }
 
-impl Default for SessionScoping {
-    fn default() -> Self {
-        Self::PerChannelPeer
-    }
-}
 
 impl SessionScoping {
     pub fn resolve_inbound_account_scope(

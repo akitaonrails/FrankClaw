@@ -226,7 +226,7 @@ fn build_channel(channel_id: &ChannelId, channel_config: &ChannelConfig) -> Resu
             )?;
             let imap_port = account
                 .get("imap_port")
-                .and_then(|v| v.as_u64())
+                .and_then(serde_json::Value::as_u64)
                 .unwrap_or(993) as u16;
             let imap_user = resolve_channel_value(
                 account,
@@ -253,7 +253,7 @@ fn build_channel(channel_id: &ChannelId, channel_config: &ChannelConfig) -> Resu
             )?;
             let smtp_port = account
                 .get("smtp_port")
-                .and_then(|v| v.as_u64())
+                .and_then(serde_json::Value::as_u64)
                 .unwrap_or(587) as u16;
             let smtp_user = resolve_channel_value(
                 account,
@@ -280,7 +280,7 @@ fn build_channel(channel_id: &ChannelId, channel_config: &ChannelConfig) -> Resu
             )?;
             let poll_interval_secs = account
                 .get("poll_interval_secs")
-                .and_then(|v| v.as_u64())
+                .and_then(serde_json::Value::as_u64)
                 .unwrap_or(30);
             let allowed_senders: Vec<String> = account
                 .get("allowed_senders")
@@ -311,8 +311,7 @@ fn build_channel(channel_id: &ChannelId, channel_config: &ChannelConfig) -> Resu
         }
         other => Err(FrankClawError::ConfigValidation {
             msg: format!(
-                "unsupported enabled channel '{}'; currently supported: web, telegram, discord, signal, slack, whatsapp, email",
-                other
+                "unsupported enabled channel '{other}'; currently supported: web, telegram, discord, signal, slack, whatsapp, email"
             ),
         }),
     }

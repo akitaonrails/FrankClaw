@@ -92,11 +92,10 @@ impl TelegramChannel {
 
         let resp = if effective_msg.attachments.is_empty() {
             let mut body = build_send_body(&effective_msg);
-            if !state.include_parse_mode {
-                if let Some(obj) = body.as_object_mut() {
+            if !state.include_parse_mode
+                && let Some(obj) = body.as_object_mut() {
                     obj.remove("parse_mode");
                 }
-            }
             self.client
                 .post(self.api_url("sendMessage"))
                 .json(&body)
@@ -217,13 +216,11 @@ impl TelegramChannel {
                 }
 
                 let msg = update.get("message").or_else(|| update.get("edited_message"));
-                if let Some(msg) = msg {
-                    if let Some(inbound) = self.parse_message(msg) {
-                        if inbound_tx.send(inbound).await.is_err() {
+                if let Some(msg) = msg
+                    && let Some(inbound) = self.parse_message(msg)
+                        && inbound_tx.send(inbound).await.is_err() {
                             return Ok(()); // Receiver dropped, shutting down.
                         }
-                    }
-                }
             }
         }
 
@@ -247,12 +244,10 @@ impl TelegramChannel {
         let message_id = msg["message_id"].as_i64()?.to_string();
 
         let timestamp = msg["date"]
-            .as_i64()
-            .map(|ts| {
+            .as_i64().map_or_else(chrono::Utc::now, |ts| {
                 chrono::DateTime::from_timestamp(ts, 0)
-                    .unwrap_or_else(|| chrono::Utc::now())
-            })
-            .unwrap_or_else(chrono::Utc::now);
+                    .unwrap_or_else(chrono::Utc::now)
+            });
 
         Some(InboundMessage {
             channel: self.id(),
@@ -263,8 +258,7 @@ impl TelegramChannel {
             is_group,
             is_mention: text
                 .as_deref()
-                .map(|t| t.contains("@"))
-                .unwrap_or(false),
+                .is_some_and(|t| t.contains("@")),
             text,
             attachments,
             platform_message_id: Some(message_id),

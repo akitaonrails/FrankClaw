@@ -69,7 +69,7 @@ fn extract_url_at(text: &str) -> Option<&str> {
     let raw = &text[..end];
 
     // Trim trailing punctuation that's typically not part of URLs.
-    let trimmed = raw.trim_end_matches(|c: char| matches!(c, '.' | ',' | ')' | ']' | '>' | ';' | '!' | '?'));
+    let trimmed = raw.trim_end_matches(['.', ',', ')', ']', '>', ';', '!', '?']);
 
     if trimmed.len() <= "https://".len() {
         return None;

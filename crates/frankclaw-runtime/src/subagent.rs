@@ -31,6 +31,12 @@ const DEFAULT_TIMEOUT_SECS: u64 = 300;
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct RunId(pub String);
 
+impl Default for RunId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RunId {
     pub fn new() -> Self {
         Self(Uuid::new_v4().to_string())
@@ -132,6 +138,12 @@ pub struct SubagentRegistry {
     /// Configuration.
     max_depth: u32,
     max_children: usize,
+}
+
+impl Default for SubagentRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl SubagentRegistry {
@@ -319,8 +331,7 @@ impl SubagentRegistry {
             ) {
                 record
                     .ended_at
-                    .map(|t| t > cutoff)
-                    .unwrap_or(true)
+                    .map_or(true, |t| t > cutoff)
             } else {
                 true // Keep active runs.
             }

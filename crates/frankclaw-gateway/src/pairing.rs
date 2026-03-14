@@ -61,8 +61,7 @@ impl PairingStore {
         state
             .approved
             .get(&approval_key(channel, account_id))
-            .map(|approved| approved.contains(sender_id))
-            .unwrap_or(false)
+            .is_some_and(|approved| approved.contains(sender_id))
     }
 
     pub fn ensure_pending(
@@ -102,7 +101,7 @@ impl PairingStore {
         state
             .pending
             .iter()
-            .filter(|pending| channel.map(|value| value == pending.channel).unwrap_or(true))
+            .filter(|pending| channel.is_none_or(|value| value == pending.channel))
             .cloned()
             .collect()
     }
@@ -119,10 +118,9 @@ impl PairingStore {
             .iter()
             .position(|pending| {
                 pending.code == code
-                    && channel.map(|value| value == pending.channel).unwrap_or(true)
+                    && channel.is_none_or(|value| value == pending.channel)
                     && account_id
-                        .map(|value| value == pending.account_id)
-                        .unwrap_or(true)
+                        .is_none_or(|value| value == pending.account_id)
             })
             .ok_or_else(|| FrankClawError::ConfigValidation {
                 msg: format!("no pending pairing found for code '{code}'"),

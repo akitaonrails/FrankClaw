@@ -17,8 +17,8 @@ use frankclaw_core::config::{AgentDef, FrankClawConfig, ProviderConfig};
 use frankclaw_core::error::{FrankClawError, Result};
 use frankclaw_core::channel::{ChannelCapabilities, InboundAttachment, InboundMessage};
 use frankclaw_core::model::{
-    CompletionMessage, CompletionRequest, ImageContent, ModelDef, ModelProvider, StreamDelta,
-    ToolCallResponse, Usage,
+    CompletionMessage, CompletionRequest, ImageContent, ModelCompat, ModelCost, ModelDef,
+    ModelProvider, StreamDelta, ToolCallResponse, Usage,
 };
 use frankclaw_core::session::{SessionEntry, SessionStore, TranscriptEntry};
 use frankclaw_core::types::{AgentId, ChannelId, Role, SessionKey};
@@ -133,7 +133,7 @@ impl Runtime {
         for (agent_id, agent) in &config.agents.agents {
             tools.validate_names(&agent.tools).map_err(|err| {
                 FrankClawError::ConfigValidation {
-                    msg: format!("agent '{}' has invalid tool config: {}", agent_id, err),
+                    msg: format!("agent '{agent_id}' has invalid tool config: {err}"),
                 }
             })?;
         }
@@ -173,8 +173,7 @@ impl Runtime {
         Ok(self
             .skill_manifests
             .get(&agent_id)
-            .map(|skills| skills.as_slice())
-            .unwrap_or(&[]))
+            .map_or(&[], std::vec::Vec::as_slice))
     }
 
     pub fn agent_surface(
@@ -186,8 +185,7 @@ impl Runtime {
                 agent,
                 self.skill_manifests
                     .get(agent_id)
-                    .map(|skills| skills.as_slice())
-                    .unwrap_or(&[]),
+                    .map_or(&[] as &[SkillManifest], std::vec::Vec::as_slice),
             )
         })
     }
@@ -225,7 +223,7 @@ impl Runtime {
         let model_id = self.resolve_model_id(&agent, request.model_id.as_deref())?;
         let session_key = self.resolve_session_key(&agent_id, request.session_key)?;
         let history = self.sessions.get_transcript(&session_key, 200, None).await?;
-        let mut next_seq = history.last().map(|entry| entry.seq + 1).unwrap_or(1);
+        let mut next_seq = history.last().map_or(1, |entry| entry.seq + 1);
         let mut allowed_tools = self.tools.definitions(&agent.tools)?;
 
         // Inject subagent tool if not at max depth.
@@ -250,10 +248,10 @@ impl Runtime {
                     api: frankclaw_core::model::ModelApi::OpenaiCompletions,
                     reasoning: false,
                     input: vec![frankclaw_core::model::InputModality::Text],
-                    cost: Default::default(),
+                    cost: ModelCost::default(),
                     context_window: 128_000,
                     max_output_tokens: 4096,
-                    compat: Default::default(),
+                    compat: ModelCompat::default(),
                 }
             });
 
@@ -275,7 +273,7 @@ impl Runtime {
                 .filter(|a| a.mime_type.starts_with("image/"))
                 .map(|a| {
                     let name = a.filename.as_deref().unwrap_or("image");
-                    format!("[Image attached: {}]", name)
+                    format!("[Image attached: {name}]")
                 })
                 .collect();
             if attachment_notes.is_empty() {
@@ -284,7 +282,7 @@ impl Runtime {
                 let prefix = attachment_notes.join("\n");
                 CompletionMessage::text(
                     Role::User,
-                    format!("{}\n\n{}", prefix, sanitized_message),
+                    format!("{prefix}\n\n{sanitized_message}"),
                 )
             }
         } else {
@@ -293,7 +291,7 @@ impl Runtime {
 
         let raw_messages: Vec<CompletionMessage> = history
             .iter()
-            .map(|entry| transcript_entry_to_message(entry))
+            .map(transcript_entry_to_message)
             .chain(std::iter::once(user_message))
             .collect();
 
@@ -357,8 +355,7 @@ impl Runtime {
             if tokio::time::Instant::now() >= turn_deadline {
                 return Err(FrankClawError::AgentRuntime {
                     msg: format!(
-                        "turn safety timeout exceeded ({}s)",
-                        TURN_SAFETY_TIMEOUT_SECS
+                        "turn safety timeout exceeded ({TURN_SAFETY_TIMEOUT_SECS}s)"
                     ),
                 });
             }
@@ -401,17 +398,15 @@ impl Runtime {
 
             // Stream any intermediate text content to the channel so the user
             // sees progress during multi-round tool execution instead of silence.
-            if let Some(ref tx) = request.stream_tx {
-                if !response.content.trim().is_empty() {
+            if let Some(ref tx) = request.stream_tx
+                && !response.content.trim().is_empty() {
                     let _ = tx.send(StreamDelta::Text(response.content.clone())).await;
                 }
-            }
 
             if response.tool_calls.len() > remaining_tool_calls {
                 return Err(FrankClawError::AgentRuntime {
                     msg: format!(
-                        "model requested too many tool calls in one turn (max {})",
-                        MAX_TOOL_CALLS_PER_TURN
+                        "model requested too many tool calls in one turn (max {MAX_TOOL_CALLS_PER_TURN})"
                     ),
                 });
             }
@@ -493,8 +488,7 @@ impl Runtime {
                         })
                         .to_string(),
                         Err(err) => format!(
-                            "{{\"error\": \"subagent failed: {}\"}}",
-                            err
+                            "{{\"error\": \"subagent failed: {err}\"}}"
                         ),
                     };
                     self.append_transcript_entry(
@@ -654,8 +648,7 @@ impl Runtime {
                 if post_tokens > mid_budget {
                     return Err(FrankClawError::AgentRuntime {
                         msg: format!(
-                            "context too large after compaction ({} tokens, budget {})",
-                            post_tokens, mid_budget
+                            "context too large after compaction ({post_tokens} tokens, budget {mid_budget})"
                         ),
                     });
                 }
@@ -663,7 +656,7 @@ impl Runtime {
         }
 
         Err(FrankClawError::AgentRuntime {
-            msg: format!("tool round limit exceeded (max {})", MAX_TOOL_ROUNDS),
+            msg: format!("tool round limit exceeded (max {MAX_TOOL_ROUNDS})"),
         })
     }
 
@@ -979,16 +972,14 @@ impl Runtime {
         explicit: Option<SessionKey>,
     ) -> Result<SessionKey> {
         if let Some(session_key) = explicit {
-            if let Some((session_agent_id, _, _)) = session_key.parse() {
-                if &session_agent_id != agent_id {
+            if let Some((session_agent_id, _, _)) = session_key.parse()
+                && &session_agent_id != agent_id {
                     return Err(FrankClawError::InvalidRequest {
                         msg: format!(
-                            "session '{}' does not belong to agent '{}'",
-                            session_key, agent_id
+                            "session '{session_key}' does not belong to agent '{agent_id}'"
                         ),
                     });
                 }
-            }
             return Ok(session_key);
         }
 
@@ -1009,9 +1000,7 @@ impl Runtime {
         }
 
         let (channel, account_id) = session_key
-            .parse()
-            .map(|(_, channel, account_id)| (channel, account_id))
-            .unwrap_or_else(|| (ChannelId::new("web"), "control".to_string()));
+            .parse().map_or_else(|| (ChannelId::new("web"), "control".to_string()), |(_, channel, account_id)| (channel, account_id));
 
         self.sessions
             .upsert(&SessionEntry {
@@ -1078,8 +1067,7 @@ impl ToolCallTracker {
         if *count >= TOOL_REPEAT_BLOCK_THRESHOLD {
             return Err(FrankClawError::AgentRuntime {
                 msg: format!(
-                    "tool '{}' called {} times with identical arguments — possible infinite loop",
-                    name, count
+                    "tool '{name}' called {count} times with identical arguments — possible infinite loop"
                 ),
             });
         }
@@ -1115,8 +1103,7 @@ fn truncate_tool_output(output: &str) -> String {
     let tail: String = sanitized.chars().skip(char_count - tail_chars).collect();
 
     format!(
-        "{}\n\n... ({} characters omitted) ...\n\n{}",
-        head, omitted, tail
+        "{head}\n\n... ({omitted} characters omitted) ...\n\n{tail}"
     )
 }
 
@@ -1126,8 +1113,8 @@ fn transcript_entry_to_message(entry: &frankclaw_core::session::TranscriptEntry)
     let metadata = entry.metadata.as_ref();
 
     // Assistant messages with tool_calls in metadata.
-    if entry.role == Role::Assistant {
-        if let Some(calls) = metadata.and_then(|m| m["tool_calls"].as_array()) {
+    if entry.role == Role::Assistant
+        && let Some(calls) = metadata.and_then(|m| m["tool_calls"].as_array()) {
             let tool_calls: Vec<ToolCallResponse> = calls
                 .iter()
                 .filter_map(|c| {
@@ -1142,14 +1129,12 @@ fn transcript_entry_to_message(entry: &frankclaw_core::session::TranscriptEntry)
                 return CompletionMessage::assistant_tool_calls(entry.content.clone(), tool_calls);
             }
         }
-    }
 
     // Tool result messages with tool_call_id in metadata.
-    if entry.role == Role::Tool {
-        if let Some(call_id) = metadata.and_then(|m| m["tool_call_id"].as_str()) {
+    if entry.role == Role::Tool
+        && let Some(call_id) = metadata.and_then(|m| m["tool_call_id"].as_str()) {
             return CompletionMessage::tool_result(call_id, entry.content.clone());
         }
-    }
 
     CompletionMessage::text(entry.role, entry.content.clone())
 }
@@ -1169,9 +1154,7 @@ fn build_tool_request_message(content: &str, tool_calls: &[ToolCallResponse]) ->
 fn summarize_tool_output(content: &str) -> String {
     let preview = serde_json::from_str::<serde_json::Value>(content)
         .ok()
-        .and_then(|value| value.get("output").cloned())
-        .map(|value| value.to_string())
-        .unwrap_or_else(|| content.to_string());
+        .and_then(|value| value.get("output").cloned()).map_or_else(|| content.to_string(), |value| value.to_string());
     let preview = preview.replace('\n', " ");
     if preview.chars().count() > 120 {
         format!("{}...", preview.chars().take(120).collect::<String>())
@@ -1312,8 +1295,7 @@ fn build_providers(
                 other => {
                     return Err(FrankClawError::ConfigValidation {
                         msg: format!(
-                            "unsupported model provider api '{}'; expected openai, anthropic, or ollama",
-                            other
+                            "unsupported model provider api '{other}'; expected openai, anthropic, or ollama"
                         ),
                     });
                 }
@@ -1334,7 +1316,7 @@ fn load_agent_skills(config: &FrankClawConfig) -> Result<HashMap<AgentId, Vec<Sk
         }
 
         let workspace = agent.workspace.as_ref().ok_or_else(|| FrankClawError::ConfigValidation {
-            msg: format!("agent '{}' declares skills but has no workspace", agent_id),
+            msg: format!("agent '{agent_id}' declares skills but has no workspace"),
         })?;
         let skills = load_workspace_skills(workspace, &agent.skills)?;
         for skill in &skills {

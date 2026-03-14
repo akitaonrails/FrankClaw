@@ -36,13 +36,12 @@ pub fn authenticate(
     rate_limiter: &AuthRateLimiter,
 ) -> Result<AuthRole> {
     // Check rate limit first.
-    if let Some(addr) = remote_addr {
-        if let Some(remaining) = rate_limiter.is_locked(&addr.ip()) {
+    if let Some(addr) = remote_addr
+        && let Some(remaining) = rate_limiter.is_locked(&addr.ip()) {
             return Err(FrankClawError::RateLimited {
                 retry_after_secs: remaining.as_secs(),
             });
         }
-    }
 
     let result = match (mode, provided) {
         // No auth required — only safe on loopback.
@@ -229,7 +228,7 @@ fn classify_surface(bind: &frankclaw_core::config::BindMode) -> Result<ExposureS
         frankclaw_core::config::BindMode::Lan => Ok(ExposureSurface::Lan),
         frankclaw_core::config::BindMode::Address(address) => {
             let ip: std::net::IpAddr = address.parse().map_err(|_| FrankClawError::ConfigValidation {
-                msg: format!("gateway.bind address '{}' is not a valid IP address", address),
+                msg: format!("gateway.bind address '{address}' is not a valid IP address"),
             })?;
             let is_private = match ip {
                 std::net::IpAddr::V4(ip) => ip.is_private() || ip.is_link_local(),

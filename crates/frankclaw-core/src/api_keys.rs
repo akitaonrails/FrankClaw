@@ -51,7 +51,7 @@ impl KeyStats {
     }
 
     fn is_available(&self, now: Instant) -> bool {
-        self.cooldown_until.map(|until| now >= until).unwrap_or(true)
+        self.cooldown_until.map_or(true, |until| now >= until)
     }
 
     fn cooldown_remaining(&self, now: Instant) -> Option<Duration> {
@@ -223,7 +223,7 @@ impl ProviderKeyManager {
 
     /// List registered providers.
     pub fn providers(&self) -> Vec<&str> {
-        self.rotators.keys().map(|s| s.as_str()).collect()
+        self.rotators.keys().map(std::string::String::as_str).collect()
     }
 }
 

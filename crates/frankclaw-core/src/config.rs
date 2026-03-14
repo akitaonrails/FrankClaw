@@ -11,6 +11,7 @@ use crate::types::{AgentId, ChannelId, SessionKey};
 /// Top-level FrankClaw configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
+#[derive(Default)]
 pub struct FrankClawConfig {
     pub gateway: GatewayConfig,
     pub agents: AgentsConfig,
@@ -24,22 +25,6 @@ pub struct FrankClawConfig {
     pub security: SecurityConfig,
 }
 
-impl Default for FrankClawConfig {
-    fn default() -> Self {
-        Self {
-            gateway: GatewayConfig::default(),
-            agents: AgentsConfig::default(),
-            channels: HashMap::new(),
-            models: ModelsConfig::default(),
-            session: SessionConfig::default(),
-            cron: CronConfig::default(),
-            hooks: HooksConfig::default(),
-            logging: LoggingConfig::default(),
-            media: MediaConfig::default(),
-            security: SecurityConfig::default(),
-        }
-    }
-}
 
 impl FrankClawConfig {
     pub fn load_from_path(path: &Path) -> Result<Self> {
@@ -87,8 +72,7 @@ impl FrankClawConfig {
                 other => {
                     return Err(FrankClawError::ConfigValidation {
                         msg: format!(
-                            "unsupported model provider api '{}'; expected openai, anthropic, or ollama",
-                            other
+                            "unsupported model provider api '{other}'; expected openai, anthropic, or ollama"
                         ),
                     });
                 }
@@ -97,8 +81,7 @@ impl FrankClawConfig {
                 && provider
                     .api_key_ref
                     .as_deref()
-                    .map(|value| value.trim().is_empty())
-                    .unwrap_or(true)
+                    .map_or(true, |value| value.trim().is_empty())
             {
                 return Err(FrankClawError::ConfigValidation {
                     msg: format!(
@@ -109,13 +92,12 @@ impl FrankClawConfig {
             }
         }
 
-        if let Some(default_model) = &self.models.default_model {
-            if default_model.trim().is_empty() {
+        if let Some(default_model) = &self.models.default_model
+            && default_model.trim().is_empty() {
                 return Err(FrankClawError::ConfigValidation {
                     msg: "models.default_model cannot be empty".into(),
                 });
             }
-        }
 
         if self.gateway.max_connections == 0 {
             return Err(FrankClawError::ConfigValidation {
@@ -129,16 +111,14 @@ impl FrankClawConfig {
             });
         }
 
-        if let BindMode::Address(address) = &self.gateway.bind {
-            if address.parse::<std::net::IpAddr>().is_err() {
+        if let BindMode::Address(address) = &self.gateway.bind
+            && address.parse::<std::net::IpAddr>().is_err() {
                 return Err(FrankClawError::ConfigValidation {
                     msg: format!(
-                        "gateway.bind address '{}' is not a valid IP address",
-                        address
+                        "gateway.bind address '{address}' is not a valid IP address"
                     ),
                 });
             }
-        }
 
         for (channel_id, channel) in &self.channels {
             channel.security_policy()?;
@@ -381,7 +361,7 @@ impl ChannelConfig {
         if let Some(raw) = self
             .extra
             .get("require_mention_for_groups")
-            .and_then(|value| value.as_bool())
+            .and_then(serde_json::Value::as_bool)
         {
             policy.require_mention_for_groups = raw;
         }
@@ -471,8 +451,7 @@ fn validate_channel_config(channel_id: &ChannelId, channel: &ChannelConfig) -> R
         }
         other => Err(FrankClawError::ConfigValidation {
             msg: format!(
-                "unsupported enabled channel '{}'; currently supported: web, telegram, discord, signal, slack, whatsapp",
-                other
+                "unsupported enabled channel '{other}'; currently supported: web, telegram, discord, signal, slack, whatsapp"
             ),
         }),
     }
@@ -493,8 +472,7 @@ fn validate_channel_account_value_source(
         account
             .get(*key)
             .and_then(|value| value.as_str())
-            .map(|value| !value.trim().is_empty())
-            .unwrap_or(false)
+            .is_some_and(|value| !value.trim().is_empty())
     });
     if has_inline_secret {
         return Ok(());
@@ -504,8 +482,7 @@ fn validate_channel_account_value_source(
         account
             .get(*key)
             .and_then(|value| value.as_str())
-            .map(|value| !value.trim().is_empty())
-            .unwrap_or(false)
+            .is_some_and(|value| !value.trim().is_empty())
     });
     if has_env_secret {
         return Ok(());
@@ -521,19 +498,12 @@ fn validate_channel_account_value_source(
 /// Model provider configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
+#[derive(Default)]
 pub struct ModelsConfig {
     pub providers: Vec<ProviderConfig>,
     pub default_model: Option<String>,
 }
 
-impl Default for ModelsConfig {
-    fn default() -> Self {
-        Self {
-            providers: vec![],
-            default_model: None,
-        }
-    }
-}
 
 /// Configuration for a model provider.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -552,21 +522,13 @@ pub struct ProviderConfig {
 /// Session defaults.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
+#[derive(Default)]
 pub struct SessionConfig {
     pub scoping: SessionScoping,
     pub reset: SessionResetPolicy,
     pub pruning: PruningConfig,
 }
 
-impl Default for SessionConfig {
-    fn default() -> Self {
-        Self {
-            scoping: SessionScoping::default(),
-            reset: SessionResetPolicy::default(),
-            pruning: PruningConfig::default(),
-        }
-    }
-}
 
 /// Cron defaults.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -594,8 +556,7 @@ impl HooksConfig {
         if self
             .token
             .as_deref()
-            .map(|value| value.trim().is_empty())
-            .unwrap_or(true)
+            .map_or(true, |value| value.trim().is_empty())
         {
             return Err(FrankClawError::ConfigValidation {
                 msg: "hooks.enabled requires a non-empty hooks.token".into(),
@@ -630,9 +591,9 @@ impl HooksConfig {
                     msg: format!("webhook mapping '{}' text_field cannot be empty", mapping.id),
                 });
             }
-            if let (Some(agent_id), Some(session_key)) = (&mapping.agent_id, &mapping.session_key) {
-                if let Some((session_agent, _, _)) = session_key.parse() {
-                    if &session_agent != agent_id {
+            if let (Some(agent_id), Some(session_key)) = (&mapping.agent_id, &mapping.session_key)
+                && let Some((session_agent, _, _)) = session_key.parse()
+                    && &session_agent != agent_id {
                         return Err(FrankClawError::ConfigValidation {
                             msg: format!(
                                 "webhook mapping '{}' session '{}' does not belong to agent '{}'",
@@ -640,8 +601,6 @@ impl HooksConfig {
                             ),
                         });
                     }
-                }
-            }
             mappings.push(mapping);
         }
         Ok(mappings)

@@ -15,6 +15,12 @@ pub struct WebChannel {
     outbound: tokio::sync::Mutex<std::collections::HashMap<String, Vec<OutboundMessage>>>,
 }
 
+impl Default for WebChannel {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl WebChannel {
     pub fn new() -> Self {
         Self {

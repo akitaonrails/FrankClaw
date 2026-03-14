@@ -129,7 +129,7 @@ impl ToolRegistry {
         for name in names {
             if !self.tools.contains_key(name) {
                 return Err(FrankClawError::ConfigValidation {
-                    msg: format!("unknown tool '{}'", name),
+                    msg: format!("unknown tool '{name}'"),
                 });
             }
         }
@@ -162,15 +162,14 @@ impl ToolRegistry {
             .tools
             .get(name)
             .ok_or_else(|| FrankClawError::InvalidRequest {
-                msg: format!("unknown tool '{}'", name),
+                msg: format!("unknown tool '{name}'"),
             })?;
 
         let risk_level = tool.definition().risk_level;
         if !self.policy.is_approved(name, risk_level) {
             return Err(FrankClawError::AgentRuntime {
                 msg: format!(
-                    "tool '{}' requires {} approval. Set FRANKCLAW_TOOL_APPROVAL={} to enable.",
-                    name, risk_level, risk_level,
+                    "tool '{name}' requires {risk_level} approval. Set FRANKCLAW_TOOL_APPROVAL={risk_level} to enable.",
                 ),
             });
         }
@@ -409,7 +408,7 @@ impl BrowserClient {
             .get(session_id)
             .cloned()
             .ok_or_else(|| FrankClawError::InvalidRequest {
-                msg: format!("browser session '{}' was not opened yet", session_id),
+                msg: format!("browser session '{session_id}' was not opened yet"),
             })?;
         self.snapshot_session(&session).await
     }
@@ -425,7 +424,7 @@ impl BrowserClient {
             .await
             .remove(session_id)
             .ok_or_else(|| FrankClawError::InvalidRequest {
-                msg: format!("browser session '{}' was not opened yet", session_id),
+                msg: format!("browser session '{session_id}' was not opened yet"),
             })?;
         let endpoint = self
             .base_url
@@ -457,7 +456,7 @@ impl BrowserClient {
             .get(session_id)
             .cloned()
             .ok_or_else(|| FrankClawError::InvalidRequest {
-                msg: format!("browser session '{}' was not opened yet", session_id),
+                msg: format!("browser session '{session_id}' was not opened yet"),
             })?;
         let mut socket = self.connect_page_socket(&session.page_ws_url).await?;
         self.wait_for_ready(&mut socket).await?;
@@ -466,7 +465,7 @@ impl BrowserClient {
             .await?;
         if !clicked {
             return Err(FrankClawError::AgentRuntime {
-                msg: format!("browser.click could not find selector '{}'", selector),
+                msg: format!("browser.click could not find selector '{selector}'"),
             });
         }
         self.snapshot_session(&session).await
@@ -480,7 +479,7 @@ impl BrowserClient {
             .get(session_id)
             .cloned()
             .ok_or_else(|| FrankClawError::InvalidRequest {
-                msg: format!("browser session '{}' was not opened yet", session_id),
+                msg: format!("browser session '{session_id}' was not opened yet"),
             })?;
         let mut socket = self.connect_page_socket(&session.page_ws_url).await?;
         self.wait_for_ready(&mut socket).await?;
@@ -489,7 +488,7 @@ impl BrowserClient {
             .await?;
         if !typed {
             return Err(FrankClawError::AgentRuntime {
-                msg: format!("browser.type could not find selector '{}'", selector),
+                msg: format!("browser.type could not find selector '{selector}'"),
             });
         }
         self.snapshot_session(&session).await
@@ -515,7 +514,7 @@ impl BrowserClient {
             .get(session_id)
             .cloned()
             .ok_or_else(|| FrankClawError::InvalidRequest {
-                msg: format!("browser session '{}' was not opened yet", session_id),
+                msg: format!("browser session '{session_id}' was not opened yet"),
             })?;
         let mut socket = self.connect_page_socket(&session.page_ws_url).await?;
         self.wait_for_ready(&mut socket).await?;
@@ -529,8 +528,8 @@ impl BrowserClient {
             }
             if std::time::Instant::now() >= deadline {
                 let target = selector
-                    .map(|value| format!("selector '{}'", value))
-                    .or_else(|| text.map(|value| format!("text '{}'", value)))
+                    .map(|value| format!("selector '{value}'"))
+                    .or_else(|| text.map(|value| format!("text '{value}'")))
                     .unwrap_or_else(|| "condition".into());
                 return Err(FrankClawError::AgentRuntime {
                     msg: format!("browser.wait timed out waiting for {target}"),
@@ -549,7 +548,7 @@ impl BrowserClient {
             .get(session_id)
             .cloned()
             .ok_or_else(|| FrankClawError::InvalidRequest {
-                msg: format!("browser session '{}' was not opened yet", session_id),
+                msg: format!("browser session '{session_id}' was not opened yet"),
             })?;
         let mut socket = self.connect_page_socket(&session.page_ws_url).await?;
         self.wait_for_ready(&mut socket).await?;
@@ -558,7 +557,7 @@ impl BrowserClient {
             .await?;
         if !pressed {
             return Err(FrankClawError::AgentRuntime {
-                msg: format!("browser.press could not find selector '{}'", selector),
+                msg: format!("browser.press could not find selector '{selector}'"),
             });
         }
         self.snapshot_session(&session).await
@@ -881,7 +880,7 @@ impl Tool for SessionInspectTool {
             })?;
         let limit = args
             .get("limit")
-            .and_then(|value| value.as_u64())
+            .and_then(serde_json::Value::as_u64)
             .unwrap_or(20)
             .clamp(1, 100) as usize;
 
@@ -953,7 +952,7 @@ impl Tool for BrowserExtractTool {
             .resolve_session_id(args.get("session_id").and_then(|value| value.as_str()), &ctx)?;
         let max_chars = args
             .get("max_chars")
-            .and_then(|value| value.as_u64())
+            .and_then(serde_json::Value::as_u64)
             .unwrap_or(2000)
             .clamp(1, 8000) as usize;
         let snapshot = self.client.extract(&session_id).await?;
@@ -984,7 +983,7 @@ impl Tool for BrowserSnapshotTool {
             .resolve_session_id(args.get("session_id").and_then(|value| value.as_str()), &ctx)?;
         let max_chars = args
             .get("max_chars")
-            .and_then(|value| value.as_u64())
+            .and_then(serde_json::Value::as_u64)
             .unwrap_or(8000)
             .clamp(1, 32000) as usize;
         let snapshot = self.client.extract(&session_id).await?;
@@ -1104,7 +1103,7 @@ impl Tool for BrowserWaitTool {
             .filter(|value| !value.is_empty());
         let timeout_ms = args
             .get("timeout_ms")
-            .and_then(|value| value.as_u64())
+            .and_then(serde_json::Value::as_u64)
             .unwrap_or(5_000);
         let snapshot = self
             .client
@@ -1249,12 +1248,8 @@ fn type_expression(selector: &str, text: &str) -> String {
 }
 
 fn wait_expression(selector: Option<&str>, text: Option<&str>) -> String {
-    let selector = selector
-        .map(|value| serde_json::to_string(value).unwrap_or_else(|_| "\"\"".into()))
-        .unwrap_or_else(|| "null".into());
-    let text = text
-        .map(|value| serde_json::to_string(value).unwrap_or_else(|_| "\"\"".into()))
-        .unwrap_or_else(|| "null".into());
+    let selector = selector.map_or_else(|| "null".into(), |value| serde_json::to_string(value).unwrap_or_else(|_| "\"\"".into()));
+    let text = text.map_or_else(|| "null".into(), |value| serde_json::to_string(value).unwrap_or_else(|_| "\"\"".into()));
     format!(
         "(function() {{ const selector = {selector}; const text = {text}; const hasSelector = !selector || !!document.querySelector(selector); const bodyText = document.body ? document.body.innerText : ''; const hasText = !text || bodyText.includes(text); return hasSelector && hasText; }})()"
     )
@@ -1273,8 +1268,7 @@ fn validate_press_key(key: &str) -> Result<()> {
         "Enter" | "Tab" | "Escape" | "ArrowDown" | "ArrowUp" => Ok(()),
         _ => Err(FrankClawError::InvalidRequest {
             msg: format!(
-                "browser.press only allows Enter, Tab, Escape, ArrowDown, and ArrowUp; got '{}'",
-                key
+                "browser.press only allows Enter, Tab, Escape, ArrowDown, and ArrowUp; got '{key}'"
             ),
         }),
     }

@@ -15,3 +15,6 @@ secrecy = { workspace = true }
 zeroize = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true }
+
+[lints]
+workspace = true

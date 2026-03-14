@@ -269,11 +269,10 @@ pub fn parse_webhook_payload(payload: &serde_json::Value) -> Vec<InboundMessage>
 
                 // Skip non-content message types (status updates, reactions,
                 // read receipts, etc.) to prevent spurious processing.
-                if let Some(msg_type) = message["type"].as_str() {
-                    if !is_processable_message_type(msg_type) {
+                if let Some(msg_type) = message["type"].as_str()
+                    && !is_processable_message_type(msg_type) {
                         continue;
                     }
-                }
 
                 let attachments = build_inbound_attachments(message);
                 let message_text = extract_message_text(message);
@@ -332,8 +331,7 @@ fn build_inbound_attachments(message: &serde_json::Value) -> Vec<InboundAttachme
                 payload["mime_type"]
                     .as_str()
                     .unwrap_or(mime_fallback),
-            )
-            .to_string(),
+            ).clone(),
             filename: payload["filename"].as_str().map(str::to_string),
             size_bytes: None,
             url: None,
@@ -462,7 +460,7 @@ fn parse_unix_timestamp(value: &str) -> Option<chrono::DateTime<chrono::Utc>> {
 
 fn decode_hex(value: &str) -> Option<Vec<u8>> {
     let value = value.trim();
-    if value.len() % 2 != 0 {
+    if !value.len().is_multiple_of(2) {
         return None;
     }
 

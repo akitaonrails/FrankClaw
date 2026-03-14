@@ -306,7 +306,7 @@ pub fn score_complexity(prompt: &str) -> ScoreBreakdown {
 pub fn score_complexity_with_config(prompt: &str, config: &ScorerConfig) -> ScoreBreakdown {
     let domain_regex = match &config.domain_keywords {
         Some(custom) => {
-            let refs: Vec<&str> = custom.iter().map(|s| s.as_str()).collect();
+            let refs: Vec<&str> = custom.iter().map(std::string::String::as_str).collect();
             build_domain_regex(&refs)
         }
         None => RE_DOMAIN_DEFAULT.clone(),

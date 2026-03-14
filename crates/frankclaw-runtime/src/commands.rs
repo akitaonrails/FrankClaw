@@ -174,7 +174,7 @@ pub fn detect_command(message: &str) -> Option<ParsedCommand> {
 
     // Check against registered commands and aliases.
     let is_known = COMMANDS.iter().any(|def| {
-        def.name == cmd_clean || def.aliases.iter().any(|&a| a == cmd_clean)
+        def.name == cmd_clean || def.aliases.contains(&cmd_clean)
     });
 
     if is_known {
@@ -193,7 +193,7 @@ fn resolve_alias(name: &str) -> &str {
         if def.name == name {
             return def.name;
         }
-        if def.aliases.iter().any(|&a| a == name) {
+        if def.aliases.contains(&name) {
             return def.name;
         }
     }
@@ -220,8 +220,7 @@ pub fn extract_directives(message: &str) -> InlineDirectives {
             let directive_start_byte = message
                 .char_indices()
                 .nth(i)
-                .map(|(idx, _)| idx)
-                .unwrap_or(message.len());
+                .map_or(message.len(), |(idx, _)| idx);
 
             // Extract the directive word.
             let rest = &message[directive_start_byte + 1..];

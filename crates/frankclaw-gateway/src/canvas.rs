@@ -117,8 +117,7 @@ impl CanvasStore {
         let mut documents = self.documents.write().await;
         let next_revision = documents
             .get(&document.id)
-            .map(|existing| existing.revision + 1)
-            .unwrap_or(1);
+            .map_or(1, |existing| existing.revision + 1);
         document.revision = next_revision;
         documents.insert(document.id.clone(), document.clone());
         Ok(document)
@@ -139,8 +138,8 @@ impl CanvasStore {
                 updated_at: chrono::Utc::now(),
             });
         // Conflict detection: reject stale patches.
-        if let Some(expected) = patch.expected_revision {
-            if existing.revision != expected {
+        if let Some(expected) = patch.expected_revision
+            && existing.revision != expected {
                 return Err(FrankClawError::InvalidRequest {
                     msg: format!(
                         "canvas revision conflict: expected {expected}, current is {}",
@@ -148,7 +147,6 @@ impl CanvasStore {
                     ),
                 });
             }
-        }
         let mut document = existing;
         if let Some(title) = patch.title {
             document.title = title;
@@ -257,7 +255,7 @@ fn render_markdown_block(block: &CanvasBlock) -> String {
     let text = text.as_str();
     match block.kind {
         CanvasBlockKind::Markdown => text.to_string(),
-        CanvasBlockKind::Code => format!("```text\n{}\n```", text),
+        CanvasBlockKind::Code => format!("```text\n{text}\n```"),
         CanvasBlockKind::Note => text
             .lines()
             .map(|line| format!("> {}", line.trim()))
@@ -271,7 +269,7 @@ fn render_markdown_block(block: &CanvasBlock) -> String {
                 if line.starts_with("- [") {
                     line.to_string()
                 } else {
-                    format!("- [ ] {}", line)
+                    format!("- [ ] {line}")
                 }
             })
             .collect::<Vec<_>>()
@@ -289,14 +287,10 @@ fn render_markdown_block(block: &CanvasBlock) -> String {
             let value = block
                 .meta
                 .as_ref()
-                .and_then(|meta| meta.get("value"))
-                .map(|value| {
+                .and_then(|meta| meta.get("value")).map_or_else(|| text.to_string(), |value| {
                     value
-                        .as_str()
-                        .map(str::to_string)
-                        .unwrap_or_else(|| value.to_string())
-                })
-                .unwrap_or_else(|| text.to_string());
+                        .as_str().map_or_else(|| value.to_string(), str::to_string)
+                });
             if text.is_empty() || text == value {
                 format!("**Metric:** {value}")
             } else {
@@ -316,7 +310,7 @@ fn render_markdown_block(block: &CanvasBlock) -> String {
                 .and_then(|meta| meta.get("target"))
                 .and_then(|value| value.as_str())
                 .unwrap_or_default();
-            format!("**Action ({action})**\n{}\n{}", text, target)
+            format!("**Action ({action})**\n{text}\n{target}")
         }
     }
 }

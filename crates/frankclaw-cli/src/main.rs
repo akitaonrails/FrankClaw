@@ -312,7 +312,7 @@ async fn main() -> anyhow::Result<()> {
 
     let state_dir = cli
         .state_dir
-        .unwrap_or_else(|| default_state_dir());
+        .unwrap_or_else(default_state_dir);
 
     match cli.command {
         Command::Chat {
@@ -482,7 +482,7 @@ async fn main() -> anyhow::Result<()> {
             if let Some(browser_status) = browser_runtime_status(&config, std::env::var("FRANKCLAW_BROWSER_DEVTOOLS_URL").ok().as_deref()) {
                 println!();
                 println!("{}",  t!("cmd.status.browser"));
-                println!("  {}", browser_status);
+                println!("  {browser_status}");
             }
             println!();
             println!("{}", t!("cmd.status.channels"));
@@ -846,7 +846,7 @@ async fn main() -> anyhow::Result<()> {
             for skill in skills {
                 println!("{} - {}", skill.id, skill.name);
                 if let Some(description) = &skill.description {
-                    println!("  {}", description);
+                    println!("  {description}");
                 }
                 if !skill.capabilities.is_empty() {
                     println!(
@@ -872,9 +872,7 @@ async fn main() -> anyhow::Result<()> {
             use frankclaw_core::session::SessionStore;
 
             let sessions = open_sessions(&state_dir)?;
-            let agent_id = agent
-                .map(frankclaw_core::types::AgentId::new)
-                .unwrap_or_else(frankclaw_core::types::AgentId::default_agent);
+            let agent_id = agent.map_or_else(frankclaw_core::types::AgentId::default_agent, frankclaw_core::types::AgentId::new);
             let entries = sessions.list(&agent_id, limit, offset).await?;
 
             for entry in entries {
@@ -992,9 +990,7 @@ fn load_config(
     path: Option<&std::path::Path>,
     state_dir: &std::path::Path,
 ) -> anyhow::Result<frankclaw_core::config::FrankClawConfig> {
-    let config_path = path
-        .map(PathBuf::from)
-        .unwrap_or_else(|| state_dir.join("frankclaw.json"));
+    let config_path = path.map_or_else(|| state_dir.join("frankclaw.json"), PathBuf::from);
 
     if !config_path.exists() {
         info!("no config found at {}, using defaults", config_path.display());
@@ -1028,11 +1024,10 @@ fn collect_doctor_warnings(
     }
 
     for provider in &config.models.providers {
-        if let Some(env_name) = provider.api_key_ref.as_deref() {
-            if std::env::var(env_name).ok().filter(|value| !value.trim().is_empty()).is_none() {
+        if let Some(env_name) = provider.api_key_ref.as_deref()
+            && std::env::var(env_name).ok().filter(|value| !value.trim().is_empty()).is_none() {
                 warnings.push(t!("warn.missing_env", id = provider.id.as_str(), env = env_name).to_string());
             }
-        }
     }
 
     for (channel_id, channel) in &config.channels {
@@ -1055,11 +1050,10 @@ fn collect_doctor_warnings(
                 "access_token_env",
                 "app_secret_env",
             ] {
-                if let Some(env_name) = account.get(key).and_then(|value| value.as_str()) {
-                    if std::env::var(env_name).ok().filter(|value| !value.trim().is_empty()).is_none() {
+                if let Some(env_name) = account.get(key).and_then(|value| value.as_str())
+                    && std::env::var(env_name).ok().filter(|value| !value.trim().is_empty()).is_none() {
                         warnings.push(t!("warn.channel_missing_env", channel = channel_id.as_str(), env = env_name, key = key).to_string());
                     }
-                }
             }
 
             for (inline_key, env_key) in [
@@ -1431,7 +1425,7 @@ fn display_skill_capability(
 
 fn print_exposure_report(report: &frankclaw_gateway::auth::ExposureReport) {
     println!("{}", t!("exposure.summary_label", summary = &*report.summary));
-    println!("{}", t!("exposure.auth", mode = &*report.auth_mode));
+    println!("{}", t!("exposure.auth", mode = report.auth_mode));
     println!("{}", t!("exposure.bind", surface = display_exposure_surface(&report.surface)));
     println!("{}", t!("exposure.remote", status = if report.remote_ready { t!("exposure.ready") } else { t!("exposure.not_ready") }));
     println!("{}", t!("exposure.public", status = if report.public_ready { t!("exposure.ready") } else { t!("exposure.not_ready") }));
@@ -1525,8 +1519,7 @@ fn is_process_alive(pid: u32) -> bool {
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status()
-        .map(|status| status.success())
-        .unwrap_or(false)
+        .is_ok_and(|status| status.success())
 }
 
 fn stop_process(pid: u32) -> anyhow::Result<()> {
@@ -1588,7 +1581,7 @@ fn prompt_choice(question: &str, options: &[&str], default: usize) -> anyhow::Re
         };
         eprintln!("  {}: {}{}", i + 1, option, marker);
     }
-    let input = prompt_line(&t!("setup.choose", max = options.len()).to_string())?;
+    let input = prompt_line(t!("setup.choose", max = options.len()).as_ref())?;
     if input.is_empty() {
         return Ok(default);
     }
@@ -1619,9 +1612,7 @@ fn run_setup(
     use frankclaw_core::config::{ChannelConfig, ProviderConfig};
     use frankclaw_core::types::ChannelId;
 
-    let config_path = config_path_override
-        .map(PathBuf::from)
-        .unwrap_or_else(|| state_dir.join("frankclaw.json"));
+    let config_path = config_path_override.map_or_else(|| state_dir.join("frankclaw.json"), PathBuf::from);
 
     println!("{}", t!("setup.title"));
     println!("{}", t!("setup.separator"));
@@ -1629,7 +1620,7 @@ fn run_setup(
 
     if config_path.exists() && !force {
         eprintln!("{}", t!("setup.config_exists", path = config_path.display()));
-        if !prompt_yes_no(&t!("setup.overwrite").to_string(), false)? {
+        if !prompt_yes_no(t!("setup.overwrite").as_ref(), false)? {
             println!("{}", t!("setup.cancelled"));
             return Ok(());
         }
@@ -1638,11 +1629,11 @@ fn run_setup(
     // --- Provider selection ---
     println!();
     let provider_idx = prompt_choice(
-        &t!("setup.which_provider").to_string(),
+        t!("setup.which_provider").as_ref(),
         &[
-            &t!("setup.provider.openai").to_string(),
-            &t!("setup.provider.anthropic").to_string(),
-            &t!("setup.provider.ollama").to_string(),
+            t!("setup.provider.openai").as_ref(),
+            t!("setup.provider.anthropic").as_ref(),
+            t!("setup.provider.ollama").as_ref(),
         ],
         0,
     )?;
@@ -1662,7 +1653,7 @@ fn run_setup(
 
     let api_key_ref = if needs_key {
         println!();
-        let env_name = prompt_line(&t!("setup.api_key_env", default = default_env).to_string())?;
+        let env_name = prompt_line(t!("setup.api_key_env", default = default_env).as_ref())?;
         let env_name = if env_name.is_empty() {
             default_env.to_string()
         } else {
@@ -1675,7 +1666,7 @@ fn run_setup(
 
     let base_url = if provider_api == "ollama" {
         println!();
-        let url = prompt_line(&t!("setup.ollama_url").to_string())?;
+        let url = prompt_line(t!("setup.ollama_url").as_ref())?;
         Some(if url.is_empty() {
             "http://127.0.0.1:11434".to_string()
         } else {
@@ -1686,7 +1677,7 @@ fn run_setup(
     };
 
     println!();
-    let model_input = prompt_line(&t!("setup.default_model", model = default_model).to_string())?;
+    let model_input = prompt_line(t!("setup.default_model", model = default_model).as_ref())?;
     let model = if model_input.is_empty() {
         default_model.to_string()
     } else {
@@ -1696,14 +1687,14 @@ fn run_setup(
     // --- Channel selection ---
     println!();
     let channel_idx = prompt_choice(
-        &t!("setup.primary_channel").to_string(),
+        t!("setup.primary_channel").as_ref(),
         &[
-            &t!("setup.channel.web").to_string(),
-            &t!("setup.channel.telegram").to_string(),
-            &t!("setup.channel.discord").to_string(),
-            &t!("setup.channel.slack").to_string(),
-            &t!("setup.channel.whatsapp").to_string(),
-            &t!("setup.channel.signal").to_string(),
+            t!("setup.channel.web").as_ref(),
+            t!("setup.channel.telegram").as_ref(),
+            t!("setup.channel.discord").as_ref(),
+            t!("setup.channel.slack").as_ref(),
+            t!("setup.channel.whatsapp").as_ref(),
+            t!("setup.channel.signal").as_ref(),
         ],
         0,
     )?;
@@ -1777,7 +1768,7 @@ fn run_setup(
 
     // --- Gateway port ---
     println!();
-    let port_input = prompt_line(&t!("setup.gateway_port").to_string())?;
+    let port_input = prompt_line(t!("setup.gateway_port").as_ref())?;
     let port: u16 = if port_input.is_empty() {
         18789
     } else {
@@ -1788,7 +1779,7 @@ fn run_setup(
 
     // --- Session encryption ---
     println!();
-    let encrypt = prompt_yes_no(&t!("setup.encrypt_sessions").to_string(), true)?;
+    let encrypt = prompt_yes_no(t!("setup.encrypt_sessions").as_ref(), true)?;
 
     // --- Build config ---
     let gateway_token = frankclaw_crypto::generate_token();
@@ -1897,14 +1888,14 @@ async fn run_doctor(
     ];
     let state_display = state_dir.display().to_string();
     system_checks.push(CheckResult::Info(t!("doctor.info.state_dir", path = state_display).to_string()));
-    print_section(&t!("doctor.section.system").to_string(), &system_checks);
+    print_section(t!("doctor.section.system").as_ref(), &system_checks);
 
     // --- Configuration ---
     let config = match load_config(config_path, state_dir) {
         Ok(cfg) => cfg,
         Err(err) => {
             print_section(
-                &t!("doctor.section.configuration").to_string(),
+                t!("doctor.section.configuration").as_ref(),
                 &[CheckResult::Fail(t!("doctor.config.load_failed", error = err).to_string())],
             );
             println!("\n{}", t!("doctor.config.critical_issues"));
@@ -1917,16 +1908,14 @@ async fn run_doctor(
         Ok(()) => config_checks.push(CheckResult::Pass(t!("doctor.config.valid").to_string())),
         Err(err) => {
             config_checks.push(CheckResult::Fail(t!("doctor.config.validation_failed", error = err).to_string()));
-            print_section(&t!("doctor.section.configuration").to_string(), &config_checks);
+            print_section(t!("doctor.section.configuration").as_ref(), &config_checks);
             println!("\n{}", t!("doctor.config.critical_issues"));
             return Ok(());
         }
     }
 
     // Config file permissions (Unix only)
-    let config_file_path = config_path
-        .map(PathBuf::from)
-        .unwrap_or_else(|| state_dir.join("frankclaw.json"));
+    let config_file_path = config_path.map_or_else(|| state_dir.join("frankclaw.json"), PathBuf::from);
     config_checks.extend(check_file_permissions(&config_file_path, "config file"));
 
     let warnings = collect_doctor_warnings(&config, state_dir)?;
@@ -1943,7 +1932,7 @@ async fn run_doctor(
         config_checks.push(CheckResult::Warn(warning.clone()));
     }
 
-    print_section(&t!("doctor.section.configuration").to_string(), &config_checks);
+    print_section(t!("doctor.section.configuration").as_ref(), &config_checks);
 
     // --- State directory ---
     let mut state_checks = Vec::new();
@@ -1955,7 +1944,7 @@ async fn run_doctor(
             t!("doctor.state.missing", path = state_dir.display()).to_string(),
         ));
     }
-    print_section(&t!("doctor.section.state_directory").to_string(), &state_checks);
+    print_section(t!("doctor.section.state_directory").as_ref(), &state_checks);
 
     // --- Database ---
     let mut db_checks = Vec::new();
@@ -1971,7 +1960,7 @@ async fn run_doctor(
             t!("doctor.db.missing").to_string(),
         ));
     }
-    print_section(&t!("doctor.section.database").to_string(), &db_checks);
+    print_section(t!("doctor.section.database").as_ref(), &db_checks);
 
     // --- Port availability ---
     let mut port_checks = Vec::new();
@@ -1985,7 +1974,7 @@ async fn run_doctor(
             t!("doctor.port.check_error", port = port, error = err).to_string(),
         )),
     }
-    print_section(&t!("doctor.section.network").to_string(), &port_checks);
+    print_section(t!("doctor.section.network").as_ref(), &port_checks);
 
     // --- Providers ---
     let mut provider_checks = Vec::new();
@@ -2012,7 +2001,7 @@ async fn run_doctor(
         ));
 
         // Connectivity check for providers with a base URL
-        let base_url = provider.base_url.as_deref().unwrap_or_else(|| {
+        let base_url = provider.base_url.as_deref().unwrap_or({
             match provider.api.as_str() {
                 "openai" => "https://api.openai.com",
                 "anthropic" => "https://api.anthropic.com",
@@ -2030,7 +2019,7 @@ async fn run_doctor(
             }
         }
     }
-    print_section(&t!("doctor.section.providers").to_string(), &provider_checks);
+    print_section(t!("doctor.section.providers").as_ref(), &provider_checks);
 
     // --- Channels ---
     let mut channel_checks = Vec::new();
@@ -2048,7 +2037,7 @@ async fn run_doctor(
             ));
         }
     }
-    print_section(&t!("doctor.section.channels").to_string(), &channel_checks);
+    print_section(t!("doctor.section.channels").as_ref(), &channel_checks);
 
     // --- Security ---
     let mut security_checks = Vec::new();
@@ -2079,7 +2068,7 @@ async fn run_doctor(
             security_checks.push(CheckResult::Pass(t!("doctor.security.auth_tailscale").to_string()));
         }
     }
-    print_section(&t!("doctor.section.security").to_string(), &security_checks);
+    print_section(t!("doctor.section.security").as_ref(), &security_checks);
 
     // --- Summary ---
     let all_checks: Vec<&CheckResult> = system_checks
@@ -2113,9 +2102,7 @@ fn rustc_version() -> String {
         .arg("--version")
         .output()
         .ok()
-        .and_then(|output| String::from_utf8(output.stdout).ok())
-        .map(|version| version.trim().to_string())
-        .unwrap_or_else(|| "unknown".into())
+        .and_then(|output| String::from_utf8(output.stdout).ok()).map_or_else(|| "unknown".into(), |version| version.trim().to_string())
 }
 
 #[cfg(unix)]
@@ -2414,8 +2401,8 @@ fn audit_missing_env_vars(
     findings: &mut Vec<Finding>,
 ) {
     for provider in &config.models.providers {
-        if let Some(env_name) = provider.api_key_ref.as_deref() {
-            if std::env::var(env_name)
+        if let Some(env_name) = provider.api_key_ref.as_deref()
+            && std::env::var(env_name)
                 .ok()
                 .filter(|v| !v.trim().is_empty())
                 .is_none()
@@ -2427,7 +2414,6 @@ fn audit_missing_env_vars(
                     remediation: t!("audit.secrets.missing_env_fix", env = env_name).to_string(),
                 });
             }
-        }
     }
 
     for (channel_id, channel) in &config.channels {
@@ -2437,8 +2423,8 @@ fn audit_missing_env_vars(
                 "access_token_env", "verify_token_env", "app_secret_env",
                 "base_url_env", "account_env", "phone_number_id_env",
             ] {
-                if let Some(env_name) = account.get(key).and_then(|v| v.as_str()) {
-                    if std::env::var(env_name)
+                if let Some(env_name) = account.get(key).and_then(|v| v.as_str())
+                    && std::env::var(env_name)
                         .ok()
                         .filter(|v| !v.trim().is_empty())
                         .is_none()
@@ -2450,7 +2436,6 @@ fn audit_missing_env_vars(
                             remediation: t!("audit.secrets.channel_missing_env_fix", env = env_name).to_string(),
                         });
                     }
-                }
             }
         }
     }
@@ -3624,10 +3609,10 @@ async fn build_runtime(
 }
 
 fn redact_config(config: &frankclaw_core::config::FrankClawConfig) -> serde_json::Value {
-    let mut val = serde_json::to_value(config).unwrap_or(serde_json::json!({}));
+    let mut val = serde_json::to_value(config).unwrap_or_else(|_| serde_json::json!({}));
     if let Some(obj) = val.as_object_mut() {
-        if let Some(gateway) = obj.get_mut("gateway").and_then(|value| value.as_object_mut()) {
-            if let Some(auth) = gateway.get_mut("auth").and_then(|value| value.as_object_mut()) {
+        if let Some(gateway) = obj.get_mut("gateway").and_then(|value| value.as_object_mut())
+            && let Some(auth) = gateway.get_mut("auth").and_then(|value| value.as_object_mut()) {
                 if let Some(token) = auth.get_mut("token") {
                     *token = serde_json::json!("[REDACTED]");
                 }
@@ -3635,10 +3620,9 @@ fn redact_config(config: &frankclaw_core::config::FrankClawConfig) -> serde_json
                     *hash = serde_json::json!("[REDACTED]");
                 }
             }
-        }
 
-        if let Some(models) = obj.get_mut("models").and_then(|value| value.as_object_mut()) {
-            if let Some(providers) = models
+        if let Some(models) = obj.get_mut("models").and_then(|value| value.as_object_mut())
+            && let Some(providers) = models
                 .get_mut("providers")
                 .and_then(|value| value.as_array_mut())
             {
@@ -3648,7 +3632,6 @@ fn redact_config(config: &frankclaw_core::config::FrankClawConfig) -> serde_json
                     }
                 }
             }
-        }
     }
     val
 }

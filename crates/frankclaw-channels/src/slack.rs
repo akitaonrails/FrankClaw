@@ -130,11 +130,10 @@ impl SlackChannel {
             }
 
             let bot_user_id = self.bot_user_id.lock().await.clone();
-            if let Some(inbound) = parse_event_message(&payload["payload"]["event"], bot_user_id.as_deref()) {
-                if inbound_tx.send(inbound).await.is_err() {
+            if let Some(inbound) = parse_event_message(&payload["payload"]["event"], bot_user_id.as_deref())
+                && inbound_tx.send(inbound).await.is_err() {
                     return Ok(());
                 }
-            }
         }
 
         Err(self.channel_err("slack socket mode closed".into()))
@@ -529,12 +528,10 @@ fn parse_event_message(event: &serde_json::Value, bot_user_id: Option<&str>) -> 
     let channel_type = event["channel_type"].as_str().unwrap_or("channel");
     let is_group = channel_type != "im";
     let is_mention = bot_user_id
-        .map(|user_id| {
+        .is_some_and(|user_id| {
             text.as_deref()
-                .map(|text| text.contains(&format!("<@{user_id}>")))
-                .unwrap_or(false)
-        })
-        .unwrap_or(false);
+                .is_some_and(|text| text.contains(&format!("<@{user_id}>")))
+        });
     let timestamp = event["ts"]
         .as_str()
         .and_then(parse_slack_timestamp)

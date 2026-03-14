@@ -196,15 +196,13 @@ fn extract_credential(
                     token.to_string(),
                 ));
             }
-            if let Some(auth) = headers.get("authorization") {
-                if let Ok(value) = auth.to_str() {
-                    if let Some(token) = value.strip_prefix("Bearer ") {
+            if let Some(auth) = headers.get("authorization")
+                && let Ok(value) = auth.to_str()
+                    && let Some(token) = value.strip_prefix("Bearer ") {
                         return AuthCredential::BearerToken(secrecy::SecretString::from(
                             token.to_string(),
                         ));
                     }
-                }
-            }
         }
         frankclaw_core::auth::AuthMode::Password { .. } => {
             if let Some(password) = query.and_then(|query| query.password.as_deref()) {
@@ -212,32 +210,28 @@ fn extract_credential(
                     password.to_string(),
                 ));
             }
-            if let Some(password) = headers.get("x-frankclaw-password") {
-                if let Ok(value) = password.to_str() {
+            if let Some(password) = headers.get("x-frankclaw-password")
+                && let Ok(value) = password.to_str() {
                     return AuthCredential::Password(secrecy::SecretString::from(
                         value.to_string(),
                     ));
                 }
-            }
-            if let Some(auth) = headers.get("authorization") {
-                if let Ok(value) = auth.to_str() {
-                    if let Some(password) = value.strip_prefix("Password ") {
+            if let Some(auth) = headers.get("authorization")
+                && let Ok(value) = auth.to_str()
+                    && let Some(password) = value.strip_prefix("Password ") {
                         return AuthCredential::Password(secrecy::SecretString::from(
                             password.to_string(),
                         ));
                     }
-                }
-            }
         }
         frankclaw_core::auth::AuthMode::TrustedProxy { identity_header } => {
             if let Some(identity) = query.and_then(|query| query.identity.as_deref()) {
                 return AuthCredential::ProxyIdentity(identity.to_string());
             }
-            if let Some(identity) = headers.get(identity_header.as_str()) {
-                if let Ok(value) = identity.to_str() {
+            if let Some(identity) = headers.get(identity_header.as_str())
+                && let Ok(value) = identity.to_str() {
                     return AuthCredential::ProxyIdentity(value.to_string());
                 }
-            }
         }
         frankclaw_core::auth::AuthMode::Tailscale => {
             for header_name in [
@@ -245,11 +239,10 @@ fn extract_credential(
                 "tailscale-user-name",
                 "x-tailscale-user-login",
             ] {
-                if let Some(identity) = headers.get(header_name) {
-                    if let Ok(value) = identity.to_str() {
+                if let Some(identity) = headers.get(header_name)
+                    && let Ok(value) = identity.to_str() {
                         return AuthCredential::TailscaleIdentity(value.to_string());
                     }
-                }
             }
         }
         frankclaw_core::auth::AuthMode::None => {}
@@ -1079,7 +1072,7 @@ async fn process_inbound_message_with_target(
     let policy = config
         .channels
         .get(&inbound.channel)
-        .map(|channel| channel.security_policy())
+        .map(frankclaw_core::config::ChannelConfig::security_policy)
         .transpose()?
         .unwrap_or_else(|| frankclaw_core::config::ChannelSecurityPolicy {
             dm_policy: ChannelDmPolicy::Disabled,
@@ -1168,8 +1161,7 @@ async fn process_inbound_message_with_target(
     let channel_for_stream = state.channel(&inbound.channel);
     let supports_edit = channel_for_stream
         .as_ref()
-        .map(|ch| ch.capabilities().edit)
-        .unwrap_or(false);
+        .is_some_and(|ch| ch.capabilities().edit);
 
     let (stream_tx, stream_rx) = if supports_edit {
         let (tx, rx) = tokio::sync::mpsc::channel::<frankclaw_core::model::StreamDelta>(64);
@@ -1209,8 +1201,8 @@ async fn process_inbound_message_with_target(
                 if let frankclaw_core::model::StreamDelta::Text(text) = delta {
                     accumulated.push_str(&text);
                     // Throttle edits to avoid rate limits.
-                    if last_edit.elapsed() >= edit_interval {
-                        if let Some(ref msg_id) = draft_id {
+                    if last_edit.elapsed() >= edit_interval
+                        && let Some(ref msg_id) = draft_id {
                             let target = frankclaw_core::channel::EditMessageTarget {
                                 account_id: String::new(), // filled below
                                 to: String::new(),
@@ -1220,7 +1212,6 @@ async fn process_inbound_message_with_target(
                             let _ = channel.edit_message(&target, &accumulated).await;
                             last_edit = tokio::time::Instant::now();
                         }
-                    }
                 }
             }
             draft_id
@@ -1248,8 +1239,8 @@ async fn process_inbound_message_with_target(
 
     // If we had a streaming draft, wait for the background task and edit with final content.
     if let Some(handle) = stream_handle {
-        if let Ok(Some(draft_id)) = handle.await {
-            if let Some(ref channel) = channel_for_stream {
+        if let Ok(Some(draft_id)) = handle.await
+            && let Some(ref channel) = channel_for_stream {
                 let target = frankclaw_core::channel::EditMessageTarget {
                     account_id: inbound.account_id.clone(),
                     to: inbound.sender_id.clone(),
@@ -1258,7 +1249,6 @@ async fn process_inbound_message_with_target(
                 };
                 let _ = channel.edit_message(&target, &response.content).await;
             }
-        }
         // Skip normal delivery — message was already sent and edited in place.
     } else if let Some(channel) = channel_for_stream {
         let outbound = OutboundMessage {
@@ -1664,8 +1654,7 @@ fn group_allowed(
     inbound
         .thread_id
         .as_deref()
-        .map(|thread_id| allowed_groups.iter().any(|entry| entry == thread_id))
-        .unwrap_or(false)
+        .is_some_and(|thread_id| allowed_groups.iter().any(|entry| entry == thread_id))
 }
 
 #[cfg(test)]

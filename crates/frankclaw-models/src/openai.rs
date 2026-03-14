@@ -152,8 +152,7 @@ impl ModelProvider for OpenAiProvider {
             .header("Authorization", format!("Bearer {}", self.api_key.expose_secret()))
             .send()
             .await
-            .map(|r| r.status().is_success())
-            .unwrap_or(false)
+            .is_ok_and(|r| r.status().is_success())
     }
 }
 

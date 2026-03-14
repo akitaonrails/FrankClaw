@@ -86,13 +86,12 @@ impl SafeFetcher {
             }
 
             // Check Content-Length header before downloading body.
-            if let Some(content_length) = response.content_length() {
-                if content_length > self.max_bytes {
+            if let Some(content_length) = response.content_length()
+                && content_length > self.max_bytes {
                     return Err(FrankClawError::MediaTooLarge {
                         max_bytes: self.max_bytes,
                     });
                 }
-            }
 
             let content_type = response
                 .headers()

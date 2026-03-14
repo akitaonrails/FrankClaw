@@ -149,11 +149,10 @@ impl DiscordChannel {
                                     if let Some(inbound) = parse_message_create(
                                         &payload["d"],
                                         bot_user_id.as_deref(),
-                                    ) {
-                                        if inbound_tx.send(inbound).await.is_err() {
+                                    )
+                                        && inbound_tx.send(inbound).await.is_err() {
                                             return Ok(());
                                         }
-                                    }
                                 }
                                 _ => {}
                             }
@@ -301,7 +300,7 @@ impl ChannelPlugin for DiscordChannel {
                     }
                     last_result = Some(result);
                 }
-                return Ok(last_result.unwrap_or(SendResult::Failed {
+                return Ok(last_result.unwrap_or_else(|| SendResult::Failed {
                     reason: "no chunks to send".into(),
                 }));
             }
@@ -431,8 +430,7 @@ fn parse_gateway_message(channel_id: ChannelId, frame: Message) -> Result<serde_
         })?.into(),
         Message::Close(close_frame) => {
             let (code, reason) = close_frame
-                .map(|cf| (cf.code.into(), cf.reason.to_string()))
-                .unwrap_or((0u16, String::new()));
+                .map_or((0u16, String::new()), |cf| (cf.code.into(), cf.reason.to_string()));
             return Err(FrankClawError::Channel {
                 channel: channel_id,
                 msg: format!("discord gateway closed (code={code}, reason={reason})"),
@@ -486,17 +484,14 @@ fn parse_message_create(
         .unwrap_or_default();
     let timestamp = payload["timestamp"]
         .as_str()
-        .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
-        .map(|value| value.with_timezone(&chrono::Utc))
-        .unwrap_or_else(chrono::Utc::now);
-    let is_mention = bot_user_id.map(|bot_user_id| {
+        .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok()).map_or_else(chrono::Utc::now, |value| value.with_timezone(&chrono::Utc));
+    let is_mention = bot_user_id.is_some_and(|bot_user_id| {
         payload["mentions"]
             .as_array()
-            .map(|mentions| {
+            .is_some_and(|mentions| {
                 mentions.iter().any(|mention| mention["id"].as_str() == Some(bot_user_id))
             })
-            .unwrap_or(false)
-    }).unwrap_or(false);
+    });
 
     Some(InboundMessage {
         channel: ChannelId::new("discord"),
@@ -623,8 +618,7 @@ fn chunk_discord_text(text: &str, limit: usize) -> Vec<String> {
         let split_at = slice
             .iter()
             .rposition(|&c| c == '\n')
-            .map(|pos| start + pos + 1)
-            .unwrap_or(end);
+            .map_or(end, |pos| start + pos + 1);
 
         chunks.push(chars[start..split_at].iter().collect());
         start = split_at;

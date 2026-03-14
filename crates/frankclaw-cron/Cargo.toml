@@ -16,3 +16,6 @@ cron = { workspace = true }
 uuid = { workspace = true }
 tokio-util = { workspace = true }
 regex = { workspace = true }
+
+[lints]
+workspace = true

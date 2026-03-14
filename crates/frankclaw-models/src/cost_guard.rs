@@ -46,8 +46,7 @@ impl std::fmt::Display for CostLimitExceeded {
             ),
             Self::HourlyRate { actions, limit } => write!(
                 f,
-                "Hourly action limit exceeded: {} actions of {} allowed per hour",
-                actions, limit
+                "Hourly action limit exceeded: {actions} actions of {limit} allowed per hour"
             ),
         }
     }

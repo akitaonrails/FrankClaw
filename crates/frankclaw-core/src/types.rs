@@ -51,7 +51,7 @@ pub struct SessionKey(String);
 
 impl SessionKey {
     pub fn new(agent_id: &AgentId, channel: &ChannelId, account_id: &str) -> Self {
-        Self(format!("{}:{}:{}", agent_id, channel, account_id))
+        Self(format!("{agent_id}:{channel}:{account_id}"))
     }
 
     /// Create a session key from a raw string.

@@ -69,21 +69,18 @@ impl SignalChannel {
             let chunk = chunk.map_err(|e| self.channel_err(format!("signal event stream read failed: {e}")))?;
             let text = std::str::from_utf8(&chunk).map_err(|e| self.channel_err(format!("signal event stream sent invalid UTF-8: {e}")))?;
             for event in parser.push(text) {
-                if let Some(inbound) = parse_receive_event(&event, self.account.as_deref()) {
-                    if inbound_tx.send(inbound).await.is_err() {
+                if let Some(inbound) = parse_receive_event(&event, self.account.as_deref())
+                    && inbound_tx.send(inbound).await.is_err() {
                         return Ok(());
                     }
-                }
             }
         }
 
-        if let Some(event) = parser.finish() {
-            if let Some(inbound) = parse_receive_event(&event, self.account.as_deref()) {
-                if inbound_tx.send(inbound).await.is_err() {
+        if let Some(event) = parser.finish()
+            && let Some(inbound) = parse_receive_event(&event, self.account.as_deref())
+                && inbound_tx.send(inbound).await.is_err() {
                     return Ok(());
                 }
-            }
-        }
 
         Err(self.channel_err("signal event stream closed".into()))
     }
@@ -390,8 +387,7 @@ fn parse_receive_event(
         && data_message
             .attachments
             .as_ref()
-            .map(|attachments| attachments.is_empty())
-            .unwrap_or(true)
+            .is_none_or(std::vec::Vec::is_empty)
     {
         return None;
     }
@@ -399,7 +395,7 @@ fn parse_receive_event(
     let sender_id = envelope
         .source_number
         .clone()
-        .or(envelope.source_uuid.clone())?;
+        .or_else(|| envelope.source_uuid.clone())?;
     let group_id = data_message
         .group_info
         .as_ref()
@@ -613,7 +609,7 @@ fn normalize_signal_identity(value: &str) -> String {
 
 /// Normalize a phone number to E.164 format: strip non-digits, re-add leading `+`.
 fn normalize_e164(value: &str) -> String {
-    let digits: String = value.chars().filter(|c| c.is_ascii_digit()).collect();
+    let digits: String = value.chars().filter(char::is_ascii_digit).collect();
     if digits.is_empty() {
         return String::new();
     }

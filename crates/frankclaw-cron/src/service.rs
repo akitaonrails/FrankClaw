@@ -46,6 +46,12 @@ pub struct CronService {
     cancel: CancellationToken,
 }
 
+impl Default for CronService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CronService {
     pub fn new() -> Self {
         Self {
@@ -127,8 +133,7 @@ impl CronService {
                                 let already_started = job
                                     .last_run
                                     .as_ref()
-                                    .map(|run| run.started_at >= next_run)
-                                    .unwrap_or(false);
+                                    .is_some_and(|run| run.started_at >= next_run);
                                 if already_started {
                                     continue;
                                 }

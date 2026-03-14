@@ -14,20 +14,18 @@ pub async fn sessions_list(
     let agent_id = request
         .params
         .get("agent_id")
-        .and_then(|v| v.as_str())
-        .map(AgentId::new)
-        .unwrap_or_else(AgentId::default_agent);
+        .and_then(|v| v.as_str()).map_or_else(AgentId::default_agent, AgentId::new);
 
     let limit = request
         .params
         .get("limit")
-        .and_then(|v| v.as_u64())
+        .and_then(serde_json::Value::as_u64)
         .unwrap_or(50) as usize;
 
     let offset = request
         .params
         .get("offset")
-        .and_then(|v| v.as_u64())
+        .and_then(serde_json::Value::as_u64)
         .unwrap_or(0) as usize;
 
     match state.sessions.list(&agent_id, limit, offset).await {
@@ -52,13 +50,13 @@ pub async fn chat_history(
     let limit = request
         .params
         .get("limit")
-        .and_then(|v| v.as_u64())
+        .and_then(serde_json::Value::as_u64)
         .unwrap_or(100) as usize;
 
     let before_seq = request
         .params
         .get("before_seq")
-        .and_then(|v| v.as_u64());
+        .and_then(serde_json::Value::as_u64);
 
     match state
         .sessions
@@ -144,7 +142,7 @@ pub async fn chat_send(
                 return ResponseFrame::err(
                     request.id,
                     413,
-                    &format!("message exceeds maximum size ({max_message_bytes} bytes)"),
+                    format!("message exceeds maximum size ({max_message_bytes} bytes)"),
                 );
             }
             message.to_string()
@@ -170,17 +168,17 @@ pub async fn chat_send(
     let max_tokens = request
         .params
         .get("max_tokens")
-        .and_then(|value| value.as_u64())
+        .and_then(serde_json::Value::as_u64)
         .map(|value| value as u32);
     let temperature = request
         .params
         .get("temperature")
-        .and_then(|value| value.as_f64())
+        .and_then(serde_json::Value::as_f64)
         .map(|value| value as f32);
     let stream = request
         .params
         .get("stream")
-        .and_then(|value| value.as_bool())
+        .and_then(serde_json::Value::as_bool)
         .unwrap_or(true);
     let request_id = request.id.clone();
 
@@ -229,11 +227,10 @@ pub async fn chat_send(
                         event: EventType::ChatDelta,
                         payload,
                     });
-                    if let Ok(json) = serde_json::to_string(&frame) {
-                        if client_tx.send(json).await.is_err() {
+                    if let Ok(json) = serde_json::to_string(&frame)
+                        && client_tx.send(json).await.is_err() {
                             break;
                         }
-                    }
                 }
             });
             delta_tx
@@ -452,7 +449,7 @@ pub async fn canvas_set(
         updated_at: chrono::Utc::now(),
     }).await {
         Ok(doc) => doc,
-        Err(e) => return ResponseFrame::err(request.id, 400, &e.to_string()),
+        Err(e) => return ResponseFrame::err(request.id, 400, e.to_string()),
     };
     broadcast_canvas_update(state, &document.id, Some(&document));
 
@@ -494,7 +491,7 @@ pub async fn canvas_patch(
     let expected_revision = request
         .params
         .get("expected_revision")
-        .and_then(|value| value.as_u64());
+        .and_then(serde_json::Value::as_u64);
     let document = match state
         .canvas
         .patch(
@@ -509,7 +506,7 @@ pub async fn canvas_patch(
         )
         .await {
         Ok(doc) => doc,
-        Err(e) => return ResponseFrame::err(request.id, 409, &e.to_string()),
+        Err(e) => return ResponseFrame::err(request.id, 409, e.to_string()),
     };
     broadcast_canvas_update(state, &document.id, Some(&document));
     ResponseFrame::ok(request.id, serde_json::json!({ "canvas": document }))

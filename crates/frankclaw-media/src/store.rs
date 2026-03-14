@@ -191,19 +191,17 @@ impl MediaStore {
             if is_metadata_path(&entry.path()) {
                 continue;
             }
-            if let Ok(metadata) = entry.metadata() {
-                if let Ok(modified) = metadata.modified() {
+            if let Ok(metadata) = entry.metadata()
+                && let Ok(modified) = metadata.modified() {
                     let age = std::time::SystemTime::now()
                         .duration_since(modified)
                         .unwrap_or_default();
-                    if age > std::time::Duration::from_secs(self.ttl_hours * 3600) {
-                        if std::fs::remove_file(entry.path()).is_ok() {
+                    if age > std::time::Duration::from_secs(self.ttl_hours * 3600)
+                        && std::fs::remove_file(entry.path()).is_ok() {
                             let _ = std::fs::remove_file(metadata_path_for(&entry.path()));
                             deleted += 1;
                         }
-                    }
                 }
-            }
         }
 
         if deleted > 0 {
@@ -241,8 +239,7 @@ impl MediaStore {
             .unwrap_or_else(|| {
                 path.extension()
                     .and_then(|value| value.to_str())
-                    .map(mime_for_safe_extension)
-                    .unwrap_or("application/octet-stream")
+                    .map_or("application/octet-stream", mime_for_safe_extension)
                     .to_string()
             });
 

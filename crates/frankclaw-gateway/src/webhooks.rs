@@ -26,7 +26,7 @@ pub fn resolve_mapping(config: &FrankClawConfig, mapping_id: &str) -> Result<Web
         .into_iter()
         .find(|mapping| mapping.id == mapping_id)
         .ok_or_else(|| FrankClawError::InvalidRequest {
-            msg: format!("unknown webhook mapping '{}'", mapping_id),
+            msg: format!("unknown webhook mapping '{mapping_id}'"),
         })
 }
 
@@ -45,9 +45,9 @@ pub fn verify_signature(config: &FrankClawConfig, body: &[u8], signature_header:
         .ok_or_else(|| FrankClawError::ConfigValidation {
             msg: "hooks.token is required when hooks are enabled".into(),
         })?;
-    let signature = signature_header.ok_or_else(|| FrankClawError::AuthRequired)?;
+    let signature = signature_header.ok_or(FrankClawError::AuthRequired)?;
     let signature = signature.strip_prefix("sha256=").unwrap_or(signature);
-    let provided = decode_hex(signature).ok_or_else(|| FrankClawError::AuthFailed)?;
+    let provided = decode_hex(signature).ok_or(FrankClawError::AuthFailed)?;
 
     let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).map_err(|_| FrankClawError::Internal {
         msg: "failed to initialize webhook signature verifier".into(),
@@ -140,7 +140,7 @@ pub fn encode_signature(secret: &str, body: &[u8]) -> String {
 
 fn decode_hex(value: &str) -> Option<Vec<u8>> {
     let value = value.trim();
-    if value.len() % 2 != 0 {
+    if !value.len().is_multiple_of(2) {
         return None;
     }
 

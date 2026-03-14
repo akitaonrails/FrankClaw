@@ -32,13 +32,11 @@ impl AuthRateLimiter {
     /// Check if an IP is currently locked out.
     pub fn is_locked(&self, ip: &IpAddr) -> Option<Duration> {
         let attempts = self.attempts.lock().expect("rate limiter poisoned");
-        if let Some(entry) = attempts.get(ip) {
-            if let Some(locked_until) = entry.locked_until {
-                if Instant::now() < locked_until {
+        if let Some(entry) = attempts.get(ip)
+            && let Some(locked_until) = entry.locked_until
+                && Instant::now() < locked_until {
                     return Some(locked_until - Instant::now());
                 }
-            }
-        }
         None
     }
 

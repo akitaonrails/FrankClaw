@@ -41,8 +41,7 @@ impl AuthMode {
             Self::Token { token } => {
                 if token
                     .as_ref()
-                    .map(|token| token.expose_secret().trim().is_empty())
-                    .unwrap_or(true)
+                    .map_or(true, |token| token.expose_secret().trim().is_empty())
                 {
                     return Err(crate::error::FrankClawError::ConfigValidation {
                         msg: "gateway.auth.mode=token requires a non-empty token".into(),

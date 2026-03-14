@@ -115,7 +115,7 @@ impl McpClient {
             .kill_on_drop(true)
             .spawn()
             .map_err(|e| FrankClawError::Internal {
-                msg: format!("failed to spawn MCP server '{}': {}", command, e),
+                msg: format!("failed to spawn MCP server '{command}': {e}"),
             })?;
 
         let stdin = child.stdin.take().ok_or_else(|| FrankClawError::Internal {
@@ -346,7 +346,7 @@ impl McpClient {
         }
 
         let result: ListToolsResult =
-            serde_json::from_value(resp.result.unwrap_or(serde_json::json!({"tools": []}))).map_err(
+            serde_json::from_value(resp.result.unwrap_or_else(|| serde_json::json!({"tools": []}))).map_err(
                 |e| FrankClawError::Internal {
                     msg: format!("failed to parse tools/list result: {e}"),
                 },
@@ -377,12 +377,12 @@ impl McpClient {
 
         if let Some(err) = resp.error {
             return Err(FrankClawError::Internal {
-                msg: format!("MCP tools/call '{}' failed: {}", tool_name, err),
+                msg: format!("MCP tools/call '{tool_name}' failed: {err}"),
             });
         }
 
         let result: CallToolResult =
-            serde_json::from_value(resp.result.unwrap_or(serde_json::json!({"content": []}))).map_err(
+            serde_json::from_value(resp.result.unwrap_or_else(|| serde_json::json!({"content": []}))).map_err(
                 |e| FrankClawError::Internal {
                     msg: format!("failed to parse tools/call result: {e}"),
                 },
@@ -402,7 +402,7 @@ impl McpClient {
 
         if result.is_error {
             return Err(FrankClawError::AgentRuntime {
-                msg: format!("MCP tool '{}' returned error: {}", tool_name, text),
+                msg: format!("MCP tool '{tool_name}' returned error: {text}"),
             });
         }
 
@@ -411,11 +411,10 @@ impl McpClient {
 
     /// Shut down the client (kills stdio process if applicable).
     pub async fn shutdown(&self) {
-        if let McpTransportInner::Stdio { child, .. } = &self.transport {
-            if let Some(mut child) = child.lock().await.take() {
+        if let McpTransportInner::Stdio { child, .. } = &self.transport
+            && let Some(mut child) = child.lock().await.take() {
                 let _ = child.kill().await;
             }
-        }
     }
 
     /// Server name.
@@ -428,11 +427,10 @@ impl Drop for McpClient {
     fn drop(&mut self) {
         if let McpTransportInner::Stdio { child, .. } = &self.transport {
             // Best-effort kill on drop (non-async).
-            if let Ok(mut guard) = child.try_lock() {
-                if let Some(ref mut child) = *guard {
+            if let Ok(mut guard) = child.try_lock()
+                && let Some(ref mut child) = *guard {
                     let _ = child.start_kill();
                 }
-            }
         }
     }
 }

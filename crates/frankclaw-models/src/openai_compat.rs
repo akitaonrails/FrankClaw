@@ -256,7 +256,7 @@ pub(crate) fn apply_stream_event(
 
     if payload["choices"]
         .as_array()
-        .is_some_and(|choices| choices.is_empty())
+        .is_some_and(std::vec::Vec::is_empty)
     {
         state.usage = parse_usage(&payload);
         return Ok(deltas);

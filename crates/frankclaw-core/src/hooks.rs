@@ -140,8 +140,8 @@ impl HookRegistry {
         let general = handlers.get(&general_key);
         let specific = handlers.get(&specific_key);
 
-        let total = general.map(|h| h.len()).unwrap_or(0)
-            + specific.map(|h| h.len()).unwrap_or(0);
+        let total = general.map_or(0, std::vec::Vec::len)
+            + specific.map_or(0, std::vec::Vec::len);
 
         if total == 0 {
             return;
@@ -187,7 +187,7 @@ impl HookRegistry {
             .read()
             .await
             .values()
-            .map(|v| v.len())
+            .map(std::vec::Vec::len)
             .sum()
     }
 

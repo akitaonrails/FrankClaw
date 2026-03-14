@@ -128,7 +128,7 @@ fn validate_skill_name(name: &str) -> Result<()> {
         Ok(())
     } else {
         Err(FrankClawError::ConfigValidation {
-            msg: format!("invalid skill name '{}'", name),
+            msg: format!("invalid skill name '{name}'"),
         })
     }
 }
@@ -136,7 +136,7 @@ fn validate_skill_name(name: &str) -> Result<()> {
 fn validate_manifest(name: &str, manifest: &SkillManifest) -> Result<()> {
     if manifest.id.trim().is_empty() {
         return Err(FrankClawError::ConfigValidation {
-            msg: format!("skill '{}' manifest is missing id", name),
+            msg: format!("skill '{name}' manifest is missing id"),
         });
     }
     if manifest.id != name {
@@ -149,30 +149,30 @@ fn validate_manifest(name: &str, manifest: &SkillManifest) -> Result<()> {
     }
     if manifest.name.trim().is_empty() {
         return Err(FrankClawError::ConfigValidation {
-            msg: format!("skill '{}' manifest is missing name", name),
+            msg: format!("skill '{name}' manifest is missing name"),
         });
     }
     if manifest.prompt.trim().is_empty() {
         return Err(FrankClawError::ConfigValidation {
-            msg: format!("skill '{}' manifest is missing prompt", name),
+            msg: format!("skill '{name}' manifest is missing prompt"),
         });
     }
     let capabilities: std::collections::HashSet<_> =
         manifest.capabilities.iter().cloned().collect();
     if capabilities.is_empty() {
         return Err(FrankClawError::ConfigValidation {
-            msg: format!("skill '{}' manifest must declare at least one capability", name),
+            msg: format!("skill '{name}' manifest must declare at least one capability"),
         });
     }
     if !capabilities.contains(&SkillCapability::Prompt) {
         return Err(FrankClawError::ConfigValidation {
-            msg: format!("skill '{}' manifest must declare the 'prompt' capability", name),
+            msg: format!("skill '{name}' manifest must declare the 'prompt' capability"),
         });
     }
     for tool in &manifest.tools {
         if tool.trim().is_empty() {
             return Err(FrankClawError::ConfigValidation {
-                msg: format!("skill '{}' declares an empty tool name", name),
+                msg: format!("skill '{name}' declares an empty tool name"),
             });
         }
     }

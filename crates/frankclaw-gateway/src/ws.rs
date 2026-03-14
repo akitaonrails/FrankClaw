@@ -226,11 +226,11 @@ async fn dispatch_method(
 
 /// Remove secrets from config before sending to clients.
 fn redact_config(config: &frankclaw_core::config::FrankClawConfig) -> serde_json::Value {
-    let mut val = serde_json::to_value(config).unwrap_or(serde_json::json!({}));
+    let mut val = serde_json::to_value(config).unwrap_or_else(|_| serde_json::json!({}));
     if let Some(obj) = val.as_object_mut() {
         // Redact auth tokens.
-        if let Some(gw) = obj.get_mut("gateway") {
-            if let Some(auth) = gw.get_mut("auth") {
+        if let Some(gw) = obj.get_mut("gateway")
+            && let Some(auth) = gw.get_mut("auth") {
                 if let Some(token) = auth.get_mut("token") {
                     *token = serde_json::json!("[REDACTED]");
                 }
@@ -238,24 +238,20 @@ fn redact_config(config: &frankclaw_core::config::FrankClawConfig) -> serde_json
                     *hash = serde_json::json!("[REDACTED]");
                 }
             }
-        }
         // Redact model provider API keys.
-        if let Some(models) = obj.get_mut("models") {
-            if let Some(providers) = models.get_mut("providers") {
-                if let Some(arr) = providers.as_array_mut() {
+        if let Some(models) = obj.get_mut("models")
+            && let Some(providers) = models.get_mut("providers")
+                && let Some(arr) = providers.as_array_mut() {
                     for p in arr {
                         if let Some(key) = p.get_mut("api_key_ref") {
                             *key = serde_json::json!("[REDACTED]");
                         }
                     }
                 }
-            }
-        }
-        if let Some(hooks) = obj.get_mut("hooks") {
-            if let Some(token) = hooks.get_mut("token") {
+        if let Some(hooks) = obj.get_mut("hooks")
+            && let Some(token) = hooks.get_mut("token") {
                 *token = serde_json::json!("[REDACTED]");
             }
-        }
     }
     val
 }

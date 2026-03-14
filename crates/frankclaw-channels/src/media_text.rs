@@ -38,9 +38,7 @@ pub(crate) fn attachment_placeholder(attachments: &[InboundAttachment]) -> Strin
     }
 
     let mime = attachments
-        .first()
-        .map(|attachment| normalize_mime_type(&attachment.mime_type))
-        .unwrap_or_else(|| "application/octet-stream".to_string());
+        .first().map_or_else(|| "application/octet-stream".to_string(), |attachment| normalize_mime_type(&attachment.mime_type));
     if mime.starts_with("image/") {
         "<media:image>".into()
     } else if mime.starts_with("audio/") {

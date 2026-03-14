@@ -103,13 +103,12 @@ impl ModelProvider for AnthropicProvider {
                     break;
                 }
             }
-            if !state.done {
-                if let Some(event) = decoder.finish() {
+            if !state.done
+                && let Some(event) = decoder.finish() {
                     for delta in apply_stream_event(&mut state, event.event.as_deref(), &event.data)? {
                         let _ = stream_tx.send(delta).await;
                     }
                 }
-            }
             let response = state.finish()?;
             let _ = stream_tx.send(StreamDelta::Done {
                 usage: Some(response.usage.clone()),
@@ -287,8 +286,8 @@ fn parse_completion_response(data: &serde_json::Value) -> Result<CompletionRespo
                 Some("thinking") => {
                     // Anthropic thinking blocks contain internal reasoning.
                     // Preserve them in content for transcript storage.
-                    if let Some(thinking) = block["thinking"].as_str() {
-                        if !thinking.is_empty() {
+                    if let Some(thinking) = block["thinking"].as_str()
+                        && !thinking.is_empty() {
                             if !content.is_empty() {
                                 content.push_str("\n\n");
                             }
@@ -296,7 +295,6 @@ fn parse_completion_response(data: &serde_json::Value) -> Result<CompletionRespo
                             content.push_str(thinking);
                             content.push_str("\n</thinking>\n\n");
                         }
-                    }
                 }
                 Some("text") => {
                     if let Some(text) = block["text"].as_str() {
@@ -403,8 +401,8 @@ fn apply_stream_event(
                 .map(|v| v as u32);
         }
         "content_block_start" => {
-            if payload["content_block"]["type"].as_str() == Some("tool_use") {
-                if let (Some(index), Some(id), Some(name)) = (
+            if payload["content_block"]["type"].as_str() == Some("tool_use")
+                && let (Some(index), Some(id), Some(name)) = (
                     payload["index"].as_u64(),
                     payload["content_block"]["id"].as_str(),
                     payload["content_block"]["name"].as_str(),
@@ -422,7 +420,6 @@ fn apply_stream_event(
                         name: name.to_string(),
                     });
                 }
-            }
         }
         "content_block_delta" => match payload["delta"]["type"].as_str() {
             Some("text_delta") => {
@@ -439,29 +436,26 @@ fn apply_stream_event(
             }
             Some("input_json_delta") => {
                 let partial = payload["delta"]["partial_json"].as_str().unwrap_or("");
-                if let Some(index) = payload["index"].as_u64().map(|value| value as usize) {
-                    if let Some(tool_call) = state.tool_calls.get_mut(&index) {
+                if let Some(index) = payload["index"].as_u64().map(|value| value as usize)
+                    && let Some(tool_call) = state.tool_calls.get_mut(&index) {
                         tool_call.arguments.push_str(partial);
                         deltas.push(StreamDelta::ToolCallDelta {
                             id: tool_call.id.clone(),
                             arguments: partial.to_string(),
                         });
                     }
-                }
             }
             _ => {}
         },
         "content_block_stop" => {
-            if let Some(index) = payload["index"].as_u64().map(|value| value as usize) {
-                if let Some(tool_call) = state.tool_calls.get_mut(&index) {
-                    if !tool_call.ended {
+            if let Some(index) = payload["index"].as_u64().map(|value| value as usize)
+                && let Some(tool_call) = state.tool_calls.get_mut(&index)
+                    && !tool_call.ended {
                         tool_call.ended = true;
                         deltas.push(StreamDelta::ToolCallEnd {
                             id: tool_call.id.clone(),
                         });
                     }
-                }
-            }
         }
         "message_delta" => {
             state.finish_reason = parse_finish_reason(payload["delta"]["stop_reason"].as_str());

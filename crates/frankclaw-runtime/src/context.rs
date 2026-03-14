@@ -57,7 +57,7 @@ pub fn estimate_messages_tokens(messages: &[CompletionMessage]) -> u32 {
 pub fn available_input_budget(model: &ModelDef, system_prompt: Option<&str>) -> u32 {
     let total = model.context_window;
     let reserved_output = model.max_output_tokens;
-    let system_tokens = system_prompt.map(|s| estimate_tokens(s)).unwrap_or(0);
+    let system_tokens = system_prompt.map_or(0, estimate_tokens);
     let overhead = SYSTEM_OVERHEAD_TOKENS + system_tokens;
 
     let raw_budget = total.saturating_sub(reserved_output).saturating_sub(overhead);

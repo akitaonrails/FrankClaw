@@ -257,8 +257,7 @@ pub fn matches_event_trigger(
 
             // Check pattern match (case-insensitive).
             regex::Regex::new(pattern)
-                .map(|re| re.is_match(message_content))
-                .unwrap_or(false)
+                .is_ok_and(|re| re.is_match(message_content))
         }
         _ => false,
     }
