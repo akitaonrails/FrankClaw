@@ -3,7 +3,7 @@ use futures_util::StreamExt;
 use reqwest::Client;
 use tracing::debug;
 
-use frankclaw_core::error::{Internal, ModelProvider as ModelProviderErr, Result};
+use frankclaw_core::error::{Internal, Provider, Result};
 use frankclaw_core::model::{ModelProvider, CompletionRequest, StreamDelta, CompletionResponse, ModelDef, ModelApi, InputModality, ModelCost, ModelCompat};
 
 use crate::openai_compat::{self, StreamState};
@@ -71,7 +71,7 @@ impl ModelProvider for OllamaProvider {
             .json(&body)
             .send()
             .await
-            .map_err(|e| ModelProviderErr {
+            .map_err(|e| Provider {
                 msg: format!("ollama request failed: {e}"),
             }.build())?;
 
@@ -86,7 +86,7 @@ impl ModelProvider for OllamaProvider {
             let mut state = StreamState::default();
             let mut stream = response.bytes_stream();
             while let Some(chunk) = stream.next().await {
-                let chunk = chunk.map_err(|e| ModelProviderErr {
+                let chunk = chunk.map_err(|e| Provider {
                     msg: format!("failed to read ollama streaming response: {e}"),
                 }.build())?;
                 for event in decoder.push(chunk.as_ref()) {
@@ -116,7 +116,7 @@ impl ModelProvider for OllamaProvider {
         }
 
         let data: serde_json::Value =
-            response.json().await.map_err(|e| ModelProviderErr {
+            response.json().await.map_err(|e| Provider {
                 msg: format!("invalid ollama response: {e}"),
             }.build())?;
         openai_compat::parse_completion_response(&data)
@@ -125,13 +125,13 @@ impl ModelProvider for OllamaProvider {
     async fn list_models(&self) -> Result<Vec<ModelDef>> {
         let url = format!("{}/api/tags", self.base_url.trim_end_matches('/'));
         let response = self.client.get(&url).send().await.map_err(|e| {
-            ModelProviderErr {
+            Provider {
                 msg: format!("failed to list ollama models: {e}"),
             }.build()
         })?;
 
         let data: serde_json::Value = response.json().await.map_err(|e| {
-            ModelProviderErr {
+            Provider {
                 msg: format!("invalid ollama response: {e}"),
             }.build()
         })?;

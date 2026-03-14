@@ -1680,7 +1680,7 @@ mod tests {
     use frankclaw_channels::{ChannelSet, whatsapp::WhatsAppChannel};
     use frankclaw_core::channel::{ChannelPlugin, SendResult};
     use frankclaw_core::config::{ChannelConfig, ProviderConfig};
-    use frankclaw_core::error::{FrankClawError, ModelProvider as ModelProviderErr};
+    use frankclaw_core::error::{FrankClawError, Provider};
     use frankclaw_core::model::{
         CompletionRequest, CompletionResponse, FinishReason, InputModality, ModelApi,
         ModelCompat, ModelCost, ModelDef, ModelProvider,
@@ -3123,7 +3123,7 @@ mod tests {
             _request: CompletionRequest,
             _stream_tx: Option<tokio::sync::mpsc::Sender<frankclaw_core::model::StreamDelta>>,
         ) -> frankclaw_core::error::Result<CompletionResponse> {
-            ModelProviderErr {
+            Provider {
                 msg: "simulated provider failure",
             }.fail()
         }

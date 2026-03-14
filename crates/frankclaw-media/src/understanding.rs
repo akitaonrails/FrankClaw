@@ -4,7 +4,7 @@
 //! injected into model context. Supports image description via vision-capable
 //! models and audio transcription via the OpenAI Whisper API.
 
-use frankclaw_core::error::{Internal, ModelProvider, Result};
+use frankclaw_core::error::{Internal, Provider, Result};
 use frankclaw_core::media::{classify_extension, classify_mime, MediaKind};
 
 use async_trait::async_trait;
@@ -242,14 +242,14 @@ impl UnderstandingProvider for VisionProvider {
             .json(&body)
             .send()
             .await
-            .map_err(|e| ModelProvider {
+            .map_err(|e| Provider {
                 msg: format!("request failed: {e}"),
             }.build())?;
 
         if !response.status().is_success() {
             let status = response.status();
             let body_text = response.text().await.unwrap_or_default();
-            return ModelProvider {
+            return Provider {
                 msg: format!("HTTP {status}: {body_text}"),
             }.fail();
         }
@@ -258,7 +258,7 @@ impl UnderstandingProvider for VisionProvider {
             response
                 .json()
                 .await
-                .map_err(|e| ModelProvider {
+                .map_err(|e| Provider {
                     msg: format!("vision: invalid JSON response: {e}"),
                 }.build())?;
 
@@ -335,7 +335,7 @@ impl UnderstandingProvider for WhisperProvider {
         let file_part = reqwest::multipart::Part::bytes(attachment.data.clone())
             .file_name(filename)
             .mime_str(&attachment.mime)
-            .map_err(|e| ModelProvider {
+            .map_err(|e| Provider {
                 msg: format!("invalid MIME type: {e}"),
             }.build())?;
 
@@ -353,14 +353,14 @@ impl UnderstandingProvider for WhisperProvider {
             .multipart(form)
             .send()
             .await
-            .map_err(|e| ModelProvider {
+            .map_err(|e| Provider {
                 msg: format!("request failed: {e}"),
             }.build())?;
 
         if !response.status().is_success() {
             let status = response.status();
             let body_text = response.text().await.unwrap_or_default();
-            return ModelProvider {
+            return Provider {
                 msg: format!("HTTP {status}: {body_text}"),
             }.fail();
         }
@@ -369,7 +369,7 @@ impl UnderstandingProvider for WhisperProvider {
             response
                 .json()
                 .await
-                .map_err(|e| ModelProvider {
+                .map_err(|e| Provider {
                     msg: format!("whisper: invalid JSON response: {e}"),
                 }.build())?;
 
@@ -379,7 +379,7 @@ impl UnderstandingProvider for WhisperProvider {
             .to_string();
 
         if text.is_empty() {
-            return ModelProvider {
+            return Provider {
                 msg: "transcription returned empty text",
             }.fail();
         }
@@ -554,7 +554,7 @@ mod tests {
             fn id(&self) -> &str { "failing" }
             fn handles(&self) -> MediaKind { MediaKind::Image }
             async fn process(&self, _att: &MediaAttachment) -> Result<UnderstandingOutput> {
-                ModelProvider {
+                Provider {
                     msg: "intentional test failure",
                 }.fail()
             }

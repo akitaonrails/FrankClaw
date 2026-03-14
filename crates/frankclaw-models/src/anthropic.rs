@@ -5,7 +5,7 @@ use secrecy::{ExposeSecret, SecretString};
 use std::collections::BTreeMap;
 use tracing::debug;
 
-use frankclaw_core::error::{FrankClawError, Internal, ModelProvider as ModelProviderErr, Result};
+use frankclaw_core::error::{FrankClawError, Internal, Provider, Result};
 use frankclaw_core::model::{ModelProvider, CompletionRequest, StreamDelta, CompletionResponse, ModelDef, ModelApi, InputModality, ModelCost, ModelCompat, ToolCallResponse, Usage, FinishReason};
 use frankclaw_core::types::Role;
 
@@ -73,7 +73,7 @@ impl ModelProvider for AnthropicProvider {
             .json(&body)
             .send()
             .await
-            .map_err(|e| ModelProviderErr {
+            .map_err(|e| Provider {
                 msg: format!("request failed: {e}"),
             }.build())?;
 
@@ -88,7 +88,7 @@ impl ModelProvider for AnthropicProvider {
             let mut state = AnthropicStreamState::default();
             let mut stream = response.bytes_stream();
             while let Some(chunk) = stream.next().await {
-                let chunk = chunk.map_err(|e| ModelProviderErr {
+                let chunk = chunk.map_err(|e| Provider {
                     msg: format!("failed to read streaming response: {e}"),
                 }.build())?;
                 for event in decoder.push(chunk.as_ref()) {
@@ -116,7 +116,7 @@ impl ModelProvider for AnthropicProvider {
             return Ok(response);
         }
 
-        let data: serde_json::Value = response.json().await.map_err(|e| ModelProviderErr {
+        let data: serde_json::Value = response.json().await.map_err(|e| Provider {
             msg: format!("invalid response: {e}"),
         }.build())?;
         parse_completion_response(&data)
@@ -360,7 +360,7 @@ impl AnthropicStreamState {
         let mut tool_calls = Vec::with_capacity(self.tool_calls.len());
         for (_, tool_call) in self.tool_calls {
             if tool_call.id.trim().is_empty() || tool_call.name.trim().is_empty() {
-                return ModelProviderErr {
+                return Provider {
                     msg: "streamed anthropic tool call missing id or name",
                 }.fail();
             }
@@ -384,7 +384,7 @@ fn apply_stream_event(
     event_type: Option<&str>,
     data: &str,
 ) -> Result<Vec<StreamDelta>> {
-    let payload: serde_json::Value = serde_json::from_str(data).map_err(|err| ModelProviderErr {
+    let payload: serde_json::Value = serde_json::from_str(data).map_err(|err| Provider {
         msg: format!("invalid streaming response chunk: {err}"),
     }.build())?;
     let mut deltas = Vec::new();
@@ -470,7 +470,7 @@ fn apply_stream_event(
         "error" => {
             let message = payload["error"]["message"].as_str().unwrap_or("anthropic stream error");
             deltas.push(StreamDelta::Error(message.to_string()));
-            return ModelProviderErr {
+            return Provider {
                 msg: message.to_string(),
             }.fail();
         }
@@ -512,31 +512,31 @@ pub fn classify_provider_error(
 
     // Context overflow detection — varies across providers
     if is_context_overflow(&body_lower) {
-        return ModelProviderErr {
+        return Provider {
             msg: format!("context length exceeded (HTTP {status}): {body}"),
         }.build();
     }
 
     match status.as_u16() {
-        401 => ModelProviderErr {
+        401 => Provider {
             msg: format!("authentication failed (invalid API key): {body}"),
         }.build(),
         402 => {
             // 402 can mean billing issue OR rate limit spend cap
             if body_lower.contains("rate_limit") || body_lower.contains("spend") {
-                ModelProviderErr {
+                Provider {
                     msg: format!("rate limit spend cap reached (retryable): {body}"),
                 }.build()
             } else {
-                ModelProviderErr {
+                Provider {
                     msg: format!("billing error (out of credits, non-retryable): {body}"),
                 }.build()
             }
         }
-        429 => ModelProviderErr {
+        429 => Provider {
             msg: format!("rate limited (HTTP 429): {body}"),
         }.build(),
-        _ => ModelProviderErr {
+        _ => Provider {
             msg: format!("HTTP {status}: {body}"),
         }.build(),
     }

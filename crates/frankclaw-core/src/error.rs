@@ -113,7 +113,7 @@ pub enum FrankClawError {
 
     // ── Model ────────────────────────────────────────────
     #[snafu(display("model provider error: {msg}"))]
-    ModelProvider {
+    ProviderError {
         msg: String,
         #[snafu(implicit)]
         location: snafu::Location,
@@ -240,7 +240,7 @@ impl FrankClawError {
             | Self::AgentRuntime { location, .. }
             | Self::TurnCancelled { location, .. }
             | Self::Sandbox { location, .. }
-            | Self::ModelProvider { location, .. }
+            | Self::ProviderError { location, .. }
             | Self::AllProvidersFailed { location, .. }
             | Self::ModelNotFound { location, .. }
             | Self::ConfigValidation { location, .. }
@@ -263,7 +263,7 @@ impl FrankClawError {
         matches!(
             self,
             Self::RateLimited { .. }
-                | Self::ModelProvider { .. }
+                | Self::ProviderError { .. }
                 | Self::AllProvidersFailed { .. }
                 | Self::Internal { .. }
         )
@@ -291,7 +291,7 @@ impl FrankClawError {
             | Self::AgentRuntime { .. }
             | Self::TurnCancelled { .. }
             | Self::Sandbox { .. }
-            | Self::ModelProvider { .. }
+            | Self::ProviderError { .. }
             | Self::AllProvidersFailed { .. }
             | Self::ConfigIo { .. }
             | Self::UnsupportedMediaType { .. }
@@ -328,7 +328,7 @@ mod tests {
             (AgentRuntime { msg: "oom" }.build(), "agent runtime error: oom", 500, false),
             (TurnCancelled.build(), "agent turn cancelled", 500, false),
             (Sandbox { msg: "denied" }.build(), "sandbox error: denied", 500, false),
-            (ModelProvider { msg: "rate limit" }.build(), "model provider error: rate limit", 500, true),
+            (Provider { msg: "rate limit" }.build(), "model provider error: rate limit", 500, true),
             (AllProvidersFailed.build(), "all model providers failed", 500, true),
             (ModelNotFound { model_id: "gpt-5" }.build(), "model not found: gpt-5", 404, false),
             (ConfigValidation { msg: "bad port" }.build(), "config validation error: bad port", 422, false),
