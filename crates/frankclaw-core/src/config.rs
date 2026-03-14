@@ -22,6 +22,7 @@ pub struct FrankClawConfig {
     pub logging: LoggingConfig,
     pub media: MediaConfig,
     pub security: SecurityConfig,
+    pub memory: MemoryConfig,
 }
 
 impl Default for FrankClawConfig {
@@ -37,6 +38,7 @@ impl Default for FrankClawConfig {
             logging: LoggingConfig::default(),
             media: MediaConfig::default(),
             security: SecurityConfig::default(),
+            memory: MemoryConfig::default(),
         }
     }
 }
@@ -760,6 +762,42 @@ impl Default for SecurityConfig {
             require_auth_for_network: true, // Cannot be disabled
             ssrf_protection: true,
             max_webhook_body_bytes: 1024 * 1024, // 1 MB
+        }
+    }
+}
+
+/// Memory/RAG configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MemoryConfig {
+    pub enabled: bool,
+    /// Embedding provider: "openai", "ollama", or "none".
+    pub embedding_provider: String,
+    /// Embedding model name (e.g., "text-embedding-3-small").
+    pub embedding_model: Option<String>,
+    /// Base URL for the embedding provider API.
+    pub embedding_base_url: Option<String>,
+    /// API key env var for embedding provider.
+    pub embedding_api_key_ref: Option<String>,
+    /// Chunk size target in characters (~384 tokens).
+    pub chunk_size: usize,
+    /// Directory to sync for memory content.
+    pub memory_dir: Option<PathBuf>,
+    /// Enable embedding cache.
+    pub cache_embeddings: bool,
+}
+
+impl Default for MemoryConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            embedding_provider: "none".into(),
+            embedding_model: None,
+            embedding_base_url: None,
+            embedding_api_key_ref: None,
+            chunk_size: 1500,
+            memory_dir: None,
+            cache_embeddings: true,
         }
     }
 }

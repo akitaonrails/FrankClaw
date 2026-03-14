@@ -94,6 +94,13 @@ pub enum FrankClawError {
     #[error("cryptographic operation failed: {0}")]
     Crypto(#[from] frankclaw_crypto::CryptoError),
 
+    // ── Memory ──────────────────────────────────────────
+    #[error("memory store error: {msg}")]
+    MemoryStore { msg: String },
+
+    #[error("embedding provider error: {msg}")]
+    EmbeddingProvider { msg: String },
+
     // ── Internal ─────────────────────────────────────────
     #[error("internal error: {msg}")]
     Internal { msg: String },
