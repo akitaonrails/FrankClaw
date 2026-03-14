@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use std::collections::HashMap;
 
-use frankclaw_core::error::{InvalidRequestSnafu, Result};
+use frankclaw_core::error::{InvalidRequest, Result};
 
 /// Maximum total document size (title + body + all block text) in bytes.
 const MAX_DOCUMENT_SIZE: usize = 1_024 * 1_024;
@@ -140,7 +140,7 @@ impl CanvasStore {
         // Conflict detection: reject stale patches.
         if let Some(expected) = patch.expected_revision
             && existing.revision != expected {
-                return InvalidRequestSnafu {
+                return InvalidRequest {
                     msg: format!(
                         "canvas revision conflict: expected {expected}, current is {}",
                         existing.revision
@@ -160,7 +160,7 @@ impl CanvasStore {
         document.blocks.extend(patch.append_blocks);
         // Enforce block count limit.
         if document.blocks.len() > MAX_BLOCKS_PER_DOCUMENT {
-            return InvalidRequestSnafu {
+            return InvalidRequest {
                 msg: format!(
                     "canvas block count exceeds limit ({} > {MAX_BLOCKS_PER_DOCUMENT})",
                     document.blocks.len()
@@ -226,7 +226,7 @@ fn validate_document_size(document: &CanvasDocument) -> Result<()> {
         + document.body.len()
         + document.blocks.iter().map(|b| b.text.len()).sum::<usize>();
     if total > MAX_DOCUMENT_SIZE {
-        return InvalidRequestSnafu {
+        return InvalidRequest {
             msg: format!(
                 "canvas document size exceeds limit ({total} bytes > {MAX_DOCUMENT_SIZE})"
             ),

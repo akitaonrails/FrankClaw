@@ -14,7 +14,7 @@ use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
 use tracing::{debug, warn};
 
-use frankclaw_core::error::{InternalSnafu, Result};
+use frankclaw_core::error::{Internal, Result};
 use frankclaw_core::media::{FileScanService, ScanVerdict};
 
 /// Minimum number of engines flagging a file to consider it malicious.
@@ -42,7 +42,7 @@ impl VirusTotalScanner {
         let client = Client::builder()
             .timeout(Duration::from_secs(60))
             .build()
-            .map_err(|e| InternalSnafu {
+            .map_err(|e| Internal {
                 msg: format!("failed to build HTTP client: {e}"),
             }.build())?;
         Ok(Self { client, api_key })
@@ -73,20 +73,20 @@ impl VirusTotalScanner {
             .multipart(form)
             .send()
             .await
-            .map_err(|e| InternalSnafu {
+            .map_err(|e| Internal {
                 msg: format!("VirusTotal upload failed: {e}"),
             }.build())?;
 
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            return InternalSnafu {
+            return Internal {
                 msg: format!("VirusTotal upload returned {status}: {body}"),
             }.fail();
         }
 
         let upload: VtUploadResponse = response.json().await.map_err(|e| {
-            InternalSnafu {
+            Internal {
                 msg: format!("VirusTotal upload response parse failed: {e}"),
             }.build()
         })?;
@@ -101,7 +101,7 @@ impl VirusTotalScanner {
 
         loop {
             if tokio::time::Instant::now() >= deadline {
-                return InternalSnafu {
+                return Internal {
                     msg: "VirusTotal analysis timed out",
                 }.fail();
             }
@@ -111,20 +111,20 @@ impl VirusTotalScanner {
                 .header("x-apikey", self.api_key.expose_secret())
                 .send()
                 .await
-                .map_err(|e| InternalSnafu {
+                .map_err(|e| Internal {
                     msg: format!("VirusTotal poll failed: {e}"),
                 }.build())?;
 
             if !response.status().is_success() {
                 let status = response.status();
                 let body = response.text().await.unwrap_or_default();
-                return InternalSnafu {
+                return Internal {
                     msg: format!("VirusTotal analysis returned {status}: {body}"),
                 }.fail();
             }
 
             let analysis: VtAnalysisResponse = response.json().await.map_err(|e| {
-                InternalSnafu {
+                Internal {
                     msg: format!("VirusTotal analysis response parse failed: {e}"),
                 }.build()
             })?;

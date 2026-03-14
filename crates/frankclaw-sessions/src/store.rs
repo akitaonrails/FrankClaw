@@ -5,7 +5,7 @@ use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::params;
 use tracing::{debug, warn};
 
-use frankclaw_core::error::{Result, SessionStorageSnafu, InvalidRequestSnafu};
+use frankclaw_core::error::{Result, SessionStorage, InvalidRequest};
 use frankclaw_core::session::{
     PruningConfig, SessionEntry, SessionStore, TranscriptEntry,
 };
@@ -38,7 +38,7 @@ impl SqliteSessionStore {
     ) -> Result<Self> {
         // Ensure parent directory exists with restricted permissions.
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| SessionStorageSnafu {
+            std::fs::create_dir_all(parent).map_err(|e| SessionStorage {
                 msg: format!("failed to create session directory: {e}"),
             }.build())?;
 
@@ -56,16 +56,16 @@ impl SqliteSessionStore {
             .max_size(8)
             .connection_timeout(std::time::Duration::from_secs(5))
             .build(manager)
-            .map_err(|e| SessionStorageSnafu {
+            .map_err(|e| SessionStorage {
                 msg: format!("connection pool error: {e}"),
             }.build())?;
 
         // Run migrations on a fresh connection.
         {
-            let conn = pool.get().map_err(|e| SessionStorageSnafu {
+            let conn = pool.get().map_err(|e| SessionStorage {
                 msg: format!("migration connection error: {e}"),
             }.build())?;
-            migrations::run_migrations(&conn).map_err(|e| SessionStorageSnafu {
+            migrations::run_migrations(&conn).map_err(|e| SessionStorage {
                 msg: format!("migration error: {e}"),
             }.build())?;
 
@@ -93,7 +93,7 @@ impl SqliteSessionStore {
         match &self.encryption_key {
             Some(key) => {
                 let blob = encrypt(key, content.as_bytes())?;
-                serde_json::to_vec(&blob).map_err(|e| SessionStorageSnafu {
+                serde_json::to_vec(&blob).map_err(|e| SessionStorage {
                     msg: format!("encryption serialization error: {e}"),
                 }.build())
             }
@@ -109,31 +109,31 @@ impl SqliteSessionStore {
         match encryption_key {
             Some(key) => {
                 let blob: frankclaw_crypto::EncryptedBlob =
-                    serde_json::from_slice(data).map_err(|e| SessionStorageSnafu {
+                    serde_json::from_slice(data).map_err(|e| SessionStorage {
                         msg: format!(
                             "transcript data is not valid encrypted blob (was it written without encryption?): {e}"
                         ),
                     }.build())?;
                 let plaintext = decrypt(key, &blob).map_err(|e| {
                     warn!("transcript decryption failed — if the master key was rotated, existing encrypted transcripts cannot be read with the new key");
-                    SessionStorageSnafu {
+                    SessionStorage {
                         msg: format!(
                             "transcript decryption failed (possible key rotation): {e}"
                         ),
                     }.build()
                 })?;
-                String::from_utf8(plaintext).map_err(|e| SessionStorageSnafu {
+                String::from_utf8(plaintext).map_err(|e| SessionStorage {
                     msg: format!("invalid UTF-8 in transcript: {e}"),
                 }.build())
             }
-            None => String::from_utf8(data.to_vec()).map_err(|e| SessionStorageSnafu {
+            None => String::from_utf8(data.to_vec()).map_err(|e| SessionStorage {
                 msg: format!("invalid UTF-8 in transcript: {e}"),
             }.build()),
         }
     }
 
     fn get_conn(&self) -> Result<r2d2::PooledConnection<SqliteConnectionManager>> {
-        self.pool.get().map_err(|e| SessionStorageSnafu {
+        self.pool.get().map_err(|e| SessionStorage {
             msg: format!("pool error: {e}"),
         }.build())
     }
@@ -160,7 +160,7 @@ impl SqliteSessionStore {
                     |row| row.get::<_, i64>(0),
                 )
                 .optional()
-                .map_err(|e| SessionStorageSnafu { msg: e.to_string() }.build())?;
+                .map_err(|e| SessionStorage { msg: e.to_string() }.build())?;
 
             let Some(seq) = seq else {
                 return Ok(false);
@@ -176,12 +176,12 @@ impl SqliteSessionStore {
                     seq,
                 ],
             )
-            .map_err(|e| SessionStorageSnafu { msg: e.to_string() }.build())?;
+            .map_err(|e| SessionStorage { msg: e.to_string() }.build())?;
 
             Ok(true)
         })
         .await
-        .map_err(|e| SessionStorageSnafu {
+        .map_err(|e| SessionStorage {
             msg: format!("task join error: {e}"),
         }.build())?
     }
@@ -200,7 +200,7 @@ impl SessionStore for SqliteSessionStore {
                             metadata, created_at, last_message_at
                      FROM sessions WHERE key = ?1",
                 )
-                .map_err(|e| SessionStorageSnafu { msg: e.to_string() }.build())?;
+                .map_err(|e| SessionStorage { msg: e.to_string() }.build())?;
 
             let result = stmt
                 .query_row(params![key_str], |row| {
@@ -224,12 +224,12 @@ impl SessionStore for SqliteSessionStore {
                     })
                 })
                 .optional()
-                .map_err(|e| SessionStorageSnafu { msg: e.to_string() }.build())?;
+                .map_err(|e| SessionStorage { msg: e.to_string() }.build())?;
 
             Ok(result)
         })
         .await
-        .map_err(|e| SessionStorageSnafu {
+        .map_err(|e| SessionStorage {
             msg: format!("task join error: {e}"),
         }.build())?
     }
@@ -259,12 +259,12 @@ impl SessionStore for SqliteSessionStore {
                     entry.last_message_at.map(|t| t.to_rfc3339()),
                 ],
             )
-            .map_err(|e| SessionStorageSnafu { msg: e.to_string() }.build())?;
+            .map_err(|e| SessionStorage { msg: e.to_string() }.build())?;
 
             Ok(())
         })
         .await
-        .map_err(|e| SessionStorageSnafu {
+        .map_err(|e| SessionStorage {
             msg: format!("task join error: {e}"),
         }.build())?
     }
@@ -276,11 +276,11 @@ impl SessionStore for SqliteSessionStore {
         tokio::task::spawn_blocking(move || {
             // CASCADE deletes transcript entries.
             conn.execute("DELETE FROM sessions WHERE key = ?1", params![key_str])
-                .map_err(|e| SessionStorageSnafu { msg: e.to_string() }.build())?;
+                .map_err(|e| SessionStorage { msg: e.to_string() }.build())?;
             Ok(())
         })
         .await
-        .map_err(|e| SessionStorageSnafu {
+        .map_err(|e| SessionStorage {
             msg: format!("task join error: {e}"),
         }.build())?
     }
@@ -304,7 +304,7 @@ impl SessionStore for SqliteSessionStore {
                      ORDER BY last_message_at DESC NULLS LAST
                      LIMIT ?2 OFFSET ?3",
                 )
-                .map_err(|e| SessionStorageSnafu { msg: e.to_string() }.build())?;
+                .map_err(|e| SessionStorage { msg: e.to_string() }.build())?;
 
             let rows = stmt
                 .query_map(params![agent, limit as i64, offset as i64], |row| {
@@ -327,24 +327,24 @@ impl SessionStore for SqliteSessionStore {
                             .and_then(|s| s.parse().ok()),
                     })
                 })
-                .map_err(|e| SessionStorageSnafu { msg: e.to_string() }.build())?;
+                .map_err(|e| SessionStorage { msg: e.to_string() }.build())?;
 
             let mut entries = Vec::new();
             for row in rows {
                 entries
-                    .push(row.map_err(|e| SessionStorageSnafu { msg: e.to_string() }.build())?);
+                    .push(row.map_err(|e| SessionStorage { msg: e.to_string() }.build())?);
             }
             Ok(entries)
         })
         .await
-        .map_err(|e| SessionStorageSnafu {
+        .map_err(|e| SessionStorage {
             msg: format!("task join error: {e}"),
         }.build())?
     }
 
     async fn append_transcript(&self, key: &SessionKey, entry: &TranscriptEntry) -> Result<()> {
         if entry.content.len() > MAX_TRANSCRIPT_ENTRY_BYTES {
-            return InvalidRequestSnafu {
+            return InvalidRequest {
                 msg: format!(
                     "transcript entry exceeds maximum size ({} bytes > {} limit)",
                     entry.content.len(),
@@ -366,19 +366,19 @@ impl SessionStore for SqliteSessionStore {
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                 params![key_str, seq as i64, role, encrypted_content, metadata, timestamp],
             )
-            .map_err(|e| SessionStorageSnafu { msg: e.to_string() }.build())?;
+            .map_err(|e| SessionStorage { msg: e.to_string() }.build())?;
 
             // Update session's last_message_at.
             conn.execute(
                 "UPDATE sessions SET last_message_at = ?1 WHERE key = ?2",
                 params![timestamp, key_str],
             )
-            .map_err(|e| SessionStorageSnafu { msg: e.to_string() }.build())?;
+            .map_err(|e| SessionStorage { msg: e.to_string() }.build())?;
 
             Ok(())
         })
         .await
-        .map_err(|e| SessionStorageSnafu {
+        .map_err(|e| SessionStorage {
             msg: format!("task join error: {e}"),
         }.build())?
     }
@@ -417,7 +417,7 @@ impl SessionStore for SqliteSessionStore {
 
             let mut stmt = conn
                 .prepare_cached(sql)
-                .map_err(|e| SessionStorageSnafu { msg: e.to_string() }.build())?;
+                .map_err(|e| SessionStorage { msg: e.to_string() }.build())?;
 
             let extract_row = |row: &rusqlite::Row<'_>| -> rusqlite::Result<RowTuple> {
                 Ok((
@@ -431,14 +431,14 @@ impl SessionStore for SqliteSessionStore {
 
             let raw_rows: Vec<RowTuple> = if let Some(seq) = seq_val {
                 let mapped = stmt.query_map(params![key_str, seq, limit as i64], extract_row)
-                    .map_err(|e| SessionStorageSnafu { msg: e.to_string() }.build())?;
+                    .map_err(|e| SessionStorage { msg: e.to_string() }.build())?;
                 mapped.collect::<rusqlite::Result<Vec<_>>>()
             } else {
                 let mapped = stmt.query_map(params![key_str, limit as i64], extract_row)
-                    .map_err(|e| SessionStorageSnafu { msg: e.to_string() }.build())?;
+                    .map_err(|e| SessionStorage { msg: e.to_string() }.build())?;
                 mapped.collect::<rusqlite::Result<Vec<_>>>()
             }
-            .map_err(|e| SessionStorageSnafu { msg: e.to_string() }.build())?;
+            .map_err(|e| SessionStorage { msg: e.to_string() }.build())?;
 
             let mut entries = Vec::new();
             for (seq, role_str, content_bytes, metadata_str, timestamp_str) in raw_rows {
@@ -459,7 +459,7 @@ impl SessionStore for SqliteSessionStore {
             Ok(entries)
         })
         .await
-        .map_err(|e| SessionStorageSnafu {
+        .map_err(|e| SessionStorage {
             msg: format!("task join error: {e}"),
         }.build())?
     }
@@ -473,11 +473,11 @@ impl SessionStore for SqliteSessionStore {
                 "DELETE FROM transcript WHERE session_key = ?1",
                 params![key_str],
             )
-            .map_err(|e| SessionStorageSnafu { msg: e.to_string() }.build())?;
+            .map_err(|e| SessionStorage { msg: e.to_string() }.build())?;
             Ok(())
         })
         .await
-        .map_err(|e| SessionStorageSnafu {
+        .map_err(|e| SessionStorage {
             msg: format!("task join error: {e}"),
         }.build())?
     }
@@ -498,7 +498,7 @@ impl SessionStore for SqliteSessionStore {
                      (last_message_at IS NULL AND created_at < ?1)",
                     params![cutoff_str],
                 )
-                .map_err(|e| SessionStorageSnafu { msg: e.to_string() }.build())?;
+                .map_err(|e| SessionStorage { msg: e.to_string() }.build())?;
 
             if deleted > 0 {
                 debug!(deleted, "pruned old sessions");
@@ -518,7 +518,7 @@ impl SessionStore for SqliteSessionStore {
                     )",
                     params![max_sessions as i64],
                 )
-                .map_err(|e| SessionStorageSnafu { msg: e.to_string() }.build())?;
+                .map_err(|e| SessionStorage { msg: e.to_string() }.build())?;
 
             if overflow > 0 {
                 warn!(overflow, max_sessions, "pruned sessions exceeding per-agent limit");
@@ -527,7 +527,7 @@ impl SessionStore for SqliteSessionStore {
             Ok((deleted + overflow) as u64)
         })
         .await
-        .map_err(|e| SessionStorageSnafu {
+        .map_err(|e| SessionStorage {
             msg: format!("task join error: {e}"),
         }.build())?
     }

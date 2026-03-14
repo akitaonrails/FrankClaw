@@ -6,7 +6,7 @@ use sha2::Sha256;
 use tracing::info;
 
 use frankclaw_core::channel::{OutboundAttachment, ChannelPlugin, ChannelCapabilities, InboundMessage, HealthStatus, OutboundMessage, SendResult, InboundAttachment};
-use frankclaw_core::error::{Result, AuthRequiredSnafu, AuthFailedSnafu, InternalSnafu};
+use frankclaw_core::error::{Result, AuthRequired, AuthFailed, Internal};
 use frankclaw_core::types::ChannelId;
 
 use crate::media_text::{normalize_mime_type, text_or_attachment_placeholder};
@@ -54,17 +54,17 @@ impl WhatsAppChannel {
         let Some(secret) = &self.app_secret else {
             return Ok(());
         };
-        let signature = signature_header.ok_or_else(|| AuthRequiredSnafu.build())?;
+        let signature = signature_header.ok_or_else(|| AuthRequired.build())?;
         let signature = signature.strip_prefix("sha256=").unwrap_or(signature);
-        let provided = decode_hex(signature).ok_or_else(|| AuthFailedSnafu.build())?;
+        let provided = decode_hex(signature).ok_or_else(|| AuthFailed.build())?;
 
         let mut mac = HmacSha256::new_from_slice(secret.expose_secret().as_bytes()).map_err(|_| {
-            InternalSnafu {
+            Internal {
                 msg: "failed to initialize whatsapp webhook signature verifier",
             }.build()
         })?;
         mac.update(body);
-        mac.verify_slice(&provided).map_err(|_| AuthFailedSnafu.build())
+        mac.verify_slice(&provided).map_err(|_| AuthFailed.build())
     }
 
     fn auth_header(&self) -> String {

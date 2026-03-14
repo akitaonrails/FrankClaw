@@ -1,7 +1,7 @@
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 
-use crate::error::ConfigValidationSnafu;
+use crate::error::ConfigValidation;
 
 /// How the gateway authenticates incoming connections.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -45,7 +45,7 @@ impl AuthMode {
                     .as_ref()
                     .is_none_or(|token| token.expose_secret().trim().is_empty())
                 {
-                    return ConfigValidationSnafu {
+                    return ConfigValidation {
                         msg: "gateway.auth.mode=token requires a non-empty token",
                     }
                     .fail();
@@ -53,7 +53,7 @@ impl AuthMode {
             }
             Self::Password { hash } => {
                 if hash.trim().is_empty() {
-                    return ConfigValidationSnafu {
+                    return ConfigValidation {
                         msg: "gateway.auth.mode=password requires a non-empty hash",
                     }
                     .fail();
@@ -61,7 +61,7 @@ impl AuthMode {
             }
             Self::TrustedProxy { identity_header } => {
                 if identity_header.trim().is_empty() {
-                    return ConfigValidationSnafu {
+                    return ConfigValidation {
                         msg: "trusted_proxy auth requires an identity_header",
                     }
                     .fail();

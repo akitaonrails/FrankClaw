@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use tracing::warn;
 
-use frankclaw_core::error::{AllProvidersFailedSnafu, FrankClawError, Result};
+use frankclaw_core::error::{AllProvidersFailed, FrankClawError, Result};
 use frankclaw_core::model::{
     CompletionRequest, CompletionResponse, ModelDef, ModelProvider, StreamDelta,
 };
@@ -144,7 +144,7 @@ impl FailoverChain {
             }
         }
 
-        Err(last_error.unwrap_or_else(|| AllProvidersFailedSnafu.build()))
+        Err(last_error.unwrap_or_else(|| AllProvidersFailed.build()))
     }
 
     /// List models from all providers (skip those with open circuit breakers).

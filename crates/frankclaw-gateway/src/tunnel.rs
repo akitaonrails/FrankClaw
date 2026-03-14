@@ -16,7 +16,7 @@ use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 use tracing::{debug, info, warn};
 
-use frankclaw_core::error::{ConfigValidationSnafu, InternalSnafu, Result};
+use frankclaw_core::error::{ConfigValidation, Internal, Result};
 
 /// Tunnel provider configuration.
 #[derive(Debug, Clone)]
@@ -111,11 +111,11 @@ async fn start_cloudflare(token: &str, host: &str, port: u16) -> Result<Tunnel> 
         .stderr(std::process::Stdio::piped())
         .kill_on_drop(true)
         .spawn()
-        .map_err(|e| InternalSnafu {
+        .map_err(|e| Internal {
             msg: format!("failed to spawn cloudflared: {e}"),
         }.build())?;
 
-    let stderr = child.stderr.take().ok_or_else(|| InternalSnafu {
+    let stderr = child.stderr.take().ok_or_else(|| Internal {
         msg: "failed to capture cloudflared stderr",
     }.build())?;
 
@@ -167,11 +167,11 @@ async fn start_ngrok(
         cmd.args(["--domain", domain]);
     }
 
-    let mut child = cmd.spawn().map_err(|e| InternalSnafu {
+    let mut child = cmd.spawn().map_err(|e| Internal {
         msg: format!("failed to spawn ngrok: {e}"),
     }.build())?;
 
-    let stdout = child.stdout.take().ok_or_else(|| InternalSnafu {
+    let stdout = child.stdout.take().ok_or_else(|| Internal {
         msg: "failed to capture ngrok stdout",
     }.build())?;
 
@@ -187,7 +187,7 @@ async fn start_ngrok(
     }
 
     // Scan stdout for URL in logfmt output (url=https://...).
-    let url = extract_url_from_stream(stdout, "url=https://", Duration::from_secs(15)).await.map_err(|_| InternalSnafu {
+    let url = extract_url_from_stream(stdout, "url=https://", Duration::from_secs(15)).await.map_err(|_| Internal {
                 msg: "ngrok did not output a public URL within 15 seconds",
             }.build())?;
 
@@ -226,7 +226,7 @@ async fn start_custom(
 
     let parts: Vec<&str> = expanded.split_whitespace().collect();
     if parts.is_empty() {
-        return ConfigValidationSnafu {
+        return ConfigValidation {
             msg: "tunnel command is empty",
         }.fail();
     }
@@ -237,7 +237,7 @@ async fn start_custom(
         .stderr(std::process::Stdio::piped())
         .kill_on_drop(true)
         .spawn()
-        .map_err(|e| InternalSnafu {
+        .map_err(|e| Internal {
             msg: format!("failed to spawn tunnel command '{}': {e}", parts[0]),
         }.build())?;
 
@@ -254,7 +254,7 @@ async fn start_custom(
 
     let url = if let Some(pattern) = url_pattern {
         // Scan stdout for a URL containing the pattern.
-        let stdout = child.stdout.take().ok_or_else(|| InternalSnafu {
+        let stdout = child.stdout.take().ok_or_else(|| Internal {
             msg: "failed to capture tunnel stdout",
         }.build())?;
         extract_url_from_stream(stdout, pattern, Duration::from_secs(15)).await?
@@ -310,10 +310,10 @@ async fn extract_url_from_stream<R: tokio::io::AsyncRead + Unpin>(
 
     match result {
         Ok(Some(url)) => Ok(url),
-        Ok(None) => InternalSnafu {
+        Ok(None) => Internal {
             msg: format!("tunnel output ended without a URL (looking for '{prefix}')"),
         }.fail(),
-        Err(_) => InternalSnafu {
+        Err(_) => Internal {
             msg: format!("tunnel did not output a URL within {}s", timeout.as_secs()),
         }.fail(),
     }

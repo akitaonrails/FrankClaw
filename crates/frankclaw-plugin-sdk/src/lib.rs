@@ -6,7 +6,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 
 use frankclaw_core::channel::{ChannelPlugin, InboundMessage};
-use frankclaw_core::error::{ConfigIoSnafu, ConfigValidationSnafu, Result};
+use frankclaw_core::error::{ConfigIo, ConfigValidation, Result};
 use serde::{Deserialize, Serialize};
 use frankclaw_core::types::ChannelId;
 
@@ -108,11 +108,11 @@ pub fn load_workspace_skills(workspace: &Path, names: &[String]) -> Result<Vec<S
 pub fn load_workspace_skill(workspace: &Path, name: &str) -> Result<SkillManifest> {
     validate_skill_name(name)?;
     let path = resolve_skill_manifest_path(workspace, name)?;
-    let content = std::fs::read_to_string(&path).map_err(|e| ConfigIoSnafu {
+    let content = std::fs::read_to_string(&path).map_err(|e| ConfigIo {
         msg: format!("failed to read skill manifest '{}': {e}", path.display()),
     }.build())?;
     let manifest: SkillManifest = serde_json::from_str(&content).map_err(|e| {
-        ConfigValidationSnafu {
+        ConfigValidation {
             msg: format!("invalid skill manifest '{}': {e}", path.display()),
         }.build()
     })?;
@@ -128,7 +128,7 @@ fn validate_skill_name(name: &str) -> Result<()> {
     if valid {
         Ok(())
     } else {
-        ConfigValidationSnafu {
+        ConfigValidation {
             msg: format!("invalid skill name '{name}'"),
         }.fail()
     }
@@ -136,12 +136,12 @@ fn validate_skill_name(name: &str) -> Result<()> {
 
 fn validate_manifest(name: &str, manifest: &SkillManifest) -> Result<()> {
     if manifest.id.trim().is_empty() {
-        return ConfigValidationSnafu {
+        return ConfigValidation {
             msg: format!("skill '{name}' manifest is missing id"),
         }.fail();
     }
     if manifest.id != name {
-        return ConfigValidationSnafu {
+        return ConfigValidation {
             msg: format!(
                 "skill '{}' manifest id '{}' does not match requested skill name",
                 name, manifest.id
@@ -149,37 +149,37 @@ fn validate_manifest(name: &str, manifest: &SkillManifest) -> Result<()> {
         }.fail();
     }
     if manifest.name.trim().is_empty() {
-        return ConfigValidationSnafu {
+        return ConfigValidation {
             msg: format!("skill '{name}' manifest is missing name"),
         }.fail();
     }
     if manifest.prompt.trim().is_empty() {
-        return ConfigValidationSnafu {
+        return ConfigValidation {
             msg: format!("skill '{name}' manifest is missing prompt"),
         }.fail();
     }
     let capabilities: std::collections::HashSet<_> =
         manifest.capabilities.iter().cloned().collect();
     if capabilities.is_empty() {
-        return ConfigValidationSnafu {
+        return ConfigValidation {
             msg: format!("skill '{name}' manifest must declare at least one capability"),
         }.fail();
     }
     if !capabilities.contains(&SkillCapability::Prompt) {
-        return ConfigValidationSnafu {
+        return ConfigValidation {
             msg: format!("skill '{name}' manifest must declare the 'prompt' capability"),
         }.fail();
     }
     for tool in &manifest.tools {
         if tool.trim().is_empty() {
-            return ConfigValidationSnafu {
+            return ConfigValidation {
                 msg: format!("skill '{name}' declares an empty tool name"),
             }.fail();
         }
     }
     for required in required_capabilities_for_tools(&manifest.tools) {
         if !capabilities.contains(&required) {
-            return ConfigValidationSnafu {
+            return ConfigValidation {
                 msg: format!(
                     "skill '{}' is missing required capability '{}'",
                     name,
@@ -217,7 +217,7 @@ fn resolve_skill_manifest_path(workspace: &Path, name: &str) -> Result<PathBuf> 
     candidates
         .into_iter()
         .find(|path| path.is_file())
-        .ok_or_else(|| ConfigIoSnafu {
+        .ok_or_else(|| ConfigIo {
             msg: format!(
                 "skill '{}' not found under '{}' or '{}'",
                 name,

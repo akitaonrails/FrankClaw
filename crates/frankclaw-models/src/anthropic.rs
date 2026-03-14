@@ -5,7 +5,7 @@ use secrecy::{ExposeSecret, SecretString};
 use std::collections::BTreeMap;
 use tracing::debug;
 
-use frankclaw_core::error::{FrankClawError, InternalSnafu, ModelProviderSnafu, Result};
+use frankclaw_core::error::{FrankClawError, Internal, ModelProvider as ModelProviderErr, Result};
 use frankclaw_core::model::{ModelProvider, CompletionRequest, StreamDelta, CompletionResponse, ModelDef, ModelApi, InputModality, ModelCost, ModelCompat, ToolCallResponse, Usage, FinishReason};
 use frankclaw_core::types::Role;
 
@@ -31,7 +31,7 @@ impl AnthropicProvider {
         let client = Client::builder()
             .timeout(std::time::Duration::from_secs(120))
             .build()
-            .map_err(|e| InternalSnafu {
+            .map_err(|e| Internal {
                 msg: format!("failed to build HTTP client: {e}"),
             }.build())?;
 
@@ -73,7 +73,7 @@ impl ModelProvider for AnthropicProvider {
             .json(&body)
             .send()
             .await
-            .map_err(|e| ModelProviderSnafu {
+            .map_err(|e| ModelProviderErr {
                 msg: format!("request failed: {e}"),
             }.build())?;
 
@@ -88,7 +88,7 @@ impl ModelProvider for AnthropicProvider {
             let mut state = AnthropicStreamState::default();
             let mut stream = response.bytes_stream();
             while let Some(chunk) = stream.next().await {
-                let chunk = chunk.map_err(|e| ModelProviderSnafu {
+                let chunk = chunk.map_err(|e| ModelProviderErr {
                     msg: format!("failed to read streaming response: {e}"),
                 }.build())?;
                 for event in decoder.push(chunk.as_ref()) {
@@ -116,7 +116,7 @@ impl ModelProvider for AnthropicProvider {
             return Ok(response);
         }
 
-        let data: serde_json::Value = response.json().await.map_err(|e| ModelProviderSnafu {
+        let data: serde_json::Value = response.json().await.map_err(|e| ModelProviderErr {
             msg: format!("invalid response: {e}"),
         }.build())?;
         parse_completion_response(&data)
@@ -360,7 +360,7 @@ impl AnthropicStreamState {
         let mut tool_calls = Vec::with_capacity(self.tool_calls.len());
         for (_, tool_call) in self.tool_calls {
             if tool_call.id.trim().is_empty() || tool_call.name.trim().is_empty() {
-                return ModelProviderSnafu {
+                return ModelProviderErr {
                     msg: "streamed anthropic tool call missing id or name",
                 }.fail();
             }
@@ -384,7 +384,7 @@ fn apply_stream_event(
     event_type: Option<&str>,
     data: &str,
 ) -> Result<Vec<StreamDelta>> {
-    let payload: serde_json::Value = serde_json::from_str(data).map_err(|err| ModelProviderSnafu {
+    let payload: serde_json::Value = serde_json::from_str(data).map_err(|err| ModelProviderErr {
         msg: format!("invalid streaming response chunk: {err}"),
     }.build())?;
     let mut deltas = Vec::new();
@@ -470,7 +470,7 @@ fn apply_stream_event(
         "error" => {
             let message = payload["error"]["message"].as_str().unwrap_or("anthropic stream error");
             deltas.push(StreamDelta::Error(message.to_string()));
-            return ModelProviderSnafu {
+            return ModelProviderErr {
                 msg: message.to_string(),
             }.fail();
         }
@@ -512,31 +512,31 @@ pub fn classify_provider_error(
 
     // Context overflow detection — varies across providers
     if is_context_overflow(&body_lower) {
-        return ModelProviderSnafu {
+        return ModelProviderErr {
             msg: format!("context length exceeded (HTTP {status}): {body}"),
         }.build();
     }
 
     match status.as_u16() {
-        401 => ModelProviderSnafu {
+        401 => ModelProviderErr {
             msg: format!("authentication failed (invalid API key): {body}"),
         }.build(),
         402 => {
             // 402 can mean billing issue OR rate limit spend cap
             if body_lower.contains("rate_limit") || body_lower.contains("spend") {
-                ModelProviderSnafu {
+                ModelProviderErr {
                     msg: format!("rate limit spend cap reached (retryable): {body}"),
                 }.build()
             } else {
-                ModelProviderSnafu {
+                ModelProviderErr {
                     msg: format!("billing error (out of credits, non-retryable): {body}"),
                 }.build()
             }
         }
-        429 => ModelProviderSnafu {
+        429 => ModelProviderErr {
             msg: format!("rate limited (HTTP 429): {body}"),
         }.build(),
-        _ => ModelProviderSnafu {
+        _ => ModelProviderErr {
             msg: format!("HTTP {status}: {body}"),
         }.build(),
     }

@@ -2,8 +2,8 @@ use std::net::SocketAddr;
 
 use frankclaw_core::auth::{AuthMode, AuthRole};
 use frankclaw_core::error::{
-    AuthFailedSnafu, AuthRequiredSnafu, ConfigValidationSnafu, FrankClawError, InternalSnafu,
-    RateLimitedSnafu, Result,
+    AuthFailed, AuthRequired, ConfigValidation, FrankClawError, Internal,
+    RateLimited, Result,
 };
 use frankclaw_crypto::{verify_password, verify_token_eq};
 use secrecy::{ExposeSecret, SecretString};
@@ -41,7 +41,7 @@ pub fn authenticate(
     // Check rate limit first.
     if let Some(addr) = remote_addr
         && let Some(remaining) = rate_limiter.is_locked(&addr.ip()) {
-            return RateLimitedSnafu {
+            return RateLimited {
                 retry_after_secs: remaining.as_secs(),
             }.fail();
         }
@@ -55,7 +55,7 @@ pub fn authenticate(
             if verify_token_eq(provided.expose_secret(), expected.expose_secret()) {
                 Ok(AuthRole::Admin)
             } else {
-                AuthFailedSnafu.fail()
+                AuthFailed.fail()
             }
         }
 
@@ -64,15 +64,15 @@ pub fn authenticate(
             let stored = frankclaw_crypto::PasswordHash::from_stored(hash.clone());
             match verify_password(provided, &stored) {
                 Ok(true) => Ok(AuthRole::Admin),
-                Ok(false) => AuthFailedSnafu.fail(),
-                Err(_) => AuthFailedSnafu.fail(),
+                Ok(false) => AuthFailed.fail(),
+                Err(_) => AuthFailed.fail(),
             }
         }
 
         // Trusted proxy: identity from header.
         (AuthMode::TrustedProxy { .. }, AuthCredential::ProxyIdentity(identity)) => {
             if identity.is_empty() {
-                AuthFailedSnafu.fail()
+                AuthFailed.fail()
             } else {
                 // Trusted proxy provides identity; we accept it.
                 // The proxy is responsible for authentication.
@@ -83,7 +83,7 @@ pub fn authenticate(
         // Tailscale: verified identity.
         (AuthMode::Tailscale, AuthCredential::TailscaleIdentity(identity)) => {
             if identity.is_empty() {
-                AuthFailedSnafu.fail()
+                AuthFailed.fail()
             } else {
                 Ok(AuthRole::Admin)
             }
@@ -92,13 +92,13 @@ pub fn authenticate(
         // Token mode but no token configured.
         (AuthMode::Token { token: None }, _) => {
             tracing::error!("token auth mode configured but no token set");
-            InternalSnafu {
+            Internal {
                 msg: "auth misconfigured",
             }.fail()
         }
 
         // Mismatched credential type.
-        _ => AuthRequiredSnafu.fail(),
+        _ => AuthRequired.fail(),
     };
 
     // Record success/failure for rate limiting.
@@ -137,7 +137,7 @@ pub fn validate_bind_auth(
         // LAN or specific address: auth is REQUIRED.
         (_, AuthMode::None) => {
             tracing::error!("refusing to bind to network without authentication");
-            ConfigValidationSnafu {
+            ConfigValidation {
                 msg: "gateway.auth must be configured when bind mode is 'lan' or a specific address. \
                       Set gateway.auth.mode to 'token' or 'password'.",
             }.fail()
@@ -229,7 +229,7 @@ fn classify_surface(bind: &frankclaw_core::config::BindMode) -> Result<ExposureS
         frankclaw_core::config::BindMode::Loopback => Ok(ExposureSurface::Loopback),
         frankclaw_core::config::BindMode::Lan => Ok(ExposureSurface::Lan),
         frankclaw_core::config::BindMode::Address(address) => {
-            let ip: std::net::IpAddr = address.parse().map_err(|_| ConfigValidationSnafu {
+            let ip: std::net::IpAddr = address.parse().map_err(|_| ConfigValidation {
                 msg: format!("gateway.bind address '{address}' is not a valid IP address"),
             }.build())?;
             let is_private = match ip {

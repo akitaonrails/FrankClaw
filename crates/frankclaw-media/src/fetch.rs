@@ -4,7 +4,7 @@ use reqwest::Client;
 use tracing::warn;
 use url::Url;
 
-use frankclaw_core::error::{InternalSnafu, MediaFetchBlockedSnafu, MediaTooLargeSnafu, Result};
+use frankclaw_core::error::{Internal, MediaFetchBlocked, MediaTooLarge, Result};
 use frankclaw_core::media::is_safe_ip;
 
 /// Maximum number of redirects to follow before aborting.
@@ -28,7 +28,7 @@ impl SafeFetcher {
             .timeout(std::time::Duration::from_secs(30))
             .redirect(reqwest::redirect::Policy::none())
             .build()
-            .map_err(|e| InternalSnafu {
+            .map_err(|e| Internal {
                 msg: format!("failed to build HTTP client: {e}"),
             }.build())?;
 
@@ -52,14 +52,14 @@ impl SafeFetcher {
                 .get(current_url.as_str())
                 .send()
                 .await
-                .map_err(|e| MediaFetchBlockedSnafu {
+                .map_err(|e| MediaFetchBlocked {
                     reason: format!("fetch failed: {e}"),
                 }.build())?;
 
             // Handle redirects: validate the target URL before following.
             if response.status().is_redirection() {
                 if redirect_count >= MAX_REDIRECTS {
-                    return MediaFetchBlockedSnafu {
+                    return MediaFetchBlocked {
                         reason: format!("too many redirects ({MAX_REDIRECTS})"),
                     }.fail();
                 }
@@ -67,12 +67,12 @@ impl SafeFetcher {
                     .headers()
                     .get("location")
                     .and_then(|v| v.to_str().ok())
-                    .ok_or_else(|| MediaFetchBlockedSnafu {
+                    .ok_or_else(|| MediaFetchBlocked {
                         reason: "redirect without Location header",
                     }.build())?;
                 // Resolve relative URLs against the current URL.
                 current_url = current_url.join(location).map_err(|e| {
-                    MediaFetchBlockedSnafu {
+                    MediaFetchBlocked {
                         reason: format!("invalid redirect URL: {e}"),
                     }.build()
                 })?;
@@ -80,7 +80,7 @@ impl SafeFetcher {
             }
 
             if !response.status().is_success() {
-                return MediaFetchBlockedSnafu {
+                return MediaFetchBlocked {
                     reason: format!("HTTP {}", response.status()),
                 }.fail();
             }
@@ -88,7 +88,7 @@ impl SafeFetcher {
             // Check Content-Length header before downloading body.
             if let Some(content_length) = response.content_length()
                 && content_length > self.max_bytes {
-                    return MediaTooLargeSnafu {
+                    return MediaTooLarge {
                         max_bytes: self.max_bytes,
                     }.fail();
                 }
@@ -101,14 +101,14 @@ impl SafeFetcher {
                 .to_string();
 
             let bytes = response.bytes().await.map_err(|e| {
-                MediaFetchBlockedSnafu {
+                MediaFetchBlocked {
                     reason: format!("body read failed: {e}"),
                 }.build()
             })?;
 
             // Enforce actual size limit (Content-Length can lie).
             if bytes.len() as u64 > self.max_bytes {
-                return MediaTooLargeSnafu {
+                return MediaTooLarge {
                     max_bytes: self.max_bytes,
                 }.fail();
             }
@@ -119,7 +119,7 @@ impl SafeFetcher {
             });
         }
 
-        MediaFetchBlockedSnafu {
+        MediaFetchBlocked {
             reason: format!("too many redirects ({MAX_REDIRECTS})"),
         }.fail()
     }
@@ -131,7 +131,7 @@ async fn validate_url_ssrf(url: &Url) -> Result<()> {
     match url.scheme() {
         "http" | "https" => {}
         scheme => {
-            return MediaFetchBlockedSnafu {
+            return MediaFetchBlocked {
                 reason: format!("unsupported scheme: {scheme}"),
             }.fail();
         }
@@ -139,21 +139,21 @@ async fn validate_url_ssrf(url: &Url) -> Result<()> {
 
     let host = url
         .host_str()
-        .ok_or_else(|| MediaFetchBlockedSnafu {
+        .ok_or_else(|| MediaFetchBlocked {
             reason: "no host in URL",
         }.build())?;
 
     let port = url.port_or_known_default().unwrap_or(443);
     let addrs: Vec<IpAddr> = tokio::net::lookup_host(format!("{host}:{port}"))
         .await
-        .map_err(|e| MediaFetchBlockedSnafu {
+        .map_err(|e| MediaFetchBlocked {
             reason: format!("DNS resolution failed: {e}"),
         }.build())?
         .map(|addr| addr.ip())
         .collect();
 
     if addrs.is_empty() {
-        return MediaFetchBlockedSnafu {
+        return MediaFetchBlocked {
             reason: "DNS resolved to no addresses",
         }.fail();
     }
@@ -164,7 +164,7 @@ async fn validate_url_ssrf(url: &Url) -> Result<()> {
     for addr in &addrs {
         if !is_safe_ip(addr) {
             warn!(%url, %addr, "SSRF blocked: URL resolved to private IP");
-            return MediaFetchBlockedSnafu {
+            return MediaFetchBlocked {
                 reason: format!("URL resolves to blocked IP range: {addr}"),
             }.fail();
         }

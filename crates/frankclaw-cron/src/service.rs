@@ -11,7 +11,7 @@ use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
-use frankclaw_core::error::{Result, ConfigIoSnafu, ConfigValidationSnafu, AgentRuntimeSnafu};
+use frankclaw_core::error::{Result, ConfigIo, ConfigValidation, AgentRuntime};
 use frankclaw_core::types::{AgentId, SessionKey};
 
 use crate::{RunLog, RunStatus};
@@ -63,7 +63,7 @@ impl CronService {
 
     pub fn open(path: &Path) -> Result<Self> {
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| ConfigIoSnafu {
+            std::fs::create_dir_all(parent).map_err(|e| ConfigIo {
                 msg: format!("failed to create cron directory: {e}"),
             }.build())?;
             #[cfg(unix)]
@@ -160,7 +160,7 @@ impl CronService {
                                 let started_at = Utc::now();
                                 let result = if let Ok(r) = tokio::time::timeout(JOB_TIMEOUT, runner(job.clone())).await { r } else {
                                     warn!(job_id = %job.id, timeout_secs = JOB_TIMEOUT.as_secs(), "cron job timed out");
-                                    AgentRuntimeSnafu {
+                                    AgentRuntime {
                                         msg: format!("cron job '{}' timed out after {}s", job.id, JOB_TIMEOUT.as_secs()),
                                     }.fail()
                                 };
@@ -198,19 +198,19 @@ impl CronService {
     pub async fn add(&self, job: CronJob) -> Result<()> {
         // Validate cron expression.
         job.schedule.parse::<Schedule>().map_err(|e| {
-            ConfigValidationSnafu {
+            ConfigValidation {
                 msg: format!("invalid cron schedule '{}': {e}", job.schedule),
             }.build()
         })?;
         // Validate prompt is non-empty.
         if job.prompt.trim().is_empty() {
-            return ConfigValidationSnafu {
+            return ConfigValidation {
                 msg: "cron job prompt must not be empty",
             }.fail();
         }
         // Validate job ID is non-empty.
         if job.id.trim().is_empty() {
-            return ConfigValidationSnafu {
+            return ConfigValidation {
                 msg: "cron job id must not be empty",
             }.fail();
         }
@@ -241,7 +241,7 @@ impl CronService {
                 if let Some(previous) = existing.get(&job.id).and_then(|stored| stored.last_run.clone()) {
                     job.last_run = Some(previous);
                 }
-                job.schedule.parse::<Schedule>().map_err(|e| ConfigValidationSnafu {
+                job.schedule.parse::<Schedule>().map_err(|e| ConfigValidation {
                     msg: format!("invalid cron schedule '{}': {e}", job.schedule),
                 }.build())?;
                 next.insert(job.id.clone(), job);
@@ -263,10 +263,10 @@ fn load_jobs(path: &Path) -> Result<HashMap<String, CronJob>> {
         return Ok(HashMap::new());
     }
 
-    let content = std::fs::read_to_string(path).map_err(|e| ConfigIoSnafu {
+    let content = std::fs::read_to_string(path).map_err(|e| ConfigIo {
         msg: format!("failed to read cron file: {e}"),
     }.build())?;
-    serde_json::from_str(&content).map_err(|e| ConfigIoSnafu {
+    serde_json::from_str(&content).map_err(|e| ConfigIo {
         msg: format!("failed to parse cron file: {e}"),
     }.build())
 }

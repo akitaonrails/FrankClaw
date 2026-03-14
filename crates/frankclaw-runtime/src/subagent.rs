@@ -12,7 +12,7 @@ use tokio::sync::{Mutex, oneshot};
 use tracing::debug;
 use uuid::Uuid;
 
-use frankclaw_core::error::{InternalSnafu, Result};
+use frankclaw_core::error::{Internal, Result};
 use frankclaw_core::types::{AgentId, SessionKey};
 
 /// Maximum spawn depth (parent=0, child=1, grandchild=2, etc.).
@@ -238,7 +238,7 @@ impl SubagentRegistry {
     /// Mark a run as started (transitioned from Pending to Running).
     pub async fn mark_running(&self, run_id: &RunId) -> Result<()> {
         let mut runs = self.runs.lock().await;
-        let record = runs.get_mut(run_id).ok_or_else(|| InternalSnafu {
+        let record = runs.get_mut(run_id).ok_or_else(|| Internal {
             msg: format!("subagent run not found: {run_id}"),
         }.build())?;
         record.state = RunState::Running;
@@ -252,7 +252,7 @@ impl SubagentRegistry {
             let mut runs = self.runs.lock().await;
             let record = runs
                 .get_mut(&notice.run_id)
-                .ok_or_else(|| InternalSnafu {
+                .ok_or_else(|| Internal {
                     msg: format!("subagent run not found: {}", notice.run_id),
                 }.build())?;
             record.state = notice.state.clone();

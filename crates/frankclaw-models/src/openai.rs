@@ -4,7 +4,7 @@ use reqwest::Client;
 use secrecy::{ExposeSecret, SecretString};
 use tracing::debug;
 
-use frankclaw_core::error::{InternalSnafu, ModelProviderSnafu, Result};
+use frankclaw_core::error::{Internal, ModelProvider as ModelProviderErr, Result};
 use frankclaw_core::model::{ModelProvider, CompletionRequest, StreamDelta, CompletionResponse, ModelDef, ModelApi, InputModality, ModelCost, ModelCompat};
 
 use crate::openai_compat::{self, StreamState};
@@ -31,7 +31,7 @@ impl OpenAiProvider {
         let client = Client::builder()
             .timeout(std::time::Duration::from_secs(120))
             .build()
-            .map_err(|e| InternalSnafu {
+            .map_err(|e| Internal {
                 msg: format!("failed to build HTTP client: {e}"),
             }.build())?;
 
@@ -74,7 +74,7 @@ impl ModelProvider for OpenAiProvider {
             .json(&body)
             .send()
             .await
-            .map_err(|e| ModelProviderSnafu {
+            .map_err(|e| ModelProviderErr {
                 msg: format!("request failed: {e}"),
             }.build())?;
 
@@ -89,7 +89,7 @@ impl ModelProvider for OpenAiProvider {
             let mut state = StreamState::default();
             let mut stream = response.bytes_stream();
             while let Some(chunk) = stream.next().await {
-                let chunk = chunk.map_err(|e| ModelProviderSnafu {
+                let chunk = chunk.map_err(|e| ModelProviderErr {
                     msg: format!("failed to read streaming response: {e}"),
                 }.build())?;
                 for event in decoder.push(chunk.as_ref()) {
@@ -116,7 +116,7 @@ impl ModelProvider for OpenAiProvider {
             return Ok(response);
         }
 
-        let data: serde_json::Value = response.json().await.map_err(|e| ModelProviderSnafu {
+        let data: serde_json::Value = response.json().await.map_err(|e| ModelProviderErr {
             msg: format!("invalid response: {e}"),
         }.build())?;
         openai_compat::parse_completion_response(&data)

@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 use tracing::warn;
 
-use frankclaw_core::error::{AgentRuntimeSnafu, InternalSnafu, InvalidRequestSnafu, Result};
+use frankclaw_core::error::{AgentRuntime, Internal, InvalidRequest, Result};
 use frankclaw_core::model::{ToolDef, ToolRiskLevel};
 
 use crate::{Tool, ToolContext};
@@ -227,14 +227,14 @@ impl Tool for BashTool {
 
     async fn invoke(&self, args: serde_json::Value, _ctx: ToolContext) -> Result<serde_json::Value> {
         let args: BashArgs = serde_json::from_value(args).map_err(|e| {
-            InvalidRequestSnafu {
+            InvalidRequest {
                 msg: format!("invalid bash args: {e}"),
             }.build()
         })?;
 
         // Security check.
         if !self.policy.allows(&args.command) {
-            return AgentRuntimeSnafu {
+            return AgentRuntime {
                 msg: format!(
                     "bash command not allowed by policy: '{}'",
                     args.command.chars().take(100).collect::<String>()
@@ -246,7 +246,7 @@ impl Tool for BashTool {
         let workdir = if let Some(ref dir) = args.workdir {
             let path = PathBuf::from(dir);
             if !path.is_dir() {
-                return InvalidRequestSnafu {
+                return InvalidRequest {
                     msg: format!("working directory does not exist: {dir}"),
                 }.fail();
             }
@@ -263,7 +263,7 @@ impl Tool for BashTool {
 
         let result = execute_command(&args.command, workdir.as_ref(), timeout, &self.sandbox).await?;
 
-        serde_json::to_value(&result).map_err(|e| InternalSnafu {
+        serde_json::to_value(&result).map_err(|e| Internal {
             msg: format!("failed to serialize bash result: {e}"),
         }.build())
     }
@@ -310,7 +310,7 @@ async fn execute_command(
         cmd.current_dir(dir);
     }
 
-    let child = cmd.spawn().map_err(|e| AgentRuntimeSnafu {
+    let child = cmd.spawn().map_err(|e| AgentRuntime {
         msg: format!("failed to spawn shell: {e}"),
     }.build())?;
 
@@ -318,7 +318,7 @@ async fn execute_command(
     let output = match tokio::time::timeout(timeout, child.wait_with_output()).await {
         Ok(Ok(output)) => output,
         Ok(Err(e)) => {
-            return AgentRuntimeSnafu {
+            return AgentRuntime {
                 msg: format!("command execution error: {e}"),
             }.fail();
         }

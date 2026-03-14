@@ -23,7 +23,7 @@ use tracing::info;
 use frankclaw_core::channel::{InboundMessage, OutboundMessage};
 use frankclaw_core::config::{BindMode, ChannelDmPolicy, FrankClawConfig};
 use frankclaw_core::error::{
-    ConfigValidationSnafu, InvalidRequestSnafu, RequestTooLargeSnafu, SessionStorageSnafu,
+    ConfigValidation, InvalidRequest, RequestTooLarge, SessionStorage,
 };
 use frankclaw_core::session::SessionStore;
 use frankclaw_core::types::MediaId;
@@ -1090,7 +1090,7 @@ async fn process_inbound_message_with_target(
         .as_deref()
         .map(str::trim)
         .filter(|text| !text.is_empty())
-        .ok_or_else(|| InvalidRequestSnafu {
+        .ok_or_else(|| InvalidRequest {
             msg: "inbound message text is required",
         }.build())?;
 
@@ -1099,7 +1099,7 @@ async fn process_inbound_message_with_target(
         .unwrap_or(config.security.max_webhook_body_bytes)
         .min(config.security.max_webhook_body_bytes);
     if text.len() > max_message_bytes {
-        return RequestTooLargeSnafu {
+        return RequestTooLarge {
             max_bytes: max_message_bytes,
         }.fail();
     }
@@ -1479,7 +1479,7 @@ async fn persist_delivery_metadata(
         recorded_at: chrono::Utc::now(),
     };
     set_last_reply_in_metadata(&mut entry.metadata, &delivery_metadata)
-        .map_err(|e| SessionStorageSnafu {
+        .map_err(|e| SessionStorage {
             msg: format!("failed to serialize delivery metadata: {e}"),
         }.build())?;
 
@@ -1593,7 +1593,7 @@ fn parse_cron_jobs(config: &FrankClawConfig) -> frankclaw_core::error::Result<Ve
         .cloned()
         .map(|value| {
             let parsed = serde_json::from_value::<CronJob>(value).map_err(|err| {
-                ConfigValidationSnafu {
+                ConfigValidation {
                     msg: format!("invalid cron job configuration: {err}"),
                 }.build()
             })?;
@@ -1605,22 +1605,22 @@ fn parse_cron_jobs(config: &FrankClawConfig) -> frankclaw_core::error::Result<Ve
 
 fn validate_cron_job(job: &CronJob) -> frankclaw_core::error::Result<()> {
     if job.id.trim().is_empty() {
-        return ConfigValidationSnafu {
+        return ConfigValidation {
             msg: "cron job id cannot be empty",
         }.fail();
     }
     if job.prompt.trim().is_empty() {
-        return ConfigValidationSnafu {
+        return ConfigValidation {
             msg: format!("cron job '{}' prompt cannot be empty", job.id),
         }.fail();
     }
     let Some((session_agent_id, _, _)) = job.session_key.parse() else {
-        return ConfigValidationSnafu {
+        return ConfigValidation {
             msg: format!("cron job '{}' has an invalid session key", job.id),
         }.fail();
     };
     if session_agent_id.as_str() != job.agent_id.as_str() {
-        return ConfigValidationSnafu {
+        return ConfigValidation {
             msg: format!(
                 "cron job '{}' session key agent '{}' does not match '{}'",
                 job.id,
@@ -1680,7 +1680,7 @@ mod tests {
     use frankclaw_channels::{ChannelSet, whatsapp::WhatsAppChannel};
     use frankclaw_core::channel::{ChannelPlugin, SendResult};
     use frankclaw_core::config::{ChannelConfig, ProviderConfig};
-    use frankclaw_core::error::{FrankClawError, ModelProviderSnafu};
+    use frankclaw_core::error::{FrankClawError, ModelProvider as ModelProviderErr};
     use frankclaw_core::model::{
         CompletionRequest, CompletionResponse, FinishReason, InputModality, ModelApi,
         ModelCompat, ModelCost, ModelDef, ModelProvider,
@@ -3123,7 +3123,7 @@ mod tests {
             _request: CompletionRequest,
             _stream_tx: Option<tokio::sync::mpsc::Sender<frankclaw_core::model::StreamDelta>>,
         ) -> frankclaw_core::error::Result<CompletionResponse> {
-            ModelProviderSnafu {
+            ModelProviderErr {
                 msg: "simulated provider failure",
             }.fail()
         }

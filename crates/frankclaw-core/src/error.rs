@@ -9,7 +9,7 @@ use crate::types::{AgentId, ChannelId, SessionKey};
 /// file and line where the error was constructed, available via the
 /// [`FrankClawError::location`] method.
 #[derive(Debug, Snafu)]
-#[snafu(visibility(pub))]
+#[snafu(visibility(pub), context(suffix(false)))]
 pub enum FrankClawError {
     // ── Auth ──────────────────────────────────────────────
     #[snafu(display("authentication required"))]
@@ -314,34 +314,34 @@ mod tests {
     /// Build every error variant. Returns (error, expected_display, expected_status, expected_retryable).
     fn error_cases() -> Vec<(FrankClawError, &'static str, u16, bool)> {
         vec![
-            (AuthRequiredSnafu.build(), "authentication required", 401, false),
-            (AuthFailedSnafu.build(), "authentication failed", 401, false),
-            (RateLimitedSnafu { retry_after_secs: 30_u64 }.build(), "rate limited (retry after 30s)", 429, true),
-            (ForbiddenSnafu { method: "chat_send" }.build(), "insufficient permissions for method chat_send", 403, false),
-            (SessionNotFoundSnafu { key: SessionKey::from_raw("a:b:c") }.build(), "session not found: a:b:c", 404, false),
-            (SessionStorageSnafu { msg: "disk full" }.build(), "session storage error: disk full", 500, false),
-            (ChannelSnafu { channel: ChannelId::new("discord"), msg: "timeout" }.build(), "channel discord error: timeout", 500, false),
-            (ChannelNotConfiguredSnafu { channel: ChannelId::new("slack") }.build(), "channel slack not configured", 404, false),
-            (ChannelDisabledSnafu { channel: ChannelId::new("telegram") }.build(), "channel telegram is disabled", 500, false),
-            (SenderBlockedSnafu { channel: ChannelId::new("signal") }.build(), "sender blocked by policy on channel signal", 403, false),
-            (AgentNotFoundSnafu { agent_id: AgentId::new("missing") }.build(), "agent missing not found", 404, false),
-            (AgentRuntimeSnafu { msg: "oom" }.build(), "agent runtime error: oom", 500, false),
-            (TurnCancelledSnafu.build(), "agent turn cancelled", 500, false),
-            (SandboxSnafu { msg: "denied" }.build(), "sandbox error: denied", 500, false),
-            (ModelProviderSnafu { msg: "rate limit" }.build(), "model provider error: rate limit", 500, true),
-            (AllProvidersFailedSnafu.build(), "all model providers failed", 500, true),
-            (ModelNotFoundSnafu { model_id: "gpt-5" }.build(), "model not found: gpt-5", 404, false),
-            (ConfigValidationSnafu { msg: "bad port" }.build(), "config validation error: bad port", 422, false),
-            (ConfigIoSnafu { msg: "not found" }.build(), "config I/O error: not found", 500, false),
-            (InvalidRequestSnafu { msg: "missing field" }.build(), "invalid request: missing field", 400, false),
-            (UnknownMethodSnafu { method: "foo" }.build(), "unknown method: foo", 400, false),
-            (RequestTooLargeSnafu { max_bytes: 4096_usize }.build(), "request too large (max 4096 bytes)", 413, false),
-            (MediaTooLargeSnafu { max_bytes: 1024_u64 }.build(), "media file too large (max 1024 bytes)", 413, false),
-            (MediaFetchBlockedSnafu { reason: "private ip" }.build(), "media fetch blocked: private ip", 403, false),
-            (UnsupportedMediaTypeSnafu { mime: "video/avi" }.build(), "unsupported media type: video/avi", 500, false),
-            (MalwareDetectedSnafu { filename: "bad.exe", detail: "trojan" }.build(), "malware detected in file 'bad.exe': trojan", 403, false),
-            (InternalSnafu { msg: "unexpected" }.build(), "internal error: unexpected", 500, true),
-            (ShuttingDownSnafu.build(), "shutdown in progress", 500, false),
+            (AuthRequired.build(), "authentication required", 401, false),
+            (AuthFailed.build(), "authentication failed", 401, false),
+            (RateLimited { retry_after_secs: 30_u64 }.build(), "rate limited (retry after 30s)", 429, true),
+            (Forbidden { method: "chat_send" }.build(), "insufficient permissions for method chat_send", 403, false),
+            (SessionNotFound { key: SessionKey::from_raw("a:b:c") }.build(), "session not found: a:b:c", 404, false),
+            (SessionStorage { msg: "disk full" }.build(), "session storage error: disk full", 500, false),
+            (Channel { channel: ChannelId::new("discord"), msg: "timeout" }.build(), "channel discord error: timeout", 500, false),
+            (ChannelNotConfigured { channel: ChannelId::new("slack") }.build(), "channel slack not configured", 404, false),
+            (ChannelDisabled { channel: ChannelId::new("telegram") }.build(), "channel telegram is disabled", 500, false),
+            (SenderBlocked { channel: ChannelId::new("signal") }.build(), "sender blocked by policy on channel signal", 403, false),
+            (AgentNotFound { agent_id: AgentId::new("missing") }.build(), "agent missing not found", 404, false),
+            (AgentRuntime { msg: "oom" }.build(), "agent runtime error: oom", 500, false),
+            (TurnCancelled.build(), "agent turn cancelled", 500, false),
+            (Sandbox { msg: "denied" }.build(), "sandbox error: denied", 500, false),
+            (ModelProvider { msg: "rate limit" }.build(), "model provider error: rate limit", 500, true),
+            (AllProvidersFailed.build(), "all model providers failed", 500, true),
+            (ModelNotFound { model_id: "gpt-5" }.build(), "model not found: gpt-5", 404, false),
+            (ConfigValidation { msg: "bad port" }.build(), "config validation error: bad port", 422, false),
+            (ConfigIo { msg: "not found" }.build(), "config I/O error: not found", 500, false),
+            (InvalidRequest { msg: "missing field" }.build(), "invalid request: missing field", 400, false),
+            (UnknownMethod { method: "foo" }.build(), "unknown method: foo", 400, false),
+            (RequestTooLarge { max_bytes: 4096_usize }.build(), "request too large (max 4096 bytes)", 413, false),
+            (MediaTooLarge { max_bytes: 1024_u64 }.build(), "media file too large (max 1024 bytes)", 413, false),
+            (MediaFetchBlocked { reason: "private ip" }.build(), "media fetch blocked: private ip", 403, false),
+            (UnsupportedMediaType { mime: "video/avi" }.build(), "unsupported media type: video/avi", 500, false),
+            (MalwareDetected { filename: "bad.exe", detail: "trojan" }.build(), "malware detected in file 'bad.exe': trojan", 403, false),
+            (Internal { msg: "unexpected" }.build(), "internal error: unexpected", 500, true),
+            (ShuttingDown.build(), "shutdown in progress", 500, false),
         ]
     }
 
@@ -473,7 +473,7 @@ mod tests {
 
     #[test]
     fn location_is_captured() {
-        let error = AuthRequiredSnafu.build();
+        let error = AuthRequired.build();
         let loc = error.location();
         let loc_str = loc.to_string();
         assert!(
@@ -485,7 +485,7 @@ mod tests {
     #[test]
     fn location_reflects_call_site() {
         let line_before = line!();
-        let error = InternalSnafu { msg: "test" }.build();
+        let error = Internal { msg: "test" }.build();
         let line_after = line!();
 
         let loc_str = error.location().to_string();

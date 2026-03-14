@@ -4,7 +4,7 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use crate::auth::{AuthMode, RateLimitConfig};
-use crate::error::{ConfigIoSnafu, ConfigValidationSnafu, Result};
+use crate::error::{ConfigIo, ConfigValidation, Result};
 use crate::session::{PruningConfig, SessionResetPolicy, SessionScoping};
 use crate::types::{AgentId, ChannelId, SessionKey};
 
@@ -29,13 +29,13 @@ pub struct FrankClawConfig {
 impl FrankClawConfig {
     pub fn load_from_path(path: &Path) -> Result<Self> {
         let content = std::fs::read_to_string(path).map_err(|err| {
-            ConfigIoSnafu {
+            ConfigIo {
                 msg: format!("failed to read config '{}': {err}", path.display()),
             }
             .build()
         })?;
         serde_json::from_str(&content).map_err(|err| {
-            ConfigIoSnafu {
+            ConfigIo {
                 msg: format!("failed to parse config '{}': {err}", path.display()),
             }
             .build()
@@ -53,7 +53,7 @@ impl FrankClawConfig {
         self.gateway.auth.validate()?;
 
         if !self.agents.agents.contains_key(&self.agents.default_agent) {
-            return ConfigValidationSnafu {
+            return ConfigValidation {
                 msg: format!(
                     "default agent '{}' is not present in agents map",
                     self.agents.default_agent
@@ -65,13 +65,13 @@ impl FrankClawConfig {
         let mut provider_ids = std::collections::HashSet::new();
         for provider in &self.models.providers {
             if provider.id.trim().is_empty() {
-                return ConfigValidationSnafu {
+                return ConfigValidation {
                     msg: "model provider id cannot be empty",
                 }
                 .fail();
             }
             if !provider_ids.insert(provider.id.clone()) {
-                return ConfigValidationSnafu {
+                return ConfigValidation {
                     msg: format!("duplicate model provider id '{}'", provider.id),
                 }
                 .fail();
@@ -79,7 +79,7 @@ impl FrankClawConfig {
             match provider.api.as_str() {
                 "openai" | "anthropic" | "ollama" => {}
                 other => {
-                    return ConfigValidationSnafu {
+                    return ConfigValidation {
                         msg: format!(
                             "unsupported model provider api '{other}'; expected openai, anthropic, or ollama"
                         ),
@@ -93,7 +93,7 @@ impl FrankClawConfig {
                     .as_deref()
                     .is_none_or(|value| value.trim().is_empty())
             {
-                return ConfigValidationSnafu {
+                return ConfigValidation {
                     msg: format!(
                         "provider '{}' requires a non-empty api_key_ref",
                         provider.id
@@ -105,21 +105,21 @@ impl FrankClawConfig {
 
         if let Some(default_model) = &self.models.default_model
             && default_model.trim().is_empty() {
-                return ConfigValidationSnafu {
+                return ConfigValidation {
                     msg: "models.default_model cannot be empty",
                 }
                 .fail();
             }
 
         if self.gateway.max_connections == 0 {
-            return ConfigValidationSnafu {
+            return ConfigValidation {
                 msg: "gateway.max_connections must be greater than 0",
             }
             .fail();
         }
 
         if self.gateway.max_ws_message_bytes == 0 {
-            return ConfigValidationSnafu {
+            return ConfigValidation {
                 msg: "gateway.max_ws_message_bytes must be greater than 0",
             }
             .fail();
@@ -127,7 +127,7 @@ impl FrankClawConfig {
 
         if let BindMode::Address(address) = &self.gateway.bind
             && address.parse::<std::net::IpAddr>().is_err() {
-                return ConfigValidationSnafu {
+                return ConfigValidation {
                     msg: format!(
                         "gateway.bind address '{address}' is not a valid IP address"
                     ),
@@ -330,7 +330,7 @@ impl ChannelConfig {
 
         if let Some(raw) = self.extra.get("dm_policy").and_then(|value| value.as_str()) {
             policy.dm_policy = raw.parse::<ChannelDmPolicy>().map_err(|_| {
-                ConfigValidationSnafu {
+                ConfigValidation {
                     msg: format!(
                         "invalid dm_policy '{raw}'; expected {}",
                         <ChannelDmPolicy as strum::VariantNames>::VARIANTS.join(", ")
@@ -342,7 +342,7 @@ impl ChannelConfig {
 
         if let Some(raw) = self.extra.get("allow_from") {
             let entries = raw.as_array().ok_or_else(|| {
-                ConfigValidationSnafu {
+                ConfigValidation {
                     msg: "allow_from must be an array of sender ids",
                 }
                 .build()
@@ -351,7 +351,7 @@ impl ChannelConfig {
                 .iter()
                 .map(|entry| {
                     entry.as_str().map(str::to_string).ok_or_else(|| {
-                        ConfigValidationSnafu {
+                        ConfigValidation {
                             msg: "allow_from entries must be strings",
                         }
                         .build()
@@ -362,7 +362,7 @@ impl ChannelConfig {
 
         if let Some(raw) = self.extra.get("groups") {
             let entries = raw.as_array().ok_or_else(|| {
-                ConfigValidationSnafu {
+                ConfigValidation {
                     msg: "groups must be an array of group or thread ids",
                 }
                 .build()
@@ -372,7 +372,7 @@ impl ChannelConfig {
                     .iter()
                     .map(|entry| {
                         entry.as_str().map(str::to_string).ok_or_else(|| {
-                            ConfigValidationSnafu {
+                            ConfigValidation {
                                 msg: "groups entries must be strings",
                             }
                             .build()
@@ -393,13 +393,13 @@ impl ChannelConfig {
         if let Some(raw) = self.extra.get("max_message_bytes") {
             #[expect(clippy::cast_possible_truncation, reason = "config values are small positive integers; truncation is not a concern")]
             let value = raw.as_u64().ok_or_else(|| {
-                ConfigValidationSnafu {
+                ConfigValidation {
                     msg: "max_message_bytes must be a positive integer",
                 }
                 .build()
             })? as usize;
             if value == 0 {
-                return ConfigValidationSnafu {
+                return ConfigValidation {
                     msg: "max_message_bytes must be greater than 0",
                 }
                 .fail();
@@ -478,7 +478,7 @@ fn validate_channel_config(channel_id: &ChannelId, channel: &ChannelConfig) -> R
                 "bot token",
             )
         }
-        other => ConfigValidationSnafu {
+        other => ConfigValidation {
             msg: format!(
                 "unsupported enabled channel '{other}'; currently supported: web, telegram, discord, signal, slack, whatsapp"
             ),
@@ -495,7 +495,7 @@ fn validate_channel_account_value_source(
     label: &str,
 ) -> Result<()> {
     let account = channel.accounts.first().ok_or_else(|| {
-        ConfigValidationSnafu {
+        ConfigValidation {
             msg: format!("{channel_name} channel requires at least one account"),
         }
         .build()
@@ -521,7 +521,7 @@ fn validate_channel_account_value_source(
         return Ok(());
     }
 
-    ConfigValidationSnafu {
+    ConfigValidation {
         msg: format!(
             "{channel_name} channel requires a non-empty {label} or {label} env reference"
         ),
@@ -592,13 +592,13 @@ impl HooksConfig {
             .as_deref()
             .is_none_or(|value| value.trim().is_empty())
         {
-            return ConfigValidationSnafu {
+            return ConfigValidation {
                 msg: "hooks.enabled requires a non-empty hooks.token",
             }
             .fail();
         }
         if self.mappings.is_empty() {
-            return ConfigValidationSnafu {
+            return ConfigValidation {
                 msg: "hooks.enabled requires at least one mapping",
             }
             .fail();
@@ -608,25 +608,25 @@ impl HooksConfig {
         let mut mappings = Vec::with_capacity(self.mappings.len());
         for raw in &self.mappings {
             let mapping: WebhookMapping = serde_json::from_value(raw.clone()).map_err(|err| {
-                ConfigValidationSnafu {
+                ConfigValidation {
                     msg: format!("invalid webhook mapping: {err}"),
                 }
                 .build()
             })?;
             if mapping.id.trim().is_empty() {
-                return ConfigValidationSnafu {
+                return ConfigValidation {
                     msg: "webhook mapping id cannot be empty",
                 }
                 .fail();
             }
             if !seen.insert(mapping.id.clone()) {
-                return ConfigValidationSnafu {
+                return ConfigValidation {
                     msg: format!("duplicate webhook mapping '{}'", mapping.id),
                 }
                 .fail();
             }
             if mapping.text_field.trim().is_empty() {
-                return ConfigValidationSnafu {
+                return ConfigValidation {
                     msg: format!("webhook mapping '{}' text_field cannot be empty", mapping.id),
                 }
                 .fail();
@@ -634,7 +634,7 @@ impl HooksConfig {
             if let (Some(agent_id), Some(session_key)) = (&mapping.agent_id, &mapping.session_key)
                 && let Some((session_agent, _, _)) = session_key.parse()
                     && &session_agent != agent_id {
-                        return ConfigValidationSnafu {
+                        return ConfigValidation {
                             msg: format!(
                                 "webhook mapping '{}' session '{}' does not belong to agent '{}'",
                                 mapping.id, session_key, agent_id

@@ -15,8 +15,8 @@ use secrecy::SecretString;
 
 use frankclaw_core::config::{AgentDef, FrankClawConfig, ProviderConfig};
 use frankclaw_core::error::{
-    AgentNotFoundSnafu, AgentRuntimeSnafu, ConfigValidationSnafu, InternalSnafu,
-    InvalidRequestSnafu, Result,
+    AgentNotFound, AgentRuntime, ConfigValidation, Internal,
+    InvalidRequest, Result,
 };
 use frankclaw_core::channel::{ChannelCapabilities, InboundAttachment, InboundMessage};
 use frankclaw_core::model::{
@@ -129,7 +129,7 @@ impl Runtime {
         let tools = ToolRegistry::with_builtins();
         for (agent_id, agent) in &config.agents.agents {
             tools.validate_names(&agent.tools).map_err(|err| {
-                ConfigValidationSnafu {
+                ConfigValidation {
                     msg: format!("agent '{agent_id}' has invalid tool config: {err}"),
                 }.build()
             })?;
@@ -208,7 +208,7 @@ impl Runtime {
     #[expect(clippy::too_many_lines, reason = "orchestration function; splitting would scatter the chat lifecycle")]
     pub async fn chat(&self, request: ChatRequest) -> Result<ChatResponse> {
         if request.message.trim().is_empty() {
-            return InvalidRequestSnafu {
+            return InvalidRequest {
                 msg: "message is required",
             }.fail();
         }
@@ -320,7 +320,7 @@ impl Runtime {
 
         // Enforce hard prompt size limit to prevent token exhaustion / memory abuse.
         if !sanitize::check_prompt_size(&request_messages, system_prompt.as_deref()) {
-            return InvalidRequestSnafu {
+            return InvalidRequest {
                 msg: format!(
                     "total prompt size exceeds maximum ({} bytes)",
                     sanitize::MAX_PROMPT_BYTES
@@ -351,7 +351,7 @@ impl Runtime {
         for _round in 0..=MAX_TOOL_ROUNDS {
             // Safety timeout: abort if the entire turn is taking too long.
             if tokio::time::Instant::now() >= turn_deadline {
-                return AgentRuntimeSnafu {
+                return AgentRuntime {
                     msg: format!(
                         "turn safety timeout exceeded ({TURN_SAFETY_TIMEOUT_SECS}s)"
                     ),
@@ -402,7 +402,7 @@ impl Runtime {
                 }
 
             if response.tool_calls.len() > remaining_tool_calls {
-                return AgentRuntimeSnafu {
+                return AgentRuntime {
                     msg: format!(
                         "model requested too many tool calls in one turn (max {MAX_TOOL_CALLS_PER_TURN})"
                     ),
@@ -558,7 +558,7 @@ impl Runtime {
                     "tool": tool_output.name,
                     "output": tool_output.output,
                 }))
-                .map_err(|err| InternalSnafu {
+                .map_err(|err| Internal {
                     msg: format!("failed to serialize tool output: {err}"),
                 }.build())?;
                 // Scan tool output for credential leaks before it enters the context.
@@ -575,7 +575,7 @@ impl Runtime {
                         patterns = %leaked,
                         "credential leak detected in tool output — blocking"
                     );
-                    return AgentRuntimeSnafu {
+                    return AgentRuntime {
                         msg: format!(
                             "tool '{}' output contained credential(s): {}. Output blocked.",
                             tool_call.name, leaked,
@@ -644,7 +644,7 @@ impl Runtime {
                 // instead of letting the provider fail with a raw context overflow.
                 let post_tokens = context::estimate_messages_tokens(&request_messages);
                 if post_tokens > mid_budget {
-                    return AgentRuntimeSnafu {
+                    return AgentRuntime {
                         msg: format!(
                             "context too large after compaction ({post_tokens} tokens, budget {mid_budget})"
                         ),
@@ -653,7 +653,7 @@ impl Runtime {
             }
         }
 
-        AgentRuntimeSnafu {
+        AgentRuntime {
             msg: format!("tool round limit exceeded (max {MAX_TOOL_ROUNDS})"),
         }.fail()
     }
@@ -715,7 +715,7 @@ impl Runtime {
     ) -> Result<String> {
         let task = arguments["task"]
             .as_str()
-            .ok_or_else(|| AgentRuntimeSnafu {
+            .ok_or_else(|| AgentRuntime {
                 msg: "spawn_subagent requires a 'task' string",
             }.build())?;
         let label = arguments["label"].as_str().map(String::from);
@@ -741,7 +741,7 @@ impl Runtime {
                 child_session_key,
             } => (run_id, child_session_key),
             subagent::SpawnResult::Rejected { reason } => {
-                return AgentRuntimeSnafu {
+                return AgentRuntime {
                     msg: format!("subagent spawn rejected: {reason}"),
                 }.fail();
             }
@@ -803,7 +803,7 @@ impl Runtime {
                         error: Some("subagent timed out".into()),
                     })
                     .await?;
-                AgentRuntimeSnafu {
+                AgentRuntime {
                     msg: "subagent execution timed out",
                 }.fail()
             }
@@ -820,7 +820,7 @@ impl Runtime {
             .agents
             .get(&agent_id)
             .cloned()
-            .ok_or_else(|| AgentNotFoundSnafu {
+            .ok_or_else(|| AgentNotFound {
                 agent_id: agent_id.clone(),
             }.build())?;
         Ok((agent_id, agent))
@@ -959,7 +959,7 @@ impl Runtime {
         self.model_defs
             .first()
             .map(|model| model.id.clone())
-            .ok_or_else(|| ConfigValidationSnafu {
+            .ok_or_else(|| ConfigValidation {
                 msg: "no model providers are configured",
             }.build())
     }
@@ -973,7 +973,7 @@ impl Runtime {
         if let Some(session_key) = explicit {
             if let Some((session_agent_id, _, _)) = session_key.parse()
                 && &session_agent_id != agent_id {
-                    return InvalidRequestSnafu {
+                    return InvalidRequest {
                         msg: format!(
                             "session '{session_key}' does not belong to agent '{agent_id}'"
                         ),
@@ -1064,7 +1064,7 @@ impl ToolCallTracker {
         *count += 1;
 
         if *count >= TOOL_REPEAT_BLOCK_THRESHOLD {
-            return AgentRuntimeSnafu {
+            return AgentRuntime {
                 msg: format!(
                     "tool '{name}' called {count} times with identical arguments — possible infinite loop"
                 ),
@@ -1250,7 +1250,7 @@ async fn fetch_image_attachments(
 }
 
 fn parse_tool_arguments(tool_call: &ToolCallResponse) -> Result<serde_json::Value> {
-    serde_json::from_str(&tool_call.arguments).map_err(|err| AgentRuntimeSnafu {
+    serde_json::from_str(&tool_call.arguments).map_err(|err| AgentRuntime {
         msg: format!(
             "model produced invalid arguments for tool '{}': {}",
             tool_call.name, err
@@ -1266,7 +1266,7 @@ fn build_providers(
 
     for provider in &config.models.providers {
         if !seen_ids.insert(provider.id.clone()) {
-            return ConfigValidationSnafu {
+            return ConfigValidation {
                 msg: format!("duplicate model provider id '{}'", provider.id),
             }.fail();
         }
@@ -1292,7 +1292,7 @@ fn build_providers(
                     provider.base_url.clone(),
                 )?),
                 other => {
-                    return ConfigValidationSnafu {
+                    return ConfigValidation {
                         msg: format!(
                             "unsupported model provider api '{other}'; expected openai, anthropic, or ollama"
                         ),
@@ -1314,14 +1314,14 @@ fn load_agent_skills(config: &FrankClawConfig) -> Result<HashMap<AgentId, Vec<Sk
             continue;
         }
 
-        let workspace = agent.workspace.as_ref().ok_or_else(|| ConfigValidationSnafu {
+        let workspace = agent.workspace.as_ref().ok_or_else(|| ConfigValidation {
             msg: format!("agent '{agent_id}' declares skills but has no workspace"),
         }.build())?;
         let skills = load_workspace_skills(workspace, &agent.skills)?;
         for skill in &skills {
             for tool in &skill.tools {
                 if !agent.tools.iter().any(|allowed| allowed == tool) {
-                    return ConfigValidationSnafu {
+                    return ConfigValidation {
                         msg: format!(
                             "agent '{}' skill '{}' requires tool '{}' but the agent does not allow it",
                             agent_id, skill.id, tool
@@ -1343,12 +1343,12 @@ fn resolve_secret(provider: &ProviderConfig, default_env: &str) -> Result<Secret
         .unwrap_or(default_env)
         .trim();
     if env_key.is_empty() {
-        return ConfigValidationSnafu {
+        return ConfigValidation {
             msg: format!("provider '{}' requires an api_key_ref", provider.id),
         }.fail();
     }
 
-    let value = std::env::var(env_key).map_err(|_| ConfigValidationSnafu {
+    let value = std::env::var(env_key).map_err(|_| ConfigValidation {
         msg: format!(
             "provider '{}' references missing environment variable '{}'",
             provider.id, env_key
@@ -1356,7 +1356,7 @@ fn resolve_secret(provider: &ProviderConfig, default_env: &str) -> Result<Secret
     }.build())?;
 
     if value.trim().is_empty() {
-        return ConfigValidationSnafu {
+        return ConfigValidation {
             msg: format!(
                 "provider '{}' environment variable '{}' is empty",
                 provider.id, env_key
@@ -1371,7 +1371,7 @@ fn resolve_secret(provider: &ProviderConfig, default_env: &str) -> Result<Secret
 mod tests {
     use super::*;
     use async_trait::async_trait;
-    use frankclaw_core::error::{AllProvidersFailedSnafu, FrankClawError};
+    use frankclaw_core::error::{AllProvidersFailed, FrankClawError};
     use frankclaw_core::model::{
         CompletionResponse, FinishReason, InputModality, ModelApi, ModelCompat, ModelCost,
         ToolCallResponse, ToolDef,
@@ -1472,7 +1472,7 @@ mod tests {
                     },
                     finish_reason: response.finish_reason,
                 }),
-                None => AllProvidersFailedSnafu.fail(),
+                None => AllProvidersFailed.fail(),
             }
         }
 

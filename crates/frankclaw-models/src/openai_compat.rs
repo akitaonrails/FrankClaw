@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use frankclaw_core::error::{ModelProviderSnafu, Result};
+use frankclaw_core::error::{ModelProvider, Result};
 use frankclaw_core::model::{CompletionRequest, ResponseFormat, CompletionResponse, ToolCallResponse, Usage, FinishReason, StreamDelta};
 use frankclaw_core::types::Role;
 
@@ -145,7 +145,7 @@ pub fn build_request_body(request: &CompletionRequest) -> serde_json::Value {
 pub fn parse_completion_response(data: &serde_json::Value) -> Result<CompletionResponse> {
     let choice = data["choices"]
         .get(0)
-        .ok_or_else(|| ModelProviderSnafu {
+        .ok_or_else(|| ModelProvider {
             msg: "no choices in response",
         }.build())?;
 
@@ -220,7 +220,7 @@ impl StreamState {
                 tool_call.ended = true;
             }
             if tool_call.id.trim().is_empty() || tool_call.name.trim().is_empty() {
-                return ModelProviderSnafu {
+                return ModelProvider {
                     msg: "streamed tool call missing id or name",
                 }.fail();
             }
@@ -250,7 +250,7 @@ pub fn apply_stream_event(
     }
 
     let payload: serde_json::Value =
-        serde_json::from_str(data).map_err(|err| ModelProviderSnafu {
+        serde_json::from_str(data).map_err(|err| ModelProvider {
             msg: format!("invalid streaming response chunk: {err}"),
         }.build())?;
     let mut deltas = Vec::new();

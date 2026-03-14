@@ -18,7 +18,7 @@ use url::Url;
 
 use tokio::net::lookup_host;
 
-use frankclaw_core::error::{AgentRuntimeSnafu, ConfigValidationSnafu, InternalSnafu, InvalidRequestSnafu, Result};
+use frankclaw_core::error::{AgentRuntime, ConfigValidation, Internal, InvalidRequest, Result};
 use frankclaw_core::media::is_safe_ip;
 use frankclaw_core::model::{ToolDef, ToolRiskLevel};
 use frankclaw_core::session::SessionStore;
@@ -128,7 +128,7 @@ impl ToolRegistry {
     pub fn validate_names(&self, names: &[String]) -> Result<()> {
         for name in names {
             if !self.tools.contains_key(name) {
-                return ConfigValidationSnafu {
+                return ConfigValidation {
                     msg: format!("unknown tool '{name}'"),
                 }.fail();
             }
@@ -153,7 +153,7 @@ impl ToolRegistry {
         ctx: ToolContext,
     ) -> Result<ToolOutput> {
         if !allowed_tools.iter().any(|allowed| allowed == name) {
-            return AgentRuntimeSnafu {
+            return AgentRuntime {
                 msg: format!("tool '{}' is not allowed for agent '{}'", name, ctx.agent_id),
             }.fail();
         }
@@ -161,13 +161,13 @@ impl ToolRegistry {
         let tool = self
             .tools
             .get(name)
-            .ok_or_else(|| InvalidRequestSnafu {
+            .ok_or_else(|| InvalidRequest {
                 msg: format!("unknown tool '{name}'"),
             }.build())?;
 
         let risk_level = tool.definition().risk_level;
         if !self.policy.is_approved(name, risk_level) {
-            return AgentRuntimeSnafu {
+            return AgentRuntime {
                 msg: format!(
                     "tool '{name}' requires {risk_level} approval. Set FRANKCLAW_TOOL_APPROVAL={risk_level} to enable.",
                 ),
@@ -281,7 +281,7 @@ impl BrowserClient {
     }
 
     fn new(raw_base_url: &str) -> Result<Self> {
-        let mut base_url = Url::parse(raw_base_url).map_err(|err| ConfigValidationSnafu {
+        let mut base_url = Url::parse(raw_base_url).map_err(|err| ConfigValidation {
             msg: format!("invalid FRANKCLAW_BROWSER_DEVTOOLS_URL: {err}"),
         }.build())?;
         if !base_url.path().ends_with('/') {
@@ -294,7 +294,7 @@ impl BrowserClient {
             http: Client::builder()
                 .timeout(std::time::Duration::from_secs(15))
                 .build()
-                .map_err(|err| InternalSnafu {
+                .map_err(|err| Internal {
                     msg: format!("failed to build browser client: {err}"),
                 }.build())?,
             sessions: Mutex::new(HashMap::new()),
@@ -320,7 +320,7 @@ impl BrowserClient {
         if let Some(session_key) = &ctx.session_key {
             return Ok(format!("session:{}", session_key.as_str()));
         }
-        InvalidRequestSnafu {
+        InvalidRequest {
             msg: "browser tool requires session_id or session context",
         }.fail()
     }
@@ -362,7 +362,7 @@ impl BrowserClient {
             {
                 let sessions = self.sessions.lock().await;
                 if self.session_count(&sessions) >= MAX_BROWSER_SESSIONS {
-                    return AgentRuntimeSnafu {
+                    return AgentRuntime {
                         msg: format!(
                             "browser session limit reached ({MAX_BROWSER_SESSIONS}). Close existing sessions first."
                         ),
@@ -403,7 +403,7 @@ impl BrowserClient {
             .await
             .get(session_id)
             .cloned()
-            .ok_or_else(|| InvalidRequestSnafu {
+            .ok_or_else(|| InvalidRequest {
                 msg: format!("browser session '{session_id}' was not opened yet"),
             }.build())?;
         self.snapshot_session(&session).await
@@ -419,13 +419,13 @@ impl BrowserClient {
             .lock()
             .await
             .remove(session_id)
-            .ok_or_else(|| InvalidRequestSnafu {
+            .ok_or_else(|| InvalidRequest {
                 msg: format!("browser session '{session_id}' was not opened yet"),
             }.build())?;
         let endpoint = self
             .base_url
             .join(&format!("json/close/{}", session.target_id))
-            .map_err(|err| InternalSnafu {
+            .map_err(|err| Internal {
                 msg: format!("invalid browser close endpoint: {err}"),
             }.build())?;
         let response = self
@@ -433,11 +433,11 @@ impl BrowserClient {
             .get(endpoint)
             .send()
             .await
-            .map_err(|err| AgentRuntimeSnafu {
+            .map_err(|err| AgentRuntime {
                 msg: format!("failed to close browser target: {err}"),
             }.build())?;
         if !response.status().is_success() {
-            return AgentRuntimeSnafu {
+            return AgentRuntime {
                 msg: format!("browser close failed with HTTP {}", response.status()),
             }.fail();
         }
@@ -451,7 +451,7 @@ impl BrowserClient {
             .await
             .get(session_id)
             .cloned()
-            .ok_or_else(|| InvalidRequestSnafu {
+            .ok_or_else(|| InvalidRequest {
                 msg: format!("browser session '{session_id}' was not opened yet"),
             }.build())?;
         let mut socket = self.connect_page_socket(&session.page_ws_url).await?;
@@ -460,7 +460,7 @@ impl BrowserClient {
             .evaluate_bool(&mut socket, &click_expression(selector))
             .await?;
         if !clicked {
-            return AgentRuntimeSnafu {
+            return AgentRuntime {
                 msg: format!("browser.click could not find selector '{selector}'"),
             }.fail();
         }
@@ -474,7 +474,7 @@ impl BrowserClient {
             .await
             .get(session_id)
             .cloned()
-            .ok_or_else(|| InvalidRequestSnafu {
+            .ok_or_else(|| InvalidRequest {
                 msg: format!("browser session '{session_id}' was not opened yet"),
             }.build())?;
         let mut socket = self.connect_page_socket(&session.page_ws_url).await?;
@@ -483,7 +483,7 @@ impl BrowserClient {
             .evaluate_bool(&mut socket, &type_expression(selector, text))
             .await?;
         if !typed {
-            return AgentRuntimeSnafu {
+            return AgentRuntime {
                 msg: format!("browser.type could not find selector '{selector}'"),
             }.fail();
         }
@@ -498,7 +498,7 @@ impl BrowserClient {
         timeout_ms: u64,
     ) -> Result<BrowserSnapshot> {
         if selector.is_none() && text.is_none() {
-            return InvalidRequestSnafu {
+            return InvalidRequest {
                 msg: "browser.wait requires selector or text",
             }.fail();
         }
@@ -509,7 +509,7 @@ impl BrowserClient {
             .await
             .get(session_id)
             .cloned()
-            .ok_or_else(|| InvalidRequestSnafu {
+            .ok_or_else(|| InvalidRequest {
                 msg: format!("browser session '{session_id}' was not opened yet"),
             }.build())?;
         let mut socket = self.connect_page_socket(&session.page_ws_url).await?;
@@ -527,7 +527,7 @@ impl BrowserClient {
                     .map(|value| format!("selector '{value}'"))
                     .or_else(|| text.map(|value| format!("text '{value}'")))
                     .unwrap_or_else(|| "condition".into());
-                return AgentRuntimeSnafu {
+                return AgentRuntime {
                     msg: format!("browser.wait timed out waiting for {target}"),
                 }.fail();
             }
@@ -543,7 +543,7 @@ impl BrowserClient {
             .await
             .get(session_id)
             .cloned()
-            .ok_or_else(|| InvalidRequestSnafu {
+            .ok_or_else(|| InvalidRequest {
                 msg: format!("browser session '{session_id}' was not opened yet"),
             }.build())?;
         let mut socket = self.connect_page_socket(&session.page_ws_url).await?;
@@ -552,7 +552,7 @@ impl BrowserClient {
             .evaluate_bool(&mut socket, &press_expression(selector, key))
             .await?;
         if !pressed {
-            return AgentRuntimeSnafu {
+            return AgentRuntime {
                 msg: format!("browser.press could not find selector '{selector}'"),
             }.fail();
         }
@@ -560,7 +560,7 @@ impl BrowserClient {
     }
 
     async fn create_target(&self, url: &str) -> Result<DevtoolsTarget> {
-        let mut endpoint = self.base_url.join("json/new").map_err(|err| InternalSnafu {
+        let mut endpoint = self.base_url.join("json/new").map_err(|err| Internal {
             msg: format!("invalid browser endpoint: {err}"),
         }.build())?;
         endpoint.set_query(Some(url));
@@ -569,15 +569,15 @@ impl BrowserClient {
             .put(endpoint)
             .send()
             .await
-            .map_err(|err| AgentRuntimeSnafu {
+            .map_err(|err| AgentRuntime {
                 msg: format!("failed to create browser target: {err}"),
             }.build())?;
         if !response.status().is_success() {
-            return AgentRuntimeSnafu {
+            return AgentRuntime {
                 msg: format!("browser target creation failed with HTTP {}", response.status()),
             }.fail();
         }
-        response.json::<DevtoolsTarget>().await.map_err(|err| AgentRuntimeSnafu {
+        response.json::<DevtoolsTarget>().await.map_err(|err| AgentRuntime {
             msg: format!("invalid browser target response: {err}"),
         }.build())
     }
@@ -631,7 +631,7 @@ impl BrowserClient {
     ) -> Result<tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>> {
         let (socket, _) = connect_async(ws_url)
             .await
-            .map_err(|err| AgentRuntimeSnafu {
+            .map_err(|err| AgentRuntime {
                 msg: format!("failed to connect to browser page socket: {err}"),
             }.build())?;
         Ok(socket)
@@ -715,13 +715,13 @@ impl BrowserClient {
                 .into(),
             ))
             .await
-            .map_err(|err| AgentRuntimeSnafu {
+            .map_err(|err| AgentRuntime {
                 msg: format!("failed to send browser command '{method}': {err}"),
             }.build())?;
 
         let read_response = async {
             while let Some(message) = socket.next().await {
-                let message = message.map_err(|err| AgentRuntimeSnafu {
+                let message = message.map_err(|err| AgentRuntime {
                     msg: format!("browser socket read failed: {err}"),
                 }.build())?;
                 let Message::Text(text) = message else {
@@ -729,7 +729,7 @@ impl BrowserClient {
                 };
                 let frame: serde_json::Value =
                     serde_json::from_str(text.as_ref()).map_err(|err| {
-                        AgentRuntimeSnafu {
+                        AgentRuntime {
                             msg: format!("browser socket sent invalid JSON: {err}"),
                         }.build()
                     })?;
@@ -737,20 +737,20 @@ impl BrowserClient {
                     continue;
                 }
                 if let Some(message) = frame["error"]["message"].as_str() {
-                    return AgentRuntimeSnafu {
+                    return AgentRuntime {
                         msg: format!("browser command '{method}' failed: {message}"),
                     }.fail();
                 }
                 return Ok(frame);
             }
-            AgentRuntimeSnafu {
+            AgentRuntime {
                 msg: format!("browser socket closed while waiting for '{method}'"),
             }.fail()
         };
 
         match tokio::time::timeout(CDP_COMMAND_TIMEOUT, read_response).await {
             Ok(result) => result,
-            Err(_) => AgentRuntimeSnafu {
+            Err(_) => AgentRuntime {
                 msg: format!("browser command '{method}' timed out after {}s", CDP_COMMAND_TIMEOUT.as_secs()),
             }.fail(),
         }
@@ -871,7 +871,7 @@ impl Tool for SessionInspectTool {
             .and_then(|value| value.as_str())
             .map(SessionKey::from_raw)
             .or(ctx.session_key)
-            .ok_or_else(|| InvalidRequestSnafu {
+            .ok_or_else(|| InvalidRequest {
                 msg: "session.inspect requires a session_key",
             }.build())?;
         let limit = args
@@ -914,7 +914,7 @@ impl Tool for BrowserOpenTool {
             .and_then(|value| value.as_str())
             .map(str::trim)
             .filter(|value| !value.is_empty())
-            .ok_or_else(|| InvalidRequestSnafu {
+            .ok_or_else(|| InvalidRequest {
                 msg: "browser.open requires a non-empty url",
             }.build())?;
         let session_id = self
@@ -1014,7 +1014,7 @@ impl Tool for BrowserClickTool {
             .and_then(|value| value.as_str())
             .map(str::trim)
             .filter(|value| !value.is_empty())
-            .ok_or_else(|| InvalidRequestSnafu {
+            .ok_or_else(|| InvalidRequest {
                 msg: "browser.click requires a non-empty selector",
             }.build())?;
         let snapshot = self.client.click(&session_id, selector).await?;
@@ -1050,13 +1050,13 @@ impl Tool for BrowserTypeTool {
             .and_then(|value| value.as_str())
             .map(str::trim)
             .filter(|value| !value.is_empty())
-            .ok_or_else(|| InvalidRequestSnafu {
+            .ok_or_else(|| InvalidRequest {
                 msg: "browser.type requires a non-empty selector",
             }.build())?;
         let text = args
             .get("text")
             .and_then(|value| value.as_str())
-            .ok_or_else(|| InvalidRequestSnafu {
+            .ok_or_else(|| InvalidRequest {
                 msg: "browser.type requires text",
             }.build())?;
         let snapshot = self.client.type_text(&session_id, selector, text).await?;
@@ -1137,7 +1137,7 @@ impl Tool for BrowserPressTool {
             .and_then(|value| value.as_str())
             .map(str::trim)
             .filter(|value| !value.is_empty())
-            .ok_or_else(|| InvalidRequestSnafu {
+            .ok_or_else(|| InvalidRequest {
                 msg: "browser.press requires a non-empty selector",
             }.build())?;
         let key = args
@@ -1145,7 +1145,7 @@ impl Tool for BrowserPressTool {
             .and_then(|value| value.as_str())
             .map(str::trim)
             .filter(|value| !value.is_empty())
-            .ok_or_else(|| InvalidRequestSnafu {
+            .ok_or_else(|| InvalidRequest {
                 msg: "browser.press requires an allowed key",
             }.build())?;
         let snapshot = self.client.press_key(&session_id, selector, key).await?;
@@ -1263,7 +1263,7 @@ fn press_expression(selector: &str, key: &str) -> String {
 fn validate_press_key(key: &str) -> Result<()> {
     match key {
         "Enter" | "Tab" | "Escape" | "ArrowDown" | "ArrowUp" => Ok(()),
-        _ => InvalidRequestSnafu {
+        _ => InvalidRequest {
             msg: format!(
                 "browser.press only allows Enter, Tab, Escape, ArrowDown, and ArrowUp; got '{key}'"
             ),
@@ -1274,34 +1274,34 @@ fn validate_press_key(key: &str) -> Result<()> {
 /// Validate that a browser navigation URL is not targeting private/internal IPs.
 /// Uses the same SSRF blocklist as media fetches.
 async fn validate_navigation_url(raw_url: &str) -> Result<()> {
-    let parsed = Url::parse(raw_url).map_err(|err| InvalidRequestSnafu {
+    let parsed = Url::parse(raw_url).map_err(|err| InvalidRequest {
         msg: format!("invalid browser navigation URL: {err}"),
     }.build())?;
     let scheme = parsed.scheme();
     if scheme != "http" && scheme != "https" {
-        return InvalidRequestSnafu {
+        return InvalidRequest {
             msg: format!("browser navigation only allows http/https URLs, got '{scheme}'"),
         }.fail();
     }
-    let host = parsed.host_str().ok_or_else(|| InvalidRequestSnafu {
+    let host = parsed.host_str().ok_or_else(|| InvalidRequest {
         msg: "browser navigation URL has no host",
     }.build())?;
     let port = parsed.port_or_known_default().unwrap_or(80);
     let lookup = format!("{host}:{port}");
     let addrs: Vec<_> = lookup_host(&lookup)
         .await
-        .map_err(|err| AgentRuntimeSnafu {
+        .map_err(|err| AgentRuntime {
             msg: format!("DNS lookup failed for browser navigation URL '{host}': {err}"),
         }.build())?
         .collect();
     if addrs.is_empty() {
-        return AgentRuntimeSnafu {
+        return AgentRuntime {
             msg: format!("DNS lookup returned no addresses for '{host}'"),
         }.fail();
     }
     for addr in &addrs {
         if !is_safe_ip(&addr.ip()) {
-            return InvalidRequestSnafu {
+            return InvalidRequest {
                 msg: format!(
                     "browser navigation blocked: '{host}' resolves to private/internal IP {}",
                     addr.ip()

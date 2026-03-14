@@ -7,7 +7,7 @@ use tokio_tungstenite::tungstenite::Message;
 use tracing::{info, warn};
 
 use frankclaw_core::channel::{ChannelPlugin, InboundMessage, OutboundMessage, SendResult, ChannelCapabilities, HealthStatus, EditMessageTarget, DeleteMessageTarget, InboundAttachment};
-use frankclaw_core::error::{FrankClawError, Result, ChannelSnafu, RateLimitedSnafu};
+use frankclaw_core::error::{FrankClawError, Result, Channel, RateLimited};
 use frankclaw_core::types::ChannelId;
 
 use crate::inbound_media::infer_inbound_mime_type;
@@ -412,7 +412,7 @@ impl ChannelPlugin for SlackChannel {
                 thread_id: msg.thread_id.clone(),
                 draft_message_id: platform_message_id,
             }),
-            SendResult::RateLimited { retry_after_secs } => RateLimitedSnafu {
+            SendResult::RateLimited { retry_after_secs } => RateLimited {
                 retry_after_secs: retry_after_secs.unwrap_or(1),
             }.fail(),
             SendResult::Failed { reason } => Err(self.channel_err(reason)),
@@ -470,26 +470,26 @@ fn parse_socket_frame(channel_id: ChannelId, frame: Message) -> Result<serde_jso
     let text = match frame {
         Message::Text(text) => text,
         Message::Binary(bytes) => String::from_utf8(bytes.to_vec())
-            .map_err(|e| ChannelSnafu {
+            .map_err(|e| Channel {
                 channel: channel_id.clone(),
                 msg: format!("slack socket mode sent invalid UTF-8: {e}"),
             }.build())?
             .into(),
         Message::Close(_) => {
-            return ChannelSnafu {
+            return Channel {
                 channel: channel_id,
                 msg: "slack socket mode closed",
             }.fail();
         }
         _ => {
-            return ChannelSnafu {
+            return Channel {
                 channel: channel_id,
                 msg: "slack socket mode sent unexpected frame type",
             }.fail();
         }
     };
 
-    serde_json::from_str(text.as_ref()).map_err(|e| ChannelSnafu {
+    serde_json::from_str(text.as_ref()).map_err(|e| Channel {
         channel: channel_id,
         msg: format!("slack socket mode sent invalid JSON: {e}"),
     }.build())
@@ -914,7 +914,7 @@ mod tests {
 
     #[test]
     fn is_fatal_slack_error_detects_invalid_auth() {
-        let err = ChannelSnafu {
+        let err = Channel {
             channel: ChannelId::new("slack"),
             msg: "invalid_auth",
         }.build();
@@ -923,7 +923,7 @@ mod tests {
 
     #[test]
     fn is_fatal_slack_error_detects_token_revoked() {
-        let err = ChannelSnafu {
+        let err = Channel {
             channel: ChannelId::new("slack"),
             msg: "token_revoked",
         }.build();
@@ -932,7 +932,7 @@ mod tests {
 
     #[test]
     fn is_fatal_slack_error_detects_account_inactive() {
-        let err = ChannelSnafu {
+        let err = Channel {
             channel: ChannelId::new("slack"),
             msg: "account_inactive",
         }.build();
@@ -941,7 +941,7 @@ mod tests {
 
     #[test]
     fn is_fatal_slack_error_does_not_match_transient_errors() {
-        let err = ChannelSnafu {
+        let err = Channel {
             channel: ChannelId::new("slack"),
             msg: "slack socket mode closed",
         }.build();

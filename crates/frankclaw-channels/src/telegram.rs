@@ -4,7 +4,7 @@ use secrecy::{ExposeSecret, SecretString};
 use tracing::{info, warn};
 
 use frankclaw_core::channel::{OutboundMessage, SendResult, ChannelPlugin, InboundMessage, InboundAttachment, ChannelCapabilities, HealthStatus, EditMessageTarget, DeleteMessageTarget, OutboundAttachment};
-use frankclaw_core::error::{Result, ChannelSnafu, RateLimitedSnafu};
+use frankclaw_core::error::{Result, Channel, RateLimited};
 use frankclaw_core::types::ChannelId;
 
 use crate::media_text::text_or_attachment_placeholder;
@@ -446,7 +446,7 @@ impl ChannelPlugin for TelegramChannel {
                 thread_id: msg.thread_id.clone(),
                 draft_message_id: platform_message_id,
             }),
-            SendResult::RateLimited { retry_after_secs } => RateLimitedSnafu {
+            SendResult::RateLimited { retry_after_secs } => RateLimited {
                 retry_after_secs: retry_after_secs.unwrap_or(1),
             }.fail(),
             SendResult::Failed { reason } => Err(self.channel_err(reason)),
@@ -562,7 +562,7 @@ fn build_media_send_request(
     let part = reqwest::multipart::Part::bytes(bytes)
         .file_name(filename)
         .mime_str(&attachment.mime_type)
-        .map_err(|e| ChannelSnafu {
+        .map_err(|e| Channel {
             channel: channel.clone(),
             msg: format!("invalid attachment mime type: {e}"),
         }.build())?;
@@ -606,7 +606,7 @@ fn build_media_group_request(
         let part = reqwest::multipart::Part::bytes(attachment_bytes(&channel, attachment)?)
             .file_name(attachment_filename(attachment))
             .mime_str(&attachment.mime_type)
-            .map_err(|e| ChannelSnafu {
+            .map_err(|e| Channel {
                 channel: channel.clone(),
                 msg: format!("invalid attachment mime type: {e}"),
             }.build())?;
@@ -615,7 +615,7 @@ fn build_media_group_request(
 
     form = form.text(
         "media",
-        serde_json::to_string(&media).map_err(|e| ChannelSnafu {
+        serde_json::to_string(&media).map_err(|e| Channel {
             channel: channel.clone(),
             msg: format!("failed to serialize telegram media group: {e}"),
         }.build())?,
@@ -644,7 +644,7 @@ fn build_media_group_items(
     include_parse_mode: bool,
 ) -> Result<Vec<serde_json::Value>> {
     if !(2..=10).contains(&attachments.len()) {
-        return ChannelSnafu {
+        return Channel {
             channel: channel.clone(),
             msg: "telegram media groups require between 2 and 10 attachments",
         }.fail();
@@ -658,7 +658,7 @@ fn build_media_group_items(
         let next_group_kind = telegram_media_group_kind(kind);
         if let Some(existing) = group_kind {
             if existing != next_group_kind {
-                return ChannelSnafu {
+                return Channel {
                     channel: channel.clone(),
                     msg: "telegram media groups must be all photos/videos, all audio, or all documents",
                 }.fail();
@@ -713,7 +713,7 @@ fn build_edit_body(target: &EditMessageTarget, new_text: &str) -> Result<serde_j
     let message_id = target
         .platform_message_id
         .parse::<i64>()
-        .map_err(|_| ChannelSnafu {
+        .map_err(|_| Channel {
             channel: ChannelId::new("telegram"),
             msg: "telegram edit requires a numeric platform message id",
         }.build())?;
@@ -731,7 +731,7 @@ fn build_delete_body(target: &DeleteMessageTarget) -> Result<serde_json::Value> 
     let message_id = target
         .platform_message_id
         .parse::<i64>()
-        .map_err(|_| ChannelSnafu {
+        .map_err(|_| Channel {
             channel: ChannelId::new("telegram"),
             msg: "telegram delete requires a numeric platform message id",
         }.build())?;

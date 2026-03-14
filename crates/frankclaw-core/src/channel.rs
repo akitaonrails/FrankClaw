@@ -171,7 +171,7 @@ pub trait ChannelPlugin: Send + Sync + 'static {
     /// Build a channel error for this adapter.
     #[track_caller]
     fn channel_err(&self, msg: String) -> crate::error::FrankClawError {
-        crate::error::ChannelSnafu {
+        crate::error::Channel {
             channel: self.id(),
             msg,
         }

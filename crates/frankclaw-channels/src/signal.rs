@@ -5,7 +5,7 @@ use reqwest::Client;
 use tracing::{info, warn};
 
 use frankclaw_core::channel::{ChannelPlugin, InboundMessage, ChannelCapabilities, HealthStatus, OutboundMessage, SendResult, InboundAttachment};
-use frankclaw_core::error::{Result, ChannelSnafu};
+use frankclaw_core::error::{Result, Channel};
 use frankclaw_core::types::ChannelId;
 
 use crate::inbound_media::infer_inbound_mime_type;
@@ -528,7 +528,7 @@ fn build_send_attachment_request(
     msg: &OutboundMessage,
     account: Option<&str>,
 ) -> Result<serde_json::Value> {
-    let number = account.ok_or_else(|| ChannelSnafu {
+    let number = account.ok_or_else(|| Channel {
         channel: ChannelId::new("signal"),
         msg: "signal attachment sends require a configured account number",
     }.build())?;
@@ -557,7 +557,7 @@ fn build_send_attachment_request(
             body["recipients"] = serde_json::json!([format!("group.{group_id}")]);
         }
         SignalTarget::Username(username) => {
-            return ChannelSnafu {
+            return Channel {
                 channel: ChannelId::new("signal"),
                 msg: format!("signal attachment sends do not support username target '{username}'"),
             }.fail();

@@ -10,7 +10,7 @@ use tokio_tungstenite::tungstenite::Message;
 use tracing::{info, warn};
 
 use frankclaw_core::channel::{ChannelPlugin, InboundMessage, OutboundMessage, SendResult, ChannelCapabilities, HealthStatus, EditMessageTarget, DeleteMessageTarget, InboundAttachment};
-use frankclaw_core::error::{FrankClawError, Result, ChannelSnafu, RateLimitedSnafu};
+use frankclaw_core::error::{FrankClawError, Result, Channel, RateLimited};
 use frankclaw_core::types::ChannelId;
 
 use crate::inbound_media::infer_inbound_mime_type;
@@ -343,7 +343,7 @@ impl ChannelPlugin for DiscordChannel {
                 thread_id: msg.thread_id.clone(),
                 draft_message_id: platform_message_id,
             }),
-            SendResult::RateLimited { retry_after_secs } => RateLimitedSnafu {
+            SendResult::RateLimited { retry_after_secs } => RateLimited {
                 retry_after_secs: retry_after_secs.unwrap_or(1),
             }.fail(),
             SendResult::Failed { reason } => Err(self.channel_err(reason)),
@@ -409,12 +409,12 @@ async fn next_json_frame(
     >,
 ) -> Result<serde_json::Value> {
     let Some(frame) = ws_rx.next().await else {
-        return ChannelSnafu {
+        return Channel {
             channel: channel_id,
             msg: "discord gateway closed",
         }.fail();
     };
-    let frame = frame.map_err(|e| ChannelSnafu {
+    let frame = frame.map_err(|e| Channel {
         channel: channel_id.clone(),
         msg: format!("discord gateway read failed: {e}"),
     }.build())?;
@@ -424,27 +424,27 @@ async fn next_json_frame(
 fn parse_gateway_message(channel_id: ChannelId, frame: Message) -> Result<serde_json::Value> {
     let text = match frame {
         Message::Text(text) => text,
-        Message::Binary(bytes) => String::from_utf8(bytes.to_vec()).map_err(|e| ChannelSnafu {
+        Message::Binary(bytes) => String::from_utf8(bytes.to_vec()).map_err(|e| Channel {
             channel: channel_id.clone(),
             msg: format!("discord gateway sent invalid UTF-8: {e}"),
         }.build())?.into(),
         Message::Close(close_frame) => {
             let (code, reason) = close_frame
                 .map_or((0u16, String::new()), |cf| (cf.code.into(), cf.reason.to_string()));
-            return ChannelSnafu {
+            return Channel {
                 channel: channel_id,
                 msg: format!("discord gateway closed (code={code}, reason={reason})"),
             }.fail();
         }
         _ => {
-            return ChannelSnafu {
+            return Channel {
                 channel: channel_id,
                 msg: "discord gateway sent unexpected frame type",
             }.fail();
         }
     };
 
-    serde_json::from_str(text.as_ref()).map_err(|e| ChannelSnafu {
+    serde_json::from_str(text.as_ref()).map_err(|e| Channel {
         channel: channel_id,
         msg: format!("discord gateway sent invalid JSON: {e}"),
     }.build())
@@ -532,7 +532,7 @@ fn build_send_form(msg: &OutboundMessage) -> Result<reqwest::multipart::Form> {
         let part = reqwest::multipart::Part::bytes(spec.bytes)
             .file_name(spec.filename)
             .mime_str(&spec.mime_type)
-            .map_err(|e| ChannelSnafu {
+            .map_err(|e| Channel {
                 channel: ChannelId::new("discord"),
                 msg: format!("invalid attachment mime type: {e}"),
             }.build())?;
@@ -972,7 +972,7 @@ mod tests {
 
     #[test]
     fn is_fatal_gateway_error_detects_disallowed_intents() {
-        let err = ChannelSnafu {
+        let err = Channel {
             channel: ChannelId::new("discord"),
             msg: "discord gateway closed (code=4014, reason=Disallowed intents)",
         }.build();
@@ -981,7 +981,7 @@ mod tests {
 
     #[test]
     fn is_fatal_gateway_error_detects_auth_failed() {
-        let err = ChannelSnafu {
+        let err = Channel {
             channel: ChannelId::new("discord"),
             msg: "discord gateway closed (code=4004, reason=Authentication failed)",
         }.build();
@@ -990,7 +990,7 @@ mod tests {
 
     #[test]
     fn is_fatal_gateway_error_does_not_match_retriable_errors() {
-        let err = ChannelSnafu {
+        let err = Channel {
             channel: ChannelId::new("discord"),
             msg: "discord gateway closed (code=4000, reason=Unknown error)",
         }.build();
@@ -999,7 +999,7 @@ mod tests {
 
     #[test]
     fn is_fatal_gateway_error_does_not_match_non_close_errors() {
-        let err = ChannelSnafu {
+        let err = Channel {
             channel: ChannelId::new("discord"),
             msg: "discord gateway HELLO timeout after 30s",
         }.build();
