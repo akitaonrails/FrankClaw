@@ -82,6 +82,7 @@ impl CronService {
     }
 
     /// Start the cron tick loop.
+    #[expect(clippy::unused_async, reason = "async kept for API consistency with other service lifecycle methods")]
     pub async fn start(
         &self,
         job_runner: JobRunner,
@@ -157,14 +158,11 @@ impl CronService {
                             let path = path.clone();
                             tokio::spawn(async move {
                                 let started_at = Utc::now();
-                                let result = match tokio::time::timeout(JOB_TIMEOUT, runner(job.clone())).await {
-                                    Ok(r) => r,
-                                    Err(_) => {
-                                        warn!(job_id = %job.id, timeout_secs = JOB_TIMEOUT.as_secs(), "cron job timed out");
-                                        Err(FrankClawError::AgentRuntime {
-                                            msg: format!("cron job '{}' timed out after {}s", job.id, JOB_TIMEOUT.as_secs()),
-                                        })
-                                    }
+                                let result = if let Ok(r) = tokio::time::timeout(JOB_TIMEOUT, runner(job.clone())).await { r } else {
+                                    warn!(job_id = %job.id, timeout_secs = JOB_TIMEOUT.as_secs(), "cron job timed out");
+                                    Err(FrankClawError::AgentRuntime {
+                                        msg: format!("cron job '{}' timed out after {}s", job.id, JOB_TIMEOUT.as_secs()),
+                                    })
                                 };
                                 let finished_at = Utc::now();
 
@@ -188,7 +186,7 @@ impl CronService {
                             });
                         }
                     }
-                    _ = cancel.cancelled() => {
+                    () = cancel.cancelled() => {
                         info!("cron service stopped");
                         break;
                     }

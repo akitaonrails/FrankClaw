@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use tokio::sync::mpsc;
 use tracing::info;
 
-use frankclaw_core::channel::*;
+use frankclaw_core::channel::{OutboundMessage, ChannelPlugin, ChannelCapabilities, InboundMessage, HealthStatus, SendResult};
 use frankclaw_core::error::Result;
 use frankclaw_core::types::ChannelId;
 
@@ -60,7 +60,7 @@ impl ChannelPlugin for WebChannel {
         }
     }
 
-    fn label(&self) -> &str {
+    fn label(&self) -> &'static str {
         "Web Chat"
     }
 
@@ -102,6 +102,7 @@ fn outbound_queue_key(account_id: &str, recipient_id: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use frankclaw_core::channel::OutboundAttachment;
     use frankclaw_core::types::MediaId;
 
     #[tokio::test]

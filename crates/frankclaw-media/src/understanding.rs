@@ -221,7 +221,7 @@ impl VisionProvider {
 
 #[async_trait]
 impl UnderstandingProvider for VisionProvider {
-    fn id(&self) -> &str {
+    fn id(&self) -> &'static str {
         "vision"
     }
 
@@ -316,7 +316,7 @@ impl WhisperProvider {
 
 #[async_trait]
 impl UnderstandingProvider for WhisperProvider {
-    fn id(&self) -> &str {
+    fn id(&self) -> &'static str {
         "whisper"
     }
 

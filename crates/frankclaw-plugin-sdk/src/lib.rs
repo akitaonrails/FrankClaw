@@ -39,6 +39,7 @@ impl PluginRegistry {
     }
 
     /// Start all registered channels, feeding inbound messages to the provided sender.
+    #[expect(clippy::unused_async, reason = "async kept for API consistency with channel plugin lifecycle")]
     pub async fn start_all_channels(
         &self,
         inbound_tx: mpsc::Sender<InboundMessage>,

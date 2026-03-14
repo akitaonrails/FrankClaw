@@ -81,7 +81,7 @@ impl FrankClawConfig {
                 && provider
                     .api_key_ref
                     .as_deref()
-                    .map_or(true, |value| value.trim().is_empty())
+                    .is_none_or(|value| value.trim().is_empty())
             {
                 return Err(FrankClawError::ConfigValidation {
                     msg: format!(
@@ -367,6 +367,7 @@ impl ChannelConfig {
         }
 
         if let Some(raw) = self.extra.get("max_message_bytes") {
+            #[expect(clippy::cast_possible_truncation, reason = "config values are small positive integers; truncation is not a concern")]
             let value = raw.as_u64().ok_or_else(|| FrankClawError::ConfigValidation {
                 msg: "max_message_bytes must be a positive integer".into(),
             })? as usize;
@@ -556,7 +557,7 @@ impl HooksConfig {
         if self
             .token
             .as_deref()
-            .map_or(true, |value| value.trim().is_empty())
+            .is_none_or(|value| value.trim().is_empty())
         {
             return Err(FrankClawError::ConfigValidation {
                 msg: "hooks.enabled requires a non-empty hooks.token".into(),

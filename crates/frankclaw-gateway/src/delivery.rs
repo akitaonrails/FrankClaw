@@ -10,10 +10,7 @@ use crate::audit::{log_event, log_failure};
 const MAX_OUTBOUND_ATTEMPTS: usize = 3;
 const MAX_RETRY_DELAY_SECS: u64 = 30;
 const PSEUDO_STREAM_MIN_CHARS: usize = 240;
-#[cfg(test)]
-const PSEUDO_STREAM_STEP_DELAY_MS: u64 = 0;
-#[cfg(not(test))]
-const PSEUDO_STREAM_STEP_DELAY_MS: u64 = 75;
+const PSEUDO_STREAM_STEP_DELAY_MS: u64 = if cfg!(test) { 0 } else { 75 };
 
 #[derive(Clone, Debug)]
 pub(crate) struct DeliveryChunkRecord {
@@ -146,6 +143,7 @@ fn hydrate_outbound_attachments(
     Ok(outbound)
 }
 
+#[expect(clippy::too_many_lines, reason = "retry loop with rate-limit handling")]
 async fn send_outbound_chunk(
     channel: Arc<dyn ChannelPlugin>,
     outbound: OutboundMessage,
@@ -537,9 +535,8 @@ fn split_text(text: &str, max_chars: usize) -> Vec<String> {
 
         let mut split_at = 0usize;
         let mut last_whitespace = None;
-        let mut count = 0usize;
 
-        for (idx, ch) in remaining.char_indices() {
+        for (count, (idx, ch)) in remaining.char_indices().enumerate() {
             if count == max_chars {
                 break;
             }
@@ -548,7 +545,6 @@ fn split_text(text: &str, max_chars: usize) -> Vec<String> {
                 last_whitespace = Some(idx);
             }
             split_at = next_idx;
-            count += 1;
         }
 
         let preferred = last_whitespace.filter(|idx| *idx > 0).unwrap_or(split_at);
@@ -654,12 +650,9 @@ async fn sleep_retry(delay_secs: u64) {
     if delay_secs == 0 {
         return;
     }
-    #[cfg(test)]
-    {
-        let _ = delay_secs;
+    if !cfg!(test) {
+        tokio::time::sleep(std::time::Duration::from_secs(delay_secs)).await;
     }
-    #[cfg(not(test))]
-    tokio::time::sleep(std::time::Duration::from_secs(delay_secs)).await;
 }
 
 fn pseudo_stream_steps(text: &str) -> Vec<String> {

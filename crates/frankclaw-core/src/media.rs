@@ -182,9 +182,9 @@ pub fn is_safe_ip(addr: &IpAddr) -> bool {
                 && !ipv4.is_broadcast()   // 255.255.255.255
                 && !ipv4.is_multicast()   // 224.0.0.0/4
                 && !ipv4.is_unspecified() // 0.0.0.0
-                && !is_cgnat_v4(ipv4)     // 100.64.0.0/10
-                && !is_documentation_v4(ipv4)  // 192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24
-                && !is_benchmarking_v4(ipv4)   // 198.18.0.0/15
+                && !is_cgnat_v4(*ipv4)     // 100.64.0.0/10
+                && !is_documentation_v4(*ipv4)  // 192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24
+                && !is_benchmarking_v4(*ipv4)   // 198.18.0.0/15
         }
         IpAddr::V6(ipv6) => {
             !ipv6.is_loopback()       // ::1
@@ -197,13 +197,13 @@ pub fn is_safe_ip(addr: &IpAddr) -> bool {
 }
 
 /// CGNAT range: 100.64.0.0/10
-fn is_cgnat_v4(ip: &std::net::Ipv4Addr) -> bool {
+fn is_cgnat_v4(ip: std::net::Ipv4Addr) -> bool {
     let octets = ip.octets();
     octets[0] == 100 && (octets[1] & 0xC0) == 64
 }
 
 /// Documentation ranges
-fn is_documentation_v4(ip: &std::net::Ipv4Addr) -> bool {
+fn is_documentation_v4(ip: std::net::Ipv4Addr) -> bool {
     let octets = ip.octets();
     (octets[0] == 192 && octets[1] == 0 && octets[2] == 2)       // 192.0.2.0/24
         || (octets[0] == 198 && octets[1] == 51 && octets[2] == 100) // 198.51.100.0/24
@@ -211,18 +211,15 @@ fn is_documentation_v4(ip: &std::net::Ipv4Addr) -> bool {
 }
 
 /// Benchmarking range: 198.18.0.0/15
-fn is_benchmarking_v4(ip: &std::net::Ipv4Addr) -> bool {
+fn is_benchmarking_v4(ip: std::net::Ipv4Addr) -> bool {
     let octets = ip.octets();
     octets[0] == 198 && (octets[1] & 0xFE) == 18
 }
 
 /// Check if an IPv6 address is a mapped private IPv4.
 fn is_private_mapped_v6(ip: &std::net::Ipv6Addr) -> bool {
-    if let Some(ipv4) = ip.to_ipv4_mapped() {
-        !is_safe_ip(&IpAddr::V4(ipv4))
-    } else {
-        false
-    }
+    ip.to_ipv4_mapped()
+        .is_some_and(|ipv4| !is_safe_ip(&IpAddr::V4(ipv4)))
 }
 
 #[cfg(test)]

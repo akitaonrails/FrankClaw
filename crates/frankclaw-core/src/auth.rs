@@ -41,7 +41,7 @@ impl AuthMode {
             Self::Token { token } => {
                 if token
                     .as_ref()
-                    .map_or(true, |token| token.expose_secret().trim().is_empty())
+                    .is_none_or(|token| token.expose_secret().trim().is_empty())
                 {
                     return Err(crate::error::FrankClawError::ConfigValidation {
                         msg: "gateway.auth.mode=token requires a non-empty token".into(),
@@ -69,6 +69,7 @@ impl AuthMode {
     }
 }
 
+#[expect(clippy::ref_option, reason = "serde custom serializer requires &Option<T> signature")]
 fn serialize_optional_secret_string<S>(
     value: &Option<SecretString>,
     serializer: S,

@@ -1,5 +1,6 @@
 use axum::response::Html;
 
+#[expect(clippy::too_many_lines, reason = "inlined HTML template; extracting would not improve clarity")]
 pub async fn index() -> Html<&'static str> {
     Html(
         r#"<!doctype html>

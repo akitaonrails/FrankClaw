@@ -36,7 +36,6 @@ pub async fn handle_ws_connection(
         },
     );
 
-    let _conn_id_display = conn_id;
     info!(%conn_id, ?role, "client connected");
 
     // Subscribe to server broadcasts.
@@ -74,7 +73,7 @@ pub async fn handle_ws_connection(
                     }
                 }
                 // Shutdown signal.
-                _ = outbound_state.shutdown.cancelled() => {
+                () = outbound_state.shutdown.cancelled() => {
                     let _ = ws_tx.send(Message::Close(None)).await;
                     break;
                 }
@@ -133,7 +132,7 @@ pub async fn handle_ws_connection(
 /// Dispatch an RPC method to the appropriate handler.
 async fn dispatch_method(
     state: &Arc<GatewayState>,
-    _conn_id: ConnId,
+    conn_id: ConnId,
     role: frankclaw_core::auth::AuthRole,
     request: RequestFrame,
 ) -> ResponseFrame {
@@ -159,7 +158,7 @@ async fn dispatch_method(
             ResponseFrame::ok(request.id, safe_config)
         }
         Method::ChatSend => {
-            crate::methods::chat_send(state, _conn_id, request).await
+            crate::methods::chat_send(state, conn_id, request).await
         }
         Method::SessionsList => {
             crate::methods::sessions_list(state, request).await

@@ -131,7 +131,24 @@ impl Method {
             | Self::NodesPairReject => AuthRole::Editor,
 
             // Viewer (read-only)
-            _ => AuthRole::Viewer,
+            Self::AgentIdentity
+            | Self::AgentList
+            | Self::ChatHistory
+            | Self::ChannelsStatus
+            | Self::ChannelsList
+            | Self::ConfigGet
+            | Self::ConfigSchema
+            | Self::CronList
+            | Self::SessionsList
+            | Self::SessionsGet
+            | Self::ModelsList
+            | Self::CanvasGet
+            | Self::CanvasExport
+            | Self::LogsTail
+            | Self::LogsQuery
+            | Self::NodesList
+            | Self::NodesPairRequest
+            | Self::HealthProbe => AuthRole::Viewer,
         }
     }
 }

@@ -1,6 +1,6 @@
 use frankclaw_core::channel::InboundAttachment;
 
-pub(crate) fn text_or_attachment_placeholder(
+pub fn text_or_attachment_placeholder(
     text: Option<&str>,
     attachments: &[InboundAttachment],
 ) -> Option<String> {
@@ -19,7 +19,7 @@ pub(crate) fn text_or_attachment_placeholder(
     }
 }
 
-pub(crate) fn text_quote_or_attachment_placeholder(
+pub fn text_quote_or_attachment_placeholder(
     text: Option<&str>,
     quote: Option<&str>,
     attachments: &[InboundAttachment],
@@ -32,7 +32,7 @@ pub(crate) fn text_quote_or_attachment_placeholder(
     })
 }
 
-pub(crate) fn attachment_placeholder(attachments: &[InboundAttachment]) -> String {
+pub fn attachment_placeholder(attachments: &[InboundAttachment]) -> String {
     if attachments.len() > 1 {
         return "<media:attachments>".into();
     }
@@ -50,7 +50,7 @@ pub(crate) fn attachment_placeholder(attachments: &[InboundAttachment]) -> Strin
     }
 }
 
-pub(crate) fn normalize_mime_type(value: &str) -> String {
+pub fn normalize_mime_type(value: &str) -> String {
     value
         .split(';')
         .next()

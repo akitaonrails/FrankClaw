@@ -59,6 +59,7 @@ impl MediaStore {
     /// Attach a file scanning service (e.g., VirusTotal).
     /// When set, all files are scanned before storage, and malicious
     /// files are rejected with `MalwareDetected`.
+    #[must_use]
     pub fn with_scanner(mut self, scanner: Arc<dyn FileScanService>) -> Self {
         self.scanner = Some(scanner);
         self

@@ -113,7 +113,7 @@ static CATALOG: LazyLock<Vec<ModelDef>> = LazyLock::new(|| {
                 cache_write_per_mtok: None,
             },
             context_window: 128_000,
-            max_output_tokens: 16_384,
+            max_output_tokens: 0x4000,
             compat: ModelCompat {
                 supports_tools: true,
                 supports_vision: true,
@@ -135,7 +135,7 @@ static CATALOG: LazyLock<Vec<ModelDef>> = LazyLock::new(|| {
                 cache_write_per_mtok: None,
             },
             context_window: 128_000,
-            max_output_tokens: 16_384,
+            max_output_tokens: 0x4000,
             compat: ModelCompat {
                 supports_tools: true,
                 supports_vision: true,

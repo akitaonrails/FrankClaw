@@ -119,11 +119,7 @@ pub fn scan_for_leaks(content: &str) -> LeakScanResult {
     LeakScanResult {
         matches,
         should_block,
-        redacted_content: if any_redacted {
-            Some(redacted)
-        } else {
-            None
-        },
+        redacted_content: any_redacted.then_some(redacted),
     }
 }
 
@@ -141,6 +137,7 @@ fn mask_secret(secret: &str) -> String {
 
 // ── Pattern definitions ─────────────────────────────────────────────────
 
+#[expect(clippy::too_many_lines, reason = "pattern catalog; each entry is a simple struct literal")]
 fn default_patterns() -> Vec<LeakPattern> {
     vec![
         // ── Critical: Block ──────────────────────────────────────────

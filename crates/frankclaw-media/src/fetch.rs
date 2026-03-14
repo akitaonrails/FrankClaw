@@ -125,7 +125,7 @@ impl SafeFetcher {
     }
 }
 
-/// Validate a URL for SSRF safety: check scheme and resolve DNS to ensure
+/// Validate a URL for SSRF protection: check scheme and resolve DNS to ensure
 /// all resolved IPs are in public ranges.
 async fn validate_url_ssrf(url: &Url) -> Result<()> {
     match url.scheme() {

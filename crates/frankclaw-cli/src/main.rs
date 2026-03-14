@@ -286,6 +286,7 @@ enum Command {
 }
 
 #[tokio::main]
+#[expect(clippy::too_many_lines, reason = "CLI entrypoint dispatching all subcommands")]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
@@ -343,8 +344,7 @@ async fn main() -> anyhow::Result<()> {
                 .config
                 .clone()
                 .unwrap_or_else(|| state_dir.join("frankclaw.json"));
-            let config = load_config(Some(&config_path), &state_dir)?;
-            let mut config = config;
+            let mut config = load_config(Some(&config_path), &state_dir)?;
             if let Some(port) = port {
                 config.gateway.port = port;
             }
@@ -949,6 +949,8 @@ async fn main() -> anyhow::Result<()> {
                 }
             } else if !report.remote_ready {
                 anyhow::bail!("{}", t!("cmd.remote.not_remote"));
+            } else {
+                // Remote-ready, non-public: proceed with remote setup.
             }
         }
 
@@ -1109,6 +1111,7 @@ fn collect_browser_tool_warnings(
     )
 }
 
+#[expect(clippy::needless_pass_by_value, reason = "ToolPolicy is small and consumed for field inspection")]
 fn collect_browser_tool_warnings_with_policy(
     config: &frankclaw_core::config::FrankClawConfig,
     browser_endpoint: Option<&str>,
@@ -1146,7 +1149,7 @@ fn collect_browser_tool_warnings_with_policy(
         warnings.push(t!("browser.mutations_blocked").to_string());
     }
     match parsed.host_str() {
-        Some("127.0.0.1") | Some("localhost") => {}
+        Some("127.0.0.1" | "localhost") => {}
         Some(other) => warnings.push(t!("browser.non_loopback", host = other).to_string()),
         None => warnings.push(t!("browser.no_host").to_string()),
     }
@@ -1179,6 +1182,7 @@ fn browser_runtime_status(
     )
 }
 
+#[expect(clippy::needless_pass_by_value, reason = "ToolPolicy is small and forwarded to inner function")]
 fn browser_runtime_status_with_policy(
     config: &frankclaw_core::config::FrankClawConfig,
     browser_endpoint: Option<&str>,
@@ -1186,13 +1190,12 @@ fn browser_runtime_status_with_policy(
 ) -> Option<String> {
     let warnings = collect_browser_tool_warnings_with_policy(config, browser_endpoint, policy.clone());
     if warnings.is_empty() {
-        if config
+        config
             .agents
             .agents
             .values()
             .flat_map(|agent| agent.tools.iter())
-            .any(|tool| tool.starts_with("browser."))
-        {
+            .any(|tool| tool.starts_with("browser.")).then(|| {
             let has_mutating = config
                 .agents
                 .agents
@@ -1208,14 +1211,12 @@ fn browser_runtime_status_with_policy(
             } else {
                 t!("cmd.status.read_only").to_string()
             };
-            Some(format!(
+            format!(
                 "{} at {}",
                 mutation_state,
                 browser_endpoint.unwrap_or("http://127.0.0.1:9222/")
-            ))
-        } else {
-            None
-        }
+            )
+        })
     } else {
         Some(warnings.join(" | "))
     }
@@ -1507,9 +1508,9 @@ fn restrict_file_permissions(path: &std::path::Path) {
 // ---------------------------------------------------------------------------
 
 fn read_pid_file(pid_path: &std::path::Path) -> Option<u32> {
-    std::fs::read_to_string(pid_path)
-        .ok()
-        .and_then(|content| content.trim().parse::<u32>().ok())
+    let content = std::fs::read_to_string(pid_path)
+        .ok()?;
+    content.trim().parse::<u32>().ok()
 }
 
 fn is_process_alive(pid: u32) -> bool {
@@ -1603,6 +1604,8 @@ fn prompt_yes_no(question: &str, default_yes: bool) -> anyhow::Result<bool> {
     Ok(matches!(input.to_lowercase().as_str(), "y" | "yes"))
 }
 
+#[expect(clippy::too_many_lines, reason = "interactive setup wizard with many prompts")]
+#[expect(clippy::unreachable, reason = "menu indices are bounded by prompt_menu; unreachable is the correct contract")]
 fn run_setup(
     config_path_override: Option<&std::path::Path>,
     state_dir: &std::path::Path,
@@ -1872,6 +1875,7 @@ fn print_section(title: &str, checks: &[CheckResult]) {
     }
 }
 
+#[expect(clippy::too_many_lines, reason = "diagnostic checks across many subsystems")]
 async fn run_doctor(
     config_path: Option<&std::path::Path>,
     state_dir: &std::path::Path,
@@ -2211,6 +2215,7 @@ struct Finding {
     remediation: String,
 }
 
+#[expect(clippy::unnecessary_wraps, reason = "Result return kept for consistency with other CLI subcommand functions")]
 fn run_security_audit(
     config: &frankclaw_core::config::FrankClawConfig,
     config_path: &std::path::Path,
@@ -2256,7 +2261,7 @@ fn run_security_audit(
     }
 
     // --- Print report ---
-    findings.sort_by(|a, b| b.severity.cmp(&a.severity));
+    findings.sort_by_key(|f| std::cmp::Reverse(f.severity));
 
     println!("{}", t!("audit.title"));
     println!("{}", t!("audit.separator"));
@@ -2313,20 +2318,19 @@ fn audit_auth(
                 remediation: t!("audit.auth.disabled_fix").to_string(),
             });
         }
-        frankclaw_core::auth::AuthMode::Token { token } => {
-            if let Some(token) = token {
-                use secrecy::ExposeSecret;
-                let token_str = token.expose_secret();
-                if token_str.len() < 16 {
-                    findings.push(Finding {
-                        severity: Severity::Medium,
-                        category: "auth",
-                        message: t!("audit.auth.token_short").to_string(),
-                        remediation: t!("audit.auth.token_short_fix").to_string(),
-                    });
-                }
+        frankclaw_core::auth::AuthMode::Token { token: Some(token) } => {
+            use secrecy::ExposeSecret;
+            let token_str = token.expose_secret();
+            if token_str.len() < 16 {
+                findings.push(Finding {
+                    severity: Severity::Medium,
+                    category: "auth",
+                    message: t!("audit.auth.token_short").to_string(),
+                    remediation: t!("audit.auth.token_short_fix").to_string(),
+                });
             }
         }
+        frankclaw_core::auth::AuthMode::Token { token: None } => {}
         frankclaw_core::auth::AuthMode::Password { hash } => {
             if hash.trim().is_empty() {
                 findings.push(Finding {
@@ -2459,6 +2463,8 @@ fn audit_encryption(
             message: t!("audit.encrypt.no_master_key").to_string(),
             remediation: t!("audit.encrypt.no_master_key_fix").to_string(),
         });
+    } else {
+        // Encryption enabled and master key present — no finding.
     }
 
     if !config.security.encrypt_media {
@@ -2509,17 +2515,14 @@ fn audit_channel_policies(
             continue;
         }
 
-        let policy = match channel.security_policy() {
-            Ok(p) => p,
-            Err(_) => {
-                findings.push(Finding {
-                    severity: Severity::High,
-                    category: "channels",
-                    message: t!("audit.channels.invalid_policy", channel = channel_id).to_string(),
-                    remediation: t!("audit.channels.invalid_policy_fix").to_string(),
-                });
-                continue;
-            }
+        let Ok(policy) = channel.security_policy() else {
+            findings.push(Finding {
+                severity: Severity::High,
+                category: "channels",
+                message: t!("audit.channels.invalid_policy", channel = channel_id).to_string(),
+                remediation: t!("audit.channels.invalid_policy_fix").to_string(),
+            });
+            continue;
         };
 
         if group_surface_needs_guard(channel_id.as_str())
@@ -2552,6 +2555,7 @@ fn audit_channel_policies(
     }
 }
 
+#[expect(clippy::too_many_lines, reason = "tool policy audit with many check categories")]
 fn audit_tool_policies(
     config: &frankclaw_core::config::FrankClawConfig,
     findings: &mut Vec<Finding>,

@@ -96,8 +96,12 @@ fn is_allowed_url(raw: &str) -> bool {
     // For hostnames, block obviously dangerous ones.
     // Full DNS resolution + IP check happens at fetch time via SafeFetcher.
     if host == "localhost"
-        || host.ends_with(".local")
-        || host.ends_with(".internal")
+        || std::path::Path::new(host)
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("local"))
+        || std::path::Path::new(host)
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("internal"))
         || host == "metadata.google.internal"
     {
         return false;

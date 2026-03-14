@@ -3,7 +3,7 @@ use reqwest::Client;
 use secrecy::{ExposeSecret, SecretString};
 use tracing::{info, warn};
 
-use frankclaw_core::channel::*;
+use frankclaw_core::channel::{OutboundMessage, SendResult, ChannelPlugin, InboundMessage, InboundAttachment, ChannelCapabilities, HealthStatus, EditMessageTarget, DeleteMessageTarget, OutboundAttachment};
 use frankclaw_core::error::{FrankClawError, Result};
 use frankclaw_core::types::ChannelId;
 
@@ -239,7 +239,7 @@ impl TelegramChannel {
         let topic_id = msg["message_thread_id"].as_i64();
         let is_group = matches!(
             msg["chat"]["type"].as_str(),
-            Some("group") | Some("supergroup")
+            Some("group" | "supergroup")
         );
         let message_id = msg["message_id"].as_i64()?.to_string();
 
@@ -258,7 +258,7 @@ impl TelegramChannel {
             is_group,
             is_mention: text
                 .as_deref()
-                .is_some_and(|t| t.contains("@")),
+                .is_some_and(|t| t.contains('@')),
             text,
             attachments,
             platform_message_id: Some(message_id),
@@ -358,7 +358,7 @@ impl ChannelPlugin for TelegramChannel {
         }
     }
 
-    fn label(&self) -> &str {
+    fn label(&self) -> &'static str {
         "Telegram"
     }
 

@@ -91,7 +91,7 @@ pub fn load_from_config(config: &FrankClawConfig) -> Result<ChannelSet> {
             LoadedChannel::Standard(channel) => {
                 channels.insert(channel_id.clone(), channel);
             }
-        };
+        }
     }
 
     Ok(ChannelSet::from_parts(
@@ -107,6 +107,7 @@ enum LoadedChannel {
     WhatsApp(Arc<whatsapp::WhatsAppChannel>),
 }
 
+#[expect(clippy::too_many_lines, reason = "channel construction dispatch; splitting would scatter related config parsing")]
 fn build_channel(channel_id: &ChannelId, channel_config: &ChannelConfig) -> Result<LoadedChannel> {
     match channel_id.as_str() {
         "web" => Ok(LoadedChannel::Web(Arc::new(web::WebChannel::new()))),
@@ -317,7 +318,7 @@ fn build_channel(channel_id: &ChannelId, channel_config: &ChannelConfig) -> Resu
     }
 }
 
-fn first_account<'a>(channel_id: &ChannelId, channel_config: &'a ChannelConfig) -> Result<&'a Value> {
+fn first_account<'cfg>(channel_id: &ChannelId, channel_config: &'cfg ChannelConfig) -> Result<&'cfg Value> {
     channel_config.accounts.first().ok_or_else(|| {
         FrankClawError::ConfigValidation {
             msg: format!("{channel_id} channel requires at least one account"),

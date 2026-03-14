@@ -58,6 +58,7 @@ impl HookEvent {
     }
 
     /// Add a context value.
+    #[must_use]
     pub fn with(mut self, key: impl Into<String>, value: impl Serialize) -> Self {
         if let Ok(v) = serde_json::to_value(value) {
             self.context.insert(key.into(), v);
@@ -132,48 +133,21 @@ impl HookRegistry {
     /// Handlers for both the general type and specific type:action pair are run.
     /// Execution is fire-and-forget: errors are logged but don't propagate.
     pub async fn fire(&self, event: HookEvent) {
-        let handlers = self.handlers.read().await;
-
         let general_key = event.event_type.to_string();
         let specific_key = event.specific_key();
 
-        let general = handlers.get(&general_key);
-        let specific = handlers.get(&specific_key);
+        let tasks = self.collect_handlers(&general_key, &specific_key, &event).await;
 
-        let total = general.map_or(0, std::vec::Vec::len)
-            + specific.map_or(0, std::vec::Vec::len);
-
-        if total == 0 {
+        if tasks.is_empty() {
             return;
         }
 
-        // Collect all handlers to run.
-        let mut tasks = Vec::with_capacity(total);
-
-        if let Some(entries) = general {
-            for entry in entries {
-                let event = event.clone();
-                let handler = entry.handler.clone();
-                let name = entry.name.clone();
-                tasks.push((name, handler, event));
-            }
-        }
-
-        if let Some(entries) = specific {
-            for entry in entries {
-                let event = event.clone();
-                let handler = entry.handler.clone();
-                let name = entry.name.clone();
-                tasks.push((name, handler, event));
-            }
-        }
-
         // Run all handlers concurrently (fire-and-forget).
-        for (name, handler, event) in tasks {
-            let event_key = event.specific_key();
+        for (name, handler, fired_event) in tasks {
+            let event_key = fired_event.specific_key();
             tokio::spawn(async move {
                 let result =
-                    tokio::time::timeout(std::time::Duration::from_secs(30), handler(event)).await;
+                    tokio::time::timeout(std::time::Duration::from_secs(30), handler(fired_event)).await;
                 if result.is_err() {
                     warn!(hook = %name, event = %event_key, "hook timed out after 30s");
                 }
@@ -196,6 +170,30 @@ impl HookRegistry {
         let key = event_type.to_string();
         let mut handlers = self.handlers.write().await;
         handlers.remove(&key);
+    }
+
+    async fn collect_handlers(
+        &self,
+        general_key: &str,
+        specific_key: &str,
+        event: &HookEvent,
+    ) -> Vec<(String, HandlerFn, HookEvent)> {
+        let handlers = self.handlers.read().await;
+        let keys = [general_key, specific_key];
+        let collected: Vec<_> = keys
+            .iter()
+            .filter_map(|key| handlers.get(*key))
+            .flatten()
+            .map(|entry| {
+                (
+                    entry.name.clone(),
+                    HandlerFn::clone(&entry.handler),
+                    event.clone(),
+                )
+            })
+            .collect();
+        drop(handlers);
+        collected
     }
 
     async fn register<F, Fut>(&self, key: String, name: String, handler: F)

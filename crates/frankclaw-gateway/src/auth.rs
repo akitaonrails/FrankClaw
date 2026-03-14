@@ -194,7 +194,7 @@ pub fn assess_exposure(config: &frankclaw_core::config::FrankClawConfig) -> Resu
 
     let summary = match (&surface, &config.gateway.auth) {
         (ExposureSurface::Loopback, _) => "local-only gateway".into(),
-        (_, AuthMode::Token { .. }) | (_, AuthMode::Password { .. }) => {
+        (_, AuthMode::Token { .. } | AuthMode::Password { .. }) => {
             "network-exposed gateway with direct auth".into()
         }
         (_, AuthMode::TrustedProxy { .. }) => "reverse-proxy mediated gateway".into(),

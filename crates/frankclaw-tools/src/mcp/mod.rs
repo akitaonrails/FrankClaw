@@ -26,7 +26,7 @@ use frankclaw_core::error::{FrankClawError, Result};
 use frankclaw_core::model::{ToolDef, ToolRiskLevel};
 
 use crate::{Tool, ToolContext};
-use protocol::*;
+use protocol::{McpTool, McpRequest, McpResponse, ListToolsResult, CallToolResult, ContentBlock};
 
 /// Configuration for an MCP server.
 #[derive(Debug, Clone)]
@@ -64,6 +64,7 @@ pub struct McpClient {
     tools_cache: RwLock<Option<Vec<McpTool>>>,
 }
 
+#[expect(clippy::large_enum_variant, reason = "both variants are heap-heavy; boxing would add indirection without meaningful savings")]
 enum McpTransportInner {
     Http {
         url: String,
@@ -100,6 +101,7 @@ impl McpClient {
     }
 
     /// Create a new stdio-based MCP client by spawning a process.
+    #[expect(clippy::unused_async, reason = "async kept for API consistency with from_config which may need async in future transports")]
     pub async fn new_stdio(
         name: String,
         command: &str,
@@ -168,6 +170,7 @@ impl McpClient {
     }
 
     /// Send a JSON-RPC request and receive the response.
+    #[expect(clippy::too_many_lines, reason = "two transport branches with error handling for each")]
     async fn send(&self, request: &McpRequest) -> Result<McpResponse> {
         match &self.transport {
             McpTransportInner::Http {
@@ -236,7 +239,7 @@ impl McpClient {
                         .map_err(|e| FrankClawError::Internal {
                             msg: format!("MCP stdin write failed: {e}"),
                         })?;
-                    stdin_guard.flush().await.ok();
+                    let _ = stdin_guard.flush().await;
                     // Return a dummy response for notifications.
                     return Ok(McpResponse {
                         jsonrpc: "2.0".into(),
@@ -259,7 +262,7 @@ impl McpClient {
                     .map_err(|e| FrankClawError::Internal {
                         msg: format!("MCP stdin write failed: {e}"),
                     })?;
-                stdin_guard.flush().await.ok();
+                let _ = stdin_guard.flush().await;
                 drop(stdin_guard);
 
                 // Read response line with timeout.
@@ -318,7 +321,7 @@ impl McpClient {
         debug!(server = %self.name, "MCP server initialized");
 
         // Send the initialized notification (fire-and-forget).
-        self.send(&McpRequest::initialized_notification()).await.ok();
+        let _ = self.send(&McpRequest::initialized_notification()).await;
 
         *guard = true;
         Ok(())
@@ -546,6 +549,7 @@ pub async fn load_mcp_tools(configs: &[McpServerConfig]) -> Vec<Arc<dyn Tool>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use protocol::McpToolAnnotations;
 
     #[test]
     fn strip_nulls_removes_top_level() {

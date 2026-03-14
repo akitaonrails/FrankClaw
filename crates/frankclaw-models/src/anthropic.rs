@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use tracing::debug;
 
 use frankclaw_core::error::{FrankClawError, Result};
-use frankclaw_core::model::*;
+use frankclaw_core::model::{ModelProvider, CompletionRequest, StreamDelta, CompletionResponse, ModelDef, ModelApi, InputModality, ModelCost, ModelCompat, ToolCallResponse, Usage, FinishReason};
 use frankclaw_core::types::Role;
 
 use crate::sse::SseDecoder;
@@ -276,6 +276,7 @@ fn build_request_body(request: &CompletionRequest) -> serde_json::Value {
     body
 }
 
+#[expect(clippy::unnecessary_wraps, reason = "Result return kept for consistency with other provider parse functions")]
 fn parse_completion_response(data: &serde_json::Value) -> Result<CompletionResponse> {
     let mut content = String::new();
     let mut tool_calls = Vec::new();
@@ -494,7 +495,7 @@ fn parse_usage(data: &serde_json::Value) -> Usage {
 
 fn parse_finish_reason(reason: Option<&str>) -> FinishReason {
     match reason {
-        Some("end_turn") | Some("stop_sequence") => FinishReason::Stop,
+        Some("end_turn" | "stop_sequence") => FinishReason::Stop,
         Some("max_tokens") => FinishReason::MaxTokens,
         Some("tool_use") => FinishReason::ToolUse,
         _ => FinishReason::Stop,
@@ -503,7 +504,7 @@ fn parse_finish_reason(reason: Option<&str>) -> FinishReason {
 
 /// Classify HTTP errors from model providers into actionable error messages.
 /// Detects context overflow, billing issues, rate limits, and auth failures.
-pub(crate) fn classify_provider_error(
+pub fn classify_provider_error(
     status: reqwest::StatusCode,
     body: &str,
 ) -> FrankClawError {
@@ -554,6 +555,7 @@ fn is_context_overflow(body_lower: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use frankclaw_core::model::CompletionMessage;
     use frankclaw_core::types::Role;
 
     #[test]

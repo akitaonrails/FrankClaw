@@ -257,8 +257,8 @@ impl SubagentRegistry {
                 })?;
             record.state = notice.state.clone();
             record.ended_at = Some(Utc::now());
-            record.result_text = notice.result_text.clone();
-            record.error = notice.error.clone();
+            record.result_text.clone_from(&notice.result_text);
+            record.error.clone_from(&notice.error);
         }
 
         // Notify the parent via completion channel if one is registered.
@@ -331,7 +331,7 @@ impl SubagentRegistry {
             ) {
                 record
                     .ended_at
-                    .map_or(true, |t| t > cutoff)
+                    .is_none_or(|t| t > cutoff)
             } else {
                 true // Keep active runs.
             }
@@ -353,6 +353,8 @@ impl SubagentRegistry {
 /// its role and constraints.
 pub fn build_subagent_context(record: &RunRecord, max_depth: u32) -> String {
     use crate::prompts;
+    use crate::sanitize;
+    const MAX_TASK_LEN: usize = 2000;
 
     let mut parts = Vec::new();
 
@@ -365,8 +367,6 @@ pub fn build_subagent_context(record: &RunRecord, max_depth: u32) -> String {
 
     // Truncate and sanitize task/label to prevent memory abuse and prompt
     // injection — these could originate from LLM-generated spawn requests.
-    use crate::sanitize;
-    const MAX_TASK_LEN: usize = 2000;
     if let Some(ref label) = record.label {
         let safe_label = sanitize::sanitize_for_prompt(label);
         let safe_label = if safe_label.len() > MAX_TASK_LEN { &safe_label[..MAX_TASK_LEN] } else { &safe_label };

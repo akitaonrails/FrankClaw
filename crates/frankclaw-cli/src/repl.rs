@@ -43,7 +43,10 @@ pub struct ReplConfig {
 /// Reads lines from stdin using rustyline, sends each to the runtime, and
 /// streams the response to stdout. Returns when the user types /quit, /exit,
 /// Ctrl-D, or Ctrl-C.
+#[expect(clippy::too_many_lines, reason = "REPL event loop with input handling and streaming output")]
 pub async fn run_repl(runtime: Arc<Runtime>, config: ReplConfig) -> anyhow::Result<()> {
+    use std::io::Write;
+
     let editor_config = Config::builder()
         .edit_mode(EditMode::Emacs)
         .auto_add_history(true)
@@ -184,7 +187,6 @@ pub async fn run_repl(runtime: Arc<Runtime>, config: ReplConfig) -> anyhow::Resu
 
         // Print streaming output.
         print!("\nassistant> ");
-        use std::io::Write;
         let _ = std::io::stdout().flush();
 
         let mut got_text = false;

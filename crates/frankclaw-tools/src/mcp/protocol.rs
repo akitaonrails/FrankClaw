@@ -21,7 +21,6 @@ pub struct McpRequest {
 /// JSON-RPC 2.0 response.
 #[derive(Debug, Clone, Deserialize)]
 pub struct McpResponse {
-    #[allow(dead_code)]
     pub jsonrpc: String,
     #[serde(deserialize_with = "deserialize_flexible_id")]
     pub id: Option<u64>,
@@ -134,6 +133,7 @@ impl McpRequest {
         }
     }
 
+    #[expect(clippy::needless_pass_by_value, reason = "value is moved directly into JSON serialization")]
     pub fn call_tool(id: u64, name: &str, arguments: serde_json::Value) -> Self {
         Self {
             jsonrpc: "2.0".into(),

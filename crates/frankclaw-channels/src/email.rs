@@ -9,7 +9,7 @@ use secrecy::{ExposeSecret, SecretString};
 use tokio::sync::Mutex;
 use tracing::{info, warn};
 
-use frankclaw_core::channel::*;
+use frankclaw_core::channel::{ChannelPlugin, InboundMessage, ChannelCapabilities, HealthStatus, OutboundMessage, SendResult};
 use frankclaw_core::error::Result;
 use frankclaw_core::types::ChannelId;
 
@@ -23,7 +23,7 @@ const DEFAULT_SMTP_PORT: u16 = 587;
 const DEFAULT_POLL_INTERVAL_SECS: u64 = 30;
 
 /// Maximum email body size to process (1 MB).
-const MAX_EMAIL_BODY_BYTES: usize = 1_048_576;
+const MAX_EMAIL_BODY_BYTES: usize = 0x0010_0000;
 
 /// Email channel adapter using IMAP for inbound and SMTP for outbound.
 pub struct EmailChannel {
@@ -42,7 +42,7 @@ pub struct EmailChannel {
 }
 
 impl EmailChannel {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments, reason = "email channel configuration requires many distinct parameters")]
     pub fn new(
         imap_server: String,
         imap_port: u16,
@@ -126,11 +126,11 @@ impl EmailChannel {
         info!(server = %self.imap_server, port = self.imap_port, "email IMAP polling started");
         loop {
             tokio::select! {
-                _ = cancel.cancelled() => {
+                () = cancel.cancelled() => {
                     info!("email IMAP polling stopped");
                     return;
                 }
-                _ = tokio::time::sleep(self.poll_interval) => {
+                () = tokio::time::sleep(self.poll_interval) => {
                     if let Err(e) = self.poll_once(&inbound_tx).await {
                         warn!(error = %e, "email IMAP poll failed");
                     }
@@ -143,6 +143,8 @@ impl EmailChannel {
         &self,
         inbound_tx: &tokio::sync::mpsc::Sender<InboundMessage>,
     ) -> Result<()> {
+        use futures_util::StreamExt;
+
         let mut session = self.connect_imap().await?;
 
         session.select("INBOX").await.map_err(|e| self.channel_err(format!("IMAP select INBOX failed: {e}")))?;
@@ -160,7 +162,6 @@ impl EmailChannel {
             .collect::<Vec<_>>()
             .join(",");
 
-        use futures_util::StreamExt;
         let mut fetch_stream = session.fetch(&seq_set, "RFC822").await.map_err(|e| self.channel_err(format!("IMAP fetch failed: {e}")))?;
 
         let mut processed_seqs = Vec::new();
@@ -173,10 +174,7 @@ impl EmailChannel {
                 }
             };
 
-            let body = match fetch.body() {
-                Some(b) => b,
-                None => continue,
-            };
+            let Some(body) = fetch.body() else { continue };
 
             if body.len() > MAX_EMAIL_BODY_BYTES {
                 warn!(size = body.len(), "email body exceeds size limit, skipping");
@@ -321,7 +319,7 @@ impl ChannelPlugin for EmailChannel {
         }
     }
 
-    fn label(&self) -> &str {
+    fn label(&self) -> &'static str {
         "Email"
     }
 

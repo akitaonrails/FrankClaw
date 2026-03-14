@@ -535,6 +535,7 @@ fn web_inbound_text_or_placeholder(
 }
 
 #[derive(Debug, serde::Deserialize)]
+#[expect(clippy::struct_field_names, reason = "field names match the external API query parameter names (hub.mode, hub.challenge, hub.verify_token)")]
 struct WhatsAppVerifyQuery {
     #[serde(rename = "hub.mode")]
     hub_mode: Option<String>,
@@ -741,6 +742,7 @@ async fn pairing_approve_handler(
     }
 }
 
+#[expect(clippy::too_many_lines, reason = "webhook dispatch with channel-specific validation")]
 async fn webhook_handler(
     State(state): State<AppState>,
     Path(mapping_id): Path<String>,
@@ -892,7 +894,7 @@ fn resolve_bind_addr(mode: &BindMode, port: u16) -> String {
 
 async fn shutdown_signal(token: tokio_util::sync::CancellationToken) {
     tokio::select! {
-        _ = token.cancelled() => {}
+        () = token.cancelled() => {}
         _ = tokio::signal::ctrl_c() => {
             info!("received ctrl-c, initiating graceful shutdown");
             token.cancel();
@@ -900,6 +902,7 @@ async fn shutdown_signal(token: tokio_util::sync::CancellationToken) {
     }
 }
 
+#[expect(clippy::result_large_err, reason = "axum::Response must be returned as-is for HTTP error responses")]
 fn require_http_auth(
     state: &AppState,
     addr: SocketAddr,
@@ -991,7 +994,7 @@ fn start_session_maintenance(state: Arc<GatewayState>) {
                         }
                     }
                 }
-                _ = state.shutdown.cancelled() => break,
+                () = state.shutdown.cancelled() => break,
             }
         }
     });
@@ -1062,6 +1065,7 @@ struct InboundProcessResult {
     session_key: frankclaw_core::types::SessionKey,
 }
 
+#[expect(clippy::too_many_lines, reason = "inbound message processing pipeline with streaming and delivery")]
 async fn process_inbound_message_with_target(
     state: Arc<GatewayState>,
     inbound: InboundMessage,
@@ -1269,6 +1273,8 @@ async fn process_inbound_message_with_target(
             &delivery,
         )
         .await?;
+    } else {
+        // stream_handle was None and no streaming channel — delivery handled elsewhere.
     }
 
     let event = frankclaw_core::protocol::Frame::Event(
@@ -1321,7 +1327,7 @@ fn start_config_watcher(state: Arc<GatewayState>, config_path: Option<PathBuf>) 
         let mut last_stamp = config_file_stamp(&config_path);
         loop {
             tokio::select! {
-                _ = shutdown.cancelled() => break,
+                () = shutdown.cancelled() => break,
                 _ = interval.tick() => {}
             }
 

@@ -396,6 +396,8 @@ impl SessionStore for SqliteSessionStore {
         let encryption_key = self.encryption_key;
 
         tokio::task::spawn_blocking(move || {
+            type RowTuple = (i64, String, Vec<u8>, Option<String>, String);
+
             let (sql, seq_val) = match before_seq {
                 Some(seq) => (
                     "SELECT seq, role, content, metadata, timestamp
@@ -418,8 +420,6 @@ impl SessionStore for SqliteSessionStore {
             let mut stmt = conn
                 .prepare_cached(sql)
                 .map_err(|e| FrankClawError::SessionStorage { msg: e.to_string() })?;
-
-            type RowTuple = (i64, String, Vec<u8>, Option<String>, String);
 
             let extract_row = |row: &rusqlite::Row<'_>| -> rusqlite::Result<RowTuple> {
                 Ok((
@@ -490,7 +490,7 @@ impl SessionStore for SqliteSessionStore {
         let max_sessions = config.max_sessions_per_agent;
 
         tokio::task::spawn_blocking(move || {
-            let cutoff = Utc::now() - chrono::Duration::days(max_age_days as i64);
+            let cutoff = Utc::now() - chrono::Duration::days(i64::from(max_age_days));
             let cutoff_str = cutoff.to_rfc3339();
 
             // Delete sessions older than max_age_days.

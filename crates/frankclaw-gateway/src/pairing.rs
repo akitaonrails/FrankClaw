@@ -64,6 +64,7 @@ impl PairingStore {
             .is_some_and(|approved| approved.contains(sender_id))
     }
 
+    #[expect(clippy::unwrap_in_result, reason = "mutex poisoning is unrecoverable; propagating the error would not help callers")]
     pub fn ensure_pending(
         &self,
         channel: &str,
@@ -106,6 +107,7 @@ impl PairingStore {
             .collect()
     }
 
+    #[expect(clippy::unwrap_in_result, reason = "mutex poisoning is unrecoverable; propagating the error would not help callers")]
     pub fn approve(
         &self,
         channel: Option<&str>,

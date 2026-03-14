@@ -4,14 +4,14 @@ use frankclaw_core::media::safe_extension_for_mime;
 use frankclaw_core::types::ChannelId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum AttachmentKind {
+pub enum AttachmentKind {
     Image,
     Audio,
     Video,
     Document,
 }
 
-pub(crate) fn attachment_kind(mime_type: &str) -> AttachmentKind {
+pub fn attachment_kind(mime_type: &str) -> AttachmentKind {
     let normalized = mime_type.trim().to_ascii_lowercase();
     if normalized.starts_with("image/") {
         AttachmentKind::Image
@@ -24,10 +24,10 @@ pub(crate) fn attachment_kind(mime_type: &str) -> AttachmentKind {
     }
 }
 
-pub(crate) fn require_single_attachment<'a>(
+pub fn require_single_attachment<'att>(
     channel: &ChannelId,
-    attachments: &'a [OutboundAttachment],
-) -> Result<&'a OutboundAttachment> {
+    attachments: &'att [OutboundAttachment],
+) -> Result<&'att OutboundAttachment> {
     match attachments {
         [attachment] => Ok(attachment),
         [] => Err(FrankClawError::Channel {
@@ -41,7 +41,7 @@ pub(crate) fn require_single_attachment<'a>(
     }
 }
 
-pub(crate) fn attachment_filename(attachment: &OutboundAttachment) -> String {
+pub fn attachment_filename(attachment: &OutboundAttachment) -> String {
     attachment
         .filename
         .clone()
@@ -49,7 +49,7 @@ pub(crate) fn attachment_filename(attachment: &OutboundAttachment) -> String {
         .unwrap_or_else(|| default_filename(&attachment.mime_type))
 }
 
-pub(crate) fn attachment_bytes(
+pub fn attachment_bytes(
     channel: &ChannelId,
     attachment: &OutboundAttachment,
 ) -> Result<Vec<u8>> {

@@ -51,9 +51,8 @@ impl VirusTotalScanner {
     /// Try to create a scanner from the `VIRUSTOTAL_API_KEY` env var.
     /// Returns `Ok(None)` if the variable is not set or empty.
     pub fn from_env() -> Result<Option<Self>> {
-        let key = match std::env::var("VIRUSTOTAL_API_KEY") {
-            Ok(k) => k,
-            Err(_) => return Ok(None),
+        let Ok(key) = std::env::var("VIRUSTOTAL_API_KEY") else {
+            return Ok(None);
         };
         let trimmed = key.trim().to_string();
         if trimmed.is_empty() {

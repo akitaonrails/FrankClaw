@@ -122,7 +122,7 @@ impl ToolRegistry {
     }
 
     pub fn register(&mut self, tool: Arc<dyn Tool>) {
-        self.tools.insert(tool.definition().name.clone(), tool);
+        self.tools.insert(tool.definition().name, tool);
     }
 
     pub fn validate_names(&self, names: &[String]) -> Result<()> {
@@ -302,6 +302,7 @@ impl BrowserClient {
         })
     }
 
+    #[expect(clippy::unused_self, reason = "method on BrowserClient for consistency with other session management methods")]
     fn session_count(&self, sessions: &HashMap<String, BrowserSession>) -> usize {
         sessions.len()
     }
@@ -311,6 +312,7 @@ impl BrowserClient {
         self.sessions.lock().await.remove(session_id);
     }
 
+    #[expect(clippy::unused_self, reason = "method on BrowserClient for consistency with other session management methods")]
     fn resolve_session_id(&self, requested: Option<&str>, ctx: &ToolContext) -> Result<String> {
         if let Some(session_id) = requested.map(str::trim).filter(|value| !value.is_empty()) {
             return Ok(session_id.to_string());
@@ -327,54 +329,21 @@ impl BrowserClient {
         validate_navigation_url(url).await?;
 
         let existing = { self.sessions.lock().await.get(&session_id).cloned() };
-        let session = match existing {
-            Some(mut session) => {
-                match self.navigate_target(&session, url).await {
-                    Ok(()) => {
-                        session.current_url = url.to_string();
-                        session.last_updated_at = Utc::now();
-                        self.sessions
-                            .lock()
-                            .await
-                            .insert(session_id.clone(), session.clone());
-                        session
-                    }
-                    Err(_) => {
-                        // Existing session's target is dead — clean up and create fresh.
-                        self.remove_dead_session(&session_id).await;
-                        let target = self.create_target(url).await?;
-                        let now = Utc::now();
-                        let fresh = BrowserSession {
-                            session_id: session_id.clone(),
-                            target_id: target.id,
-                            page_ws_url: target.web_socket_debugger_url,
-                            current_url: target.url,
-                            title: None,
-                            last_updated_at: now,
-                        };
-                        self.sessions
-                            .lock()
-                            .await
-                            .insert(session_id.clone(), fresh.clone());
-                        fresh
-                    }
-                }
-            }
-            None => {
-                // Enforce concurrent session limit.
-                {
-                    let sessions = self.sessions.lock().await;
-                    if self.session_count(&sessions) >= MAX_BROWSER_SESSIONS {
-                        return Err(FrankClawError::AgentRuntime {
-                            msg: format!(
-                                "browser session limit reached ({MAX_BROWSER_SESSIONS}). Close existing sessions first."
-                            ),
-                        });
-                    }
-                }
+        let session = if let Some(mut session) = existing {
+            if matches!(self.navigate_target(&session, url).await, Ok(())) {
+                session.current_url = url.to_string();
+                session.last_updated_at = Utc::now();
+                self.sessions
+                    .lock()
+                    .await
+                    .insert(session_id.clone(), session.clone());
+                session
+            } else {
+                // Existing session's target is dead — clean up and create fresh.
+                self.remove_dead_session(&session_id).await;
                 let target = self.create_target(url).await?;
                 let now = Utc::now();
-                let session = BrowserSession {
+                let fresh = BrowserSession {
                     session_id: session_id.clone(),
                     target_id: target.id,
                     page_ws_url: target.web_socket_debugger_url,
@@ -385,16 +354,43 @@ impl BrowserClient {
                 self.sessions
                     .lock()
                     .await
-                    .insert(session_id.clone(), session.clone());
-                session
+                    .insert(session_id.clone(), fresh.clone());
+                fresh
             }
+        } else {
+            // Enforce concurrent session limit.
+            {
+                let sessions = self.sessions.lock().await;
+                if self.session_count(&sessions) >= MAX_BROWSER_SESSIONS {
+                    return Err(FrankClawError::AgentRuntime {
+                        msg: format!(
+                            "browser session limit reached ({MAX_BROWSER_SESSIONS}). Close existing sessions first."
+                        ),
+                    });
+                }
+            }
+            let target = self.create_target(url).await?;
+            let now = Utc::now();
+            let session = BrowserSession {
+                session_id: session_id.clone(),
+                target_id: target.id,
+                page_ws_url: target.web_socket_debugger_url,
+                current_url: target.url,
+                title: None,
+                last_updated_at: now,
+            };
+            self.sessions
+                .lock()
+                .await
+                .insert(session_id.clone(), session.clone());
+            session
         };
 
         let snapshot = self.snapshot_session(&session).await?;
         let mut sessions = self.sessions.lock().await;
         if let Some(entry) = sessions.get_mut(&session_id) {
-            entry.title = snapshot.title.clone();
-            entry.current_url = snapshot.url.clone();
+            entry.title.clone_from(&snapshot.title);
+            entry.current_url.clone_from(&snapshot.url);
             entry.last_updated_at = snapshot.captured_at;
         }
         Ok(snapshot)
@@ -1217,6 +1213,7 @@ impl Tool for BrowserCloseTool {
     }
 }
 
+#[expect(clippy::needless_pass_by_value, reason = "snapshot is consumed to build the JSON result")]
 fn snapshot_result(snapshot: BrowserSnapshot, include_html: bool, max_chars: usize) -> serde_json::Value {
     let mut value = serde_json::json!({
         "session_id": snapshot.session_id,

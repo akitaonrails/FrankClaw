@@ -34,10 +34,10 @@ pub enum Tier {
 impl Tier {
     pub fn from_score(score: u32) -> Self {
         match score {
-            0..=15 => Tier::Flash,
-            16..=40 => Tier::Standard,
-            41..=65 => Tier::Pro,
-            _ => Tier::Frontier,
+            0..=15 => Self::Flash,
+            16..=40 => Self::Standard,
+            41..=65 => Self::Pro,
+            _ => Self::Frontier,
         }
     }
 }
@@ -56,9 +56,9 @@ pub enum TaskComplexity {
 impl From<Tier> for TaskComplexity {
     fn from(tier: Tier) -> Self {
         match tier {
-            Tier::Flash | Tier::Standard => TaskComplexity::Simple,
-            Tier::Pro => TaskComplexity::Moderate,
-            Tier::Frontier => TaskComplexity::Complex,
+            Tier::Flash | Tier::Standard => Self::Simple,
+            Tier::Pro => Self::Moderate,
+            Tier::Frontier => Self::Complex,
         }
     }
 }
@@ -240,7 +240,7 @@ static DEFAULT_OVERRIDES: LazyLock<Vec<PatternOverride>> = LazyLock::new(|| {
         // Flash tier: greetings and acknowledgments
         PatternOverride {
             regex: Regex::new(
-                r"(?i)^(hi|hello|hey|thanks|ok|sure|yes|no|yep|nope|cool|nice|great|got it)$",
+                "(?i)^(hi|hello|hey|thanks|ok|sure|yes|no|yep|nope|cool|nice|great|got it)$",
             )
             .expect("greeting pattern is valid"),
             tier: Tier::Flash,
@@ -255,23 +255,23 @@ static DEFAULT_OVERRIDES: LazyLock<Vec<PatternOverride>> = LazyLock::new(|| {
         },
         // Frontier tier: security audits
         PatternOverride {
-            regex: Regex::new(r"(?i)security.*(audit|review|scan)")
+            regex: Regex::new("(?i)security.*(audit|review|scan)")
                 .expect("security audit pattern is valid"),
             tier: Tier::Frontier,
         },
         PatternOverride {
-            regex: Regex::new(r"(?i)vulnerabilit(y|ies).*(review|scan|check|audit)")
+            regex: Regex::new("(?i)vulnerabilit(y|ies).*(review|scan|check|audit)")
                 .expect("vulnerability pattern is valid"),
             tier: Tier::Frontier,
         },
         // Pro tier: production deployments
         PatternOverride {
-            regex: Regex::new(r"(?i)deploy.*(mainnet|production)")
+            regex: Regex::new("(?i)deploy.*(mainnet|production)")
                 .expect("deploy pattern is valid"),
             tier: Tier::Pro,
         },
         PatternOverride {
-            regex: Regex::new(r"(?i)production.*(deploy|release|push)")
+            regex: Regex::new("(?i)production.*(deploy|release|push)")
                 .expect("production pattern is valid"),
             tier: Tier::Pro,
         },
@@ -314,6 +314,7 @@ pub fn score_complexity_with_config(prompt: &str, config: &ScorerConfig) -> Scor
     score_complexity_internal(prompt, &config.weights, &domain_regex)
 }
 
+#[expect(clippy::too_many_lines, reason = "13-dimension scorer; splitting would scatter related scoring logic")]
 fn score_complexity_internal(
     prompt: &str,
     weights: &ScorerWeights,

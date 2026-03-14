@@ -38,27 +38,15 @@ pub enum JobState {
 
 impl JobState {
     /// Check whether a transition from this state to `target` is valid.
-    pub fn can_transition_to(self, target: JobState) -> bool {
+    pub fn can_transition_to(self, target: Self) -> bool {
         matches!(
             (self, target),
             // From Pending
-            (JobState::Pending, JobState::InProgress)
-                | (JobState::Pending, JobState::Cancelled)
-                // From InProgress
-                | (JobState::InProgress, JobState::Completed)
-                | (JobState::InProgress, JobState::Failed)
-                | (JobState::InProgress, JobState::Stuck)
-                | (JobState::InProgress, JobState::Cancelled)
-                // From Completed
-                | (JobState::Completed, JobState::Submitted)
-                | (JobState::Completed, JobState::Failed)
-                // From Submitted
-                | (JobState::Submitted, JobState::Accepted)
-                | (JobState::Submitted, JobState::Failed)
-                // From Stuck (recovery path)
-                | (JobState::Stuck, JobState::InProgress)
-                | (JobState::Stuck, JobState::Failed)
-                | (JobState::Stuck, JobState::Cancelled)
+            (Self::Pending | Self::Stuck, Self::InProgress) |
+(Self::Pending | Self::InProgress | Self::Stuck, Self::Cancelled) |
+(Self::InProgress, Self::Completed | Self::Failed | Self::Stuck) |
+(Self::Completed, Self::Submitted | Self::Failed) |
+(Self::Submitted, Self::Accepted | Self::Failed) | (Self::Stuck, Self::Failed)
         )
     }
 
@@ -66,7 +54,7 @@ impl JobState {
     pub fn is_terminal(self) -> bool {
         matches!(
             self,
-            JobState::Accepted | JobState::Failed | JobState::Cancelled
+            Self::Accepted | Self::Failed | Self::Cancelled
         )
     }
 }
@@ -74,14 +62,14 @@ impl JobState {
 impl std::fmt::Display for JobState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            JobState::Pending => write!(f, "pending"),
-            JobState::InProgress => write!(f, "in_progress"),
-            JobState::Completed => write!(f, "completed"),
-            JobState::Submitted => write!(f, "submitted"),
-            JobState::Accepted => write!(f, "accepted"),
-            JobState::Failed => write!(f, "failed"),
-            JobState::Stuck => write!(f, "stuck"),
-            JobState::Cancelled => write!(f, "cancelled"),
+            Self::Pending => write!(f, "pending"),
+            Self::InProgress => write!(f, "in_progress"),
+            Self::Completed => write!(f, "completed"),
+            Self::Submitted => write!(f, "submitted"),
+            Self::Accepted => write!(f, "accepted"),
+            Self::Failed => write!(f, "failed"),
+            Self::Stuck => write!(f, "stuck"),
+            Self::Cancelled => write!(f, "cancelled"),
         }
     }
 }

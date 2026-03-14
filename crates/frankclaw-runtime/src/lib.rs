@@ -121,13 +121,7 @@ impl Runtime {
         let channel_ids = config
             .channels
             .iter()
-            .filter_map(|(channel_id, channel)| {
-                if channel.enabled {
-                    Some(channel_id.clone())
-                } else {
-                    None
-                }
-            })
+            .filter(|&(_, channel)| channel.enabled).map(|(channel_id, _)| channel_id.clone())
             .collect();
         let tools = ToolRegistry::with_builtins();
         for (agent_id, agent) in &config.agents.agents {
@@ -208,6 +202,7 @@ impl Runtime {
         )
     }
 
+    #[expect(clippy::too_many_lines, reason = "orchestration function; splitting would scatter the chat lifecycle")]
     pub async fn chat(&self, request: ChatRequest) -> Result<ChatResponse> {
         if request.message.trim().is_empty() {
             return Err(FrankClawError::InvalidRequest {
@@ -966,6 +961,7 @@ impl Runtime {
             })
     }
 
+    #[expect(clippy::unused_self, reason = "method on Runtime for consistency; may use self fields in future")]
     fn resolve_session_key(
         &self,
         agent_id: &AgentId,
@@ -1223,12 +1219,12 @@ async fn fetch_image_attachments(
         };
 
         match fetcher.fetch(&url).await {
-            Ok(fetched) => {
-                let b64 = base64::engine::general_purpose::STANDARD.encode(&fetched.bytes);
+            Ok(fetch_result) => {
+                let b64 = base64::engine::general_purpose::STANDARD.encode(&fetch_result.bytes);
                 // Use the fetched content-type if it's an image, otherwise fall back
                 // to the attachment's declared MIME type.
-                let mime = if fetched.content_type.starts_with("image/") {
-                    fetched.content_type
+                let mime = if fetch_result.content_type.starts_with("image/") {
+                    fetch_result.content_type
                 } else {
                     attachment.mime_type.clone()
                 };

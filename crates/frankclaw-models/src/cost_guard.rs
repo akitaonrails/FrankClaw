@@ -147,7 +147,7 @@ impl CostGuard {
         let (input_rate, output_rate) =
             costs::model_cost(model).unwrap_or_else(costs::default_cost);
 
-        let cost = input_rate * f64::from(input_tokens) + output_rate * f64::from(output_tokens);
+        let cost = input_rate.mul_add(f64::from(input_tokens), output_rate * f64::from(output_tokens));
 
         // Update daily cost (reset if new day)
         {
@@ -206,10 +206,10 @@ impl CostGuard {
     pub async fn daily_spend(&self) -> f64 {
         let daily = self.daily_cost.lock().await;
         let today = chrono::Utc::now().date_naive();
-        if today != daily.reset_date {
-            0.0
-        } else {
+        if today == daily.reset_date {
             daily.total_usd
+        } else {
+            0.0
         }
     }
 

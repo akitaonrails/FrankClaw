@@ -126,6 +126,7 @@ pub async fn sessions_reset(
 }
 
 /// Handle `chat.send` method.
+#[expect(clippy::too_many_lines, reason = "request validation and orchestration in one handler")]
 pub async fn chat_send(
     state: &Arc<GatewayState>,
     conn_id: ConnId,
@@ -305,9 +306,8 @@ pub async fn webhooks_test(
         Some(mapping_id) if !mapping_id.trim().is_empty() => mapping_id,
         _ => return ResponseFrame::err(request.id, 400, "mapping_id is required"),
     };
-    let payload = match request.params.get("payload") {
-        Some(payload) => payload,
-        None => return ResponseFrame::err(request.id, 400, "payload is required"),
+    let Some(payload) = request.params.get("payload") else {
+        return ResponseFrame::err(request.id, 400, "payload is required");
     };
 
     let config = state.current_config();

@@ -5,7 +5,7 @@ use secrecy::{ExposeSecret, SecretString};
 use tracing::debug;
 
 use frankclaw_core::error::{FrankClawError, Result};
-use frankclaw_core::model::*;
+use frankclaw_core::model::{ModelProvider, CompletionRequest, StreamDelta, CompletionResponse, ModelDef, ModelApi, InputModality, ModelCost, ModelCompat};
 
 use crate::openai_compat::{self, StreamState};
 use crate::sse::SseDecoder;

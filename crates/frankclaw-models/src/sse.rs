@@ -1,11 +1,11 @@
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct SseEvent {
+pub struct SseEvent {
     pub(crate) event: Option<String>,
     pub(crate) data: String,
 }
 
 #[derive(Debug, Default)]
-pub(crate) struct SseDecoder {
+pub struct SseDecoder {
     buffer: String,
     event: Option<String>,
     data_lines: Vec<String>,

@@ -59,7 +59,8 @@ impl Tunnel {
 
     /// Get the public URL of this tunnel.
     pub fn public_url(&self) -> Option<String> {
-        self.public_url.read().ok().and_then(|g| g.clone())
+        let g = self.public_url.read().ok()?;
+        g.clone()
     }
 
     /// Provider name.
@@ -69,7 +70,8 @@ impl Tunnel {
 
     /// Stop the tunnel and kill the process.
     pub async fn stop(&self) {
-        if let Some(mut child) = self.child.lock().await.take() {
+        let child = self.child.lock().await.take();
+        if let Some(mut child) = child {
             let _ = child.kill().await;
             info!(tunnel = %self.name, "tunnel stopped");
         }
@@ -131,7 +133,7 @@ async fn start_cloudflare(token: &str, host: &str, port: u16) -> Result<Tunnel> 
 
     info!(tunnel = "cloudflare", url = %url, "tunnel started");
 
-    let public_url = Arc::new(RwLock::new(Some(url.clone())));
+    let public_url = Arc::new(RwLock::new(Some(url)));
     let child_handle = Arc::new(Mutex::new(Some(child)));
 
     Ok(Tunnel {
@@ -197,7 +199,7 @@ async fn start_ngrok(
 
     info!(tunnel = "ngrok", url = %url, "tunnel started");
 
-    let public_url = Arc::new(RwLock::new(Some(url.clone())));
+    let public_url = Arc::new(RwLock::new(Some(url)));
     let child_handle = Arc::new(Mutex::new(Some(child)));
 
     Ok(Tunnel {
@@ -217,6 +219,7 @@ async fn start_custom(
     host: &str,
     port: u16,
 ) -> Result<Tunnel> {
+    #[expect(clippy::literal_string_with_formatting_args, reason = "template placeholders for user-defined tunnel commands, not format! args")]
     let expanded = command
         .replace("{host}", host)
         .replace("{port}", &port.to_string());
@@ -269,7 +272,7 @@ async fn start_custom(
 
     info!(tunnel = "custom", url = %url, "tunnel started");
 
-    let public_url = Arc::new(RwLock::new(Some(url.clone())));
+    let public_url = Arc::new(RwLock::new(Some(url)));
     let child_handle = Arc::new(Mutex::new(Some(child)));
 
     Ok(Tunnel {

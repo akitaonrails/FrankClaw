@@ -6,7 +6,7 @@ use tokio::sync::Mutex;
 use tokio_tungstenite::tungstenite::Message;
 use tracing::{info, warn};
 
-use frankclaw_core::channel::*;
+use frankclaw_core::channel::{ChannelPlugin, InboundMessage, OutboundMessage, SendResult, ChannelCapabilities, HealthStatus, EditMessageTarget, DeleteMessageTarget, InboundAttachment};
 use frankclaw_core::error::{FrankClawError, Result};
 use frankclaw_core::types::ChannelId;
 
@@ -238,7 +238,7 @@ impl SlackChannel {
             .post(format!("{SLACK_API_BASE}/files.completeUploadExternal"))
             .header("authorization", self.bot_auth_header())
             .json(&build_complete_upload_request(
-                files,
+                &files,
                 channel_id,
                 thread_ts,
                 text,
@@ -299,7 +299,7 @@ impl ChannelPlugin for SlackChannel {
         }
     }
 
-    fn label(&self) -> &str {
+    fn label(&self) -> &'static str {
         "Slack"
     }
 
@@ -575,7 +575,7 @@ fn build_upload_ticket_request(filename: &str, length: usize) -> serde_json::Val
 }
 
 fn build_complete_upload_request(
-    files: Vec<serde_json::Value>,
+    files: &[serde_json::Value],
     channel_id: &str,
     thread_ts: Option<&str>,
     initial_comment: &str,
@@ -832,7 +832,7 @@ mod tests {
     #[test]
     fn build_complete_upload_request_uses_thread_and_comment() {
         let body = build_complete_upload_request(
-            vec![serde_json::json!({
+            &[serde_json::json!({
                 "id": "F123",
                 "title": "report.pdf",
             })],
@@ -853,7 +853,7 @@ mod tests {
     #[test]
     fn build_complete_upload_request_supports_multiple_files() {
         let body = build_complete_upload_request(
-            vec![
+            &[
                 serde_json::json!({
                     "id": "F123",
                     "title": "report.pdf",

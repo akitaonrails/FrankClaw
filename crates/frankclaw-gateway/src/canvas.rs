@@ -61,7 +61,7 @@ pub enum CanvasExportFormat {
 impl CanvasExportFormat {
     pub fn parse(value: Option<&str>) -> Self {
         match value.map(str::trim).filter(|value| !value.is_empty()) {
-            Some("markdown") | Some("md") => Self::Markdown,
+            Some("markdown" | "md") => Self::Markdown,
             _ => Self::Json,
         }
     }

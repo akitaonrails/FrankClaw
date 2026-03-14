@@ -4,7 +4,7 @@ use futures_util::StreamExt;
 use reqwest::Client;
 use tracing::{info, warn};
 
-use frankclaw_core::channel::*;
+use frankclaw_core::channel::{ChannelPlugin, InboundMessage, ChannelCapabilities, HealthStatus, OutboundMessage, SendResult, InboundAttachment};
 use frankclaw_core::error::{FrankClawError, Result};
 use frankclaw_core::types::ChannelId;
 
@@ -25,6 +25,7 @@ pub struct SignalChannel {
 }
 
 impl SignalChannel {
+    #[expect(clippy::needless_pass_by_value, reason = "owned String consumed into struct fields")]
     pub fn new(base_url: String, account: Option<String>) -> Result<Self> {
         let client = crate::build_channel_http_client()?;
 
@@ -106,7 +107,7 @@ impl ChannelPlugin for SignalChannel {
         }
     }
 
-    fn label(&self) -> &str {
+    fn label(&self) -> &'static str {
         "Signal"
     }
 
@@ -145,7 +146,7 @@ impl ChannelPlugin for SignalChannel {
 
     async fn send(&self, msg: OutboundMessage) -> Result<SendResult> {
         let (endpoint, body) = if msg.attachments.is_empty() {
-            (self.endpoint(SIGNAL_API_PATH_RPC), build_send_request(&msg, self.account.as_deref())?)
+            (self.endpoint(SIGNAL_API_PATH_RPC), build_send_request(&msg, self.account.as_deref()))
         } else {
             (self.endpoint(SIGNAL_API_PATH_SEND), build_send_attachment_request(&msg, self.account.as_deref())?)
         };
@@ -376,7 +377,10 @@ fn parse_receive_event(
 
     let data_message = envelope
         .data_message
-        .or_else(|| envelope.edit_message.and_then(|edit| edit.data_message))?;
+        .or_else(|| {
+            let edit = envelope.edit_message?;
+            edit.data_message
+        })?;
     if data_message.reaction.is_some()
         && data_message
             .message
@@ -490,7 +494,7 @@ fn detect_group_mention(mentions: Option<&[SignalMention]>, configured_account: 
     })
 }
 
-fn build_send_request(msg: &OutboundMessage, account: Option<&str>) -> Result<serde_json::Value> {
+fn build_send_request(msg: &OutboundMessage, account: Option<&str>) -> serde_json::Value {
     let text = normalize_outbound_text(&msg.text, OutboundTextFlavor::Plain);
     let mut params = serde_json::json!({
         "message": text,
@@ -512,12 +516,12 @@ fn build_send_request(msg: &OutboundMessage, account: Option<&str>) -> Result<se
         }
     }
 
-    Ok(serde_json::json!({
+    serde_json::json!({
         "jsonrpc": "2.0",
         "method": "send",
         "params": params,
         "id": uuid::Uuid::new_v4().to_string(),
-    }))
+    })
 }
 
 fn build_send_attachment_request(
@@ -684,6 +688,7 @@ fn timestamp_millis(value: i64) -> Option<chrono::DateTime<chrono::Utc>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use frankclaw_core::channel::OutboundAttachment;
 
     fn fixture(name: &str) -> serde_json::Value {
         match name {
@@ -802,8 +807,7 @@ mod tests {
                 reply_to: None,
             },
             Some("+15551234567"),
-        )
-        .expect("send request should build");
+        );
 
         assert_eq!(body["method"], serde_json::json!("send"));
         assert_eq!(body["params"]["groupId"], serde_json::json!("group-42"));
@@ -824,8 +828,7 @@ mod tests {
                 reply_to: None,
             },
             Some("+15551234567"),
-        )
-        .expect("send request should build");
+        );
 
         assert_eq!(body["params"]["message"], serde_json::json!("hello"));
     }

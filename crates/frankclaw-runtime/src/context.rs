@@ -62,7 +62,7 @@ pub fn available_input_budget(model: &ModelDef, system_prompt: Option<&str>) -> 
 
     let raw_budget = total.saturating_sub(reserved_output).saturating_sub(overhead);
     // Apply safety margin
-    (raw_budget as f64 / SAFETY_MARGIN) as u32
+    (f64::from(raw_budget) / SAFETY_MARGIN) as u32
 }
 
 /// Optimize a message list to fit within the model's context window.
@@ -75,7 +75,7 @@ pub fn available_input_budget(model: &ModelDef, system_prompt: Option<&str>) -> 
 /// This is a "sliding window with summary marker" approach — simpler than
 /// LLM-based summarization but effective and zero-latency.
 pub fn optimize_context(
-    messages: Vec<CompletionMessage>,
+    mut messages: Vec<CompletionMessage>,
     model: &ModelDef,
     system_prompt: Option<&str>,
 ) -> ContextWindow {
@@ -84,7 +84,6 @@ pub fn optimize_context(
     // Always repair orphaned tool messages before sending to the API.
     // This prevents errors like "messages with role 'tool' must be a response
     // to a preceding message with 'tool_calls'" from OpenAI.
-    let mut messages = messages;
     repair_tool_pairing(&mut messages);
     // Merge consecutive same-role messages to satisfy providers requiring
     // strict alternation (Anthropic, Gemini).

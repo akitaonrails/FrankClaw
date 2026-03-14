@@ -157,6 +157,7 @@ impl SystemEvent {
     }
 
     /// Set the payload.
+    #[must_use]
     pub fn with_payload(mut self, payload: serde_json::Value) -> Self {
         self.payload = payload;
         self

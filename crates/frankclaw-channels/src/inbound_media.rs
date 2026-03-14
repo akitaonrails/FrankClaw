@@ -1,6 +1,6 @@
 use frankclaw_core::media::infer_mime_from_name;
 
-pub(crate) fn infer_inbound_mime_type(
+pub fn infer_inbound_mime_type(
     explicit: Option<&str>,
     filename: Option<&str>,
     url: Option<&str>,

@@ -57,7 +57,7 @@ pub enum CommandCategory {
 pub struct CommandDef {
     /// Primary command name (e.g., "help").
     pub name: &'static str,
-    /// Aliases (e.g., ["h"]).
+    /// Aliases (e.g., `["h"]`).
     pub aliases: &'static [&'static str],
     /// Short description for help output.
     pub description: &'static str,
@@ -177,14 +177,10 @@ pub fn detect_command(message: &str) -> Option<ParsedCommand> {
         def.name == cmd_clean || def.aliases.contains(&cmd_clean)
     });
 
-    if is_known {
-        Some(ParsedCommand {
+    is_known.then(|| ParsedCommand {
             name: resolve_alias(cmd_clean).to_string(),
             args: args.to_string(),
         })
-    } else {
-        None
-    }
 }
 
 /// Resolve command aliases to the canonical command name.

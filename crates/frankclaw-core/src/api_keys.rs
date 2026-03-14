@@ -51,12 +51,12 @@ impl KeyStats {
     }
 
     fn is_available(&self, now: Instant) -> bool {
-        self.cooldown_until.map_or(true, |until| now >= until)
+        self.cooldown_until.is_none_or(|until| now >= until)
     }
 
     fn cooldown_remaining(&self, now: Instant) -> Option<Duration> {
-        self.cooldown_until
-            .and_then(|until| until.checked_duration_since(now))
+        let until = self.cooldown_until?;
+        until.checked_duration_since(now)
     }
 }
 
@@ -70,6 +70,8 @@ pub struct KeyRotator {
 
 impl KeyRotator {
     /// Create a rotator with a set of API keys.
+    ///
+    /// # Panics
     ///
     /// Panics if `keys` is empty.
     pub fn new(keys: Vec<SecretString>) -> Self {
@@ -167,12 +169,16 @@ impl KeyRotator {
 fn compute_cooldown(consecutive_failures: u32, reason: FailureReason) -> Duration {
     let base = match reason {
         FailureReason::AuthError | FailureReason::Billing => Duration::from_secs(300), // 5 min
-        _ => BASE_COOLDOWN,
+        FailureReason::RateLimit
+        | FailureReason::Overloaded
+        | FailureReason::Timeout
+        | FailureReason::Unknown => BASE_COOLDOWN,
     };
 
     // Exponential: base * 5^(failures-1), capped at MAX_COOLDOWN.
     let exponent = consecutive_failures.saturating_sub(1).min(5);
     let multiplier = 5u64.pow(exponent);
+    #[expect(clippy::cast_possible_truncation, reason = "multiplier is at most 5^5 = 3125, which fits in u32")]
     let cooldown = base.saturating_mul(multiplier as u32);
 
     cooldown.min(MAX_COOLDOWN)
@@ -204,7 +210,8 @@ impl ProviderKeyManager {
 
     /// Select a key for the given provider.
     pub fn select(&mut self, provider: &str) -> Option<&SecretString> {
-        self.rotators.get_mut(provider).and_then(|r| r.select())
+        let r = self.rotators.get_mut(provider)?;
+        r.select()
     }
 
     /// Mark the most recently used key for a provider as successful.

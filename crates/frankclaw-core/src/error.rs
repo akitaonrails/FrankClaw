@@ -133,7 +133,19 @@ impl FrankClawError {
             Self::MalwareDetected { .. } => 403,
             Self::ConfigValidation { .. } => 422,
             Self::SenderBlocked { .. } => 403,
-            _ => 500,
+            Self::SessionStorage { .. }
+            | Self::Channel { .. }
+            | Self::ChannelDisabled { .. }
+            | Self::AgentRuntime { .. }
+            | Self::TurnCancelled
+            | Self::Sandbox { .. }
+            | Self::ModelProvider { .. }
+            | Self::AllProvidersFailed
+            | Self::ConfigIo { .. }
+            | Self::UnsupportedMediaType { .. }
+            | Self::Crypto(_)
+            | Self::Internal { .. }
+            | Self::ShuttingDown => 500,
         }
     }
 }

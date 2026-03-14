@@ -5,7 +5,7 @@ use secrecy::{ExposeSecret, SecretString};
 use sha2::Sha256;
 use tracing::info;
 
-use frankclaw_core::channel::*;
+use frankclaw_core::channel::{OutboundAttachment, ChannelPlugin, ChannelCapabilities, InboundMessage, HealthStatus, OutboundMessage, SendResult, InboundAttachment};
 use frankclaw_core::error::{FrankClawError, Result};
 use frankclaw_core::types::ChannelId;
 
@@ -28,6 +28,7 @@ pub struct WhatsAppChannel {
 }
 
 impl WhatsAppChannel {
+    #[expect(clippy::needless_pass_by_value, reason = "owned String consumed into struct fields")]
     pub fn new(
         access_token: SecretString,
         phone_number_id: String,
@@ -141,7 +142,7 @@ impl ChannelPlugin for WhatsAppChannel {
         }
     }
 
-    fn label(&self) -> &str {
+    fn label(&self) -> &'static str {
         "WhatsApp"
     }
 
@@ -452,10 +453,10 @@ fn classify_whatsapp_send_error(code: u64, message: &str) -> String {
 }
 
 fn parse_unix_timestamp(value: &str) -> Option<chrono::DateTime<chrono::Utc>> {
-    value
+    let secs = value
         .parse::<i64>()
-        .ok()
-        .and_then(|secs| chrono::DateTime::<chrono::Utc>::from_timestamp(secs, 0))
+        .ok()?;
+    chrono::DateTime::<chrono::Utc>::from_timestamp(secs, 0)
 }
 
 fn decode_hex(value: &str) -> Option<Vec<u8>> {

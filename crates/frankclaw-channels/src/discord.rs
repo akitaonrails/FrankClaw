@@ -9,7 +9,7 @@ use tokio::sync::Mutex;
 use tokio_tungstenite::tungstenite::Message;
 use tracing::{info, warn};
 
-use frankclaw_core::channel::*;
+use frankclaw_core::channel::{ChannelPlugin, InboundMessage, OutboundMessage, SendResult, ChannelCapabilities, HealthStatus, EditMessageTarget, DeleteMessageTarget, InboundAttachment};
 use frankclaw_core::error::{FrankClawError, Result};
 use frankclaw_core::types::ChannelId;
 
@@ -235,7 +235,7 @@ impl ChannelPlugin for DiscordChannel {
         }
     }
 
-    fn label(&self) -> &str {
+    fn label(&self) -> &'static str {
         "Discord"
     }
 
@@ -630,6 +630,7 @@ fn chunk_discord_text(text: &str, limit: usize) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use frankclaw_core::channel::OutboundAttachment;
 
     fn fixture(name: &str) -> serde_json::Value {
         match name {

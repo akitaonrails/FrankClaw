@@ -1,10 +1,10 @@
 use std::collections::BTreeMap;
 
 use frankclaw_core::error::{FrankClawError, Result};
-use frankclaw_core::model::*;
+use frankclaw_core::model::{CompletionRequest, ResponseFormat, CompletionResponse, ToolCallResponse, Usage, FinishReason, StreamDelta};
 use frankclaw_core::types::Role;
 
-/// Sanitize a tool name for OpenAI compatibility (dots → underscores).
+/// Sanitize a tool name for OpenAI compatibility (dots -> underscores).
 /// OpenAI requires tool names to match `^[a-zA-Z0-9_-]+$`.
 fn sanitize_tool_name(name: &str) -> String {
     name.replace('.', "_")
@@ -24,7 +24,8 @@ fn restore_tool_name(name: &str) -> String {
 }
 
 /// Build an OpenAI-compatible chat completions request body.
-pub(crate) fn build_request_body(request: &CompletionRequest) -> serde_json::Value {
+#[expect(clippy::too_many_lines, reason = "request body assembly with many optional fields")]
+pub fn build_request_body(request: &CompletionRequest) -> serde_json::Value {
     let messages: Vec<serde_json::Value> = {
         let mut msgs = Vec::new();
         if let Some(system) = &request.system {
@@ -141,7 +142,7 @@ pub(crate) fn build_request_body(request: &CompletionRequest) -> serde_json::Val
 }
 
 /// Parse a non-streaming OpenAI-compatible chat completions response.
-pub(crate) fn parse_completion_response(data: &serde_json::Value) -> Result<CompletionResponse> {
+pub fn parse_completion_response(data: &serde_json::Value) -> Result<CompletionResponse> {
     let choice = data["choices"]
         .get(0)
         .ok_or_else(|| FrankClawError::ModelProvider {
@@ -181,7 +182,7 @@ pub(crate) fn parse_completion_response(data: &serde_json::Value) -> Result<Comp
 
 /// Accumulator for OpenAI-compatible streaming responses.
 #[derive(Debug)]
-pub(crate) struct StreamState {
+pub struct StreamState {
     pub(crate) content: String,
     pub(crate) tool_calls: BTreeMap<usize, StreamingToolCall>,
     pub(crate) usage: Usage,
@@ -202,7 +203,7 @@ impl Default for StreamState {
 }
 
 #[derive(Debug, Default)]
-pub(crate) struct StreamingToolCall {
+pub struct StreamingToolCall {
     pub(crate) id: String,
     pub(crate) name: String,
     pub(crate) arguments: String,
@@ -239,7 +240,7 @@ impl StreamState {
 }
 
 /// Process a single SSE data payload and return any stream deltas.
-pub(crate) fn apply_stream_event(
+pub fn apply_stream_event(
     state: &mut StreamState,
     data: &str,
 ) -> Result<Vec<StreamDelta>> {
@@ -319,7 +320,7 @@ pub(crate) fn apply_stream_event(
     Ok(deltas)
 }
 
-pub(crate) fn parse_usage(data: &serde_json::Value) -> Usage {
+pub fn parse_usage(data: &serde_json::Value) -> Usage {
     Usage {
         input_tokens: data["usage"]["prompt_tokens"].as_u64().unwrap_or(0) as u32,
         output_tokens: data["usage"]["completion_tokens"].as_u64().unwrap_or(0) as u32,
@@ -327,7 +328,7 @@ pub(crate) fn parse_usage(data: &serde_json::Value) -> Usage {
     }
 }
 
-pub(crate) fn parse_finish_reason(reason: Option<&str>) -> FinishReason {
+pub fn parse_finish_reason(reason: Option<&str>) -> FinishReason {
     match reason {
         Some("stop") => FinishReason::Stop,
         Some("length") => FinishReason::MaxTokens,
@@ -340,6 +341,7 @@ pub(crate) fn parse_finish_reason(reason: Option<&str>) -> FinishReason {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use frankclaw_core::model::CompletionMessage;
 
     #[test]
     fn stream_state_accumulates_text_and_usage() {

@@ -32,7 +32,7 @@ impl Default for RetryConfig {
 /// - Attempt 1: ~2000ms (1500–2500ms)
 /// - Attempt 2: ~4000ms (3000–5000ms)
 pub fn retry_backoff_delay(attempt: u32) -> Duration {
-    let base_ms: u64 = 1000u64.saturating_mul(2u64.saturating_pow(attempt));
+    let base_ms = 1000u64.saturating_mul(2u64.saturating_pow(attempt));
     let jitter_range = base_ms / 4; // ±25%
     let jitter = if jitter_range > 0 {
         let offset = rand::thread_rng().gen_range(0..=jitter_range * 2);
