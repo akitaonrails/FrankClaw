@@ -179,8 +179,9 @@ pub struct CompletionRequest {
 }
 
 /// Risk classification for tools. Determines whether operator approval is needed.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, strum::Display)]
 #[serde(rename_all = "lowercase")]
+#[strum(serialize_all = "lowercase")]
 pub enum ToolRiskLevel {
     /// Read-only operations: always auto-approved.
     #[default]
@@ -189,16 +190,6 @@ pub enum ToolRiskLevel {
     Mutating,
     /// Destructive operations: require explicit `Destructive` approval level.
     Destructive,
-}
-
-impl std::fmt::Display for ToolRiskLevel {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::ReadOnly => write!(f, "readonly"),
-            Self::Mutating => write!(f, "mutating"),
-            Self::Destructive => write!(f, "destructive"),
-        }
-    }
 }
 
 /// Tool definition for function calling.

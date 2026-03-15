@@ -198,21 +198,16 @@ impl Default for GatewayConfig {
 }
 
 /// How to bind the listening socket.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BindMode {
     /// 127.0.0.1 only (safest default).
+    #[default]
     Loopback,
     /// 0.0.0.0 (LAN accessible). Requires auth.
     Lan,
     /// Specific address.
     Address(String),
-}
-
-impl Default for BindMode {
-    fn default() -> Self {
-        Self::Loopback
-    }
 }
 
 /// TLS configuration.
@@ -272,9 +267,10 @@ impl Default for AgentDef {
 }
 
 /// Sandbox configuration for agent code execution.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(tag = "mode", rename_all = "snake_case")]
 pub enum SandboxConfig {
+    #[default]
     None,
     Docker {
         image: String,
@@ -298,12 +294,6 @@ pub enum SandboxConfig {
     },
 }
 
-impl Default for SandboxConfig {
-    fn default() -> Self {
-        Self::None
-    }
-}
-
 fn default_sandbox_memory() -> u64 {
     512
 }
@@ -321,7 +311,8 @@ pub struct ChannelConfig {
     pub extra: serde_json::Value,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::EnumString, strum::VariantNames)]
+#[strum(serialize_all = "snake_case")]
 pub enum ChannelDmPolicy {
     Open,
     Allowlist,
@@ -355,20 +346,14 @@ impl ChannelConfig {
         let mut policy = ChannelSecurityPolicy::default();
 
         if let Some(raw) = self.extra.get("dm_policy").and_then(|value| value.as_str()) {
-            policy.dm_policy = match raw {
-                "open" => ChannelDmPolicy::Open,
-                "allowlist" => ChannelDmPolicy::Allowlist,
-                "pairing" => ChannelDmPolicy::Pairing,
-                "disabled" => ChannelDmPolicy::Disabled,
-                other => {
-                    return Err(FrankClawError::ConfigValidation {
-                        msg: format!(
-                            "invalid dm_policy '{}'; expected open, allowlist, pairing, or disabled",
-                            other
-                        ),
-                    });
+            policy.dm_policy = raw.parse::<ChannelDmPolicy>().map_err(|_| {
+                FrankClawError::ConfigValidation {
+                    msg: format!(
+                        "invalid dm_policy '{raw}'; expected {}",
+                        <ChannelDmPolicy as strum::VariantNames>::VARIANTS.join(", ")
+                    ),
                 }
-            };
+            })?;
         }
 
         if let Some(raw) = self.extra.get("allow_from") {

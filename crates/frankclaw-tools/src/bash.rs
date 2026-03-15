@@ -56,20 +56,15 @@ struct BashResult {
 }
 
 /// Security policy for bash tool execution.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub enum BashPolicy {
     /// Allow all commands (dangerous, for development only).
     AllowAll,
     /// Only allow commands starting with these binaries.
     Allowlist(Vec<String>),
     /// Deny all commands.
+    #[default]
     DenyAll,
-}
-
-impl Default for BashPolicy {
-    fn default() -> Self {
-        Self::DenyAll
-    }
 }
 
 /// Optional sandbox mode using `ai-jail` (bubblewrap + landlock).

@@ -18,7 +18,8 @@ use regex::Regex;
 // ---------------------------------------------------------------------------
 
 /// Complexity tier produced by the 13-dimension scorer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, strum::Display, strum::IntoStaticStr)]
+#[strum(serialize_all = "snake_case")]
 pub enum Tier {
     /// Simple requests: greetings, quick lookups (score 0-15).
     Flash,
@@ -38,21 +39,6 @@ impl Tier {
             41..=65 => Tier::Pro,
             _ => Tier::Frontier,
         }
-    }
-
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Tier::Flash => "flash",
-            Tier::Standard => "standard",
-            Tier::Pro => "pro",
-            Tier::Frontier => "frontier",
-        }
-    }
-}
-
-impl std::fmt::Display for Tier {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.as_str())
     }
 }
 
@@ -586,8 +572,10 @@ mod tests {
 
     #[test]
     fn tier_display() {
-        assert_eq!(Tier::Flash.as_str(), "flash");
+        assert_eq!(Tier::Flash.to_string(), "flash");
         assert_eq!(Tier::Frontier.to_string(), "frontier");
+        let s: &'static str = Tier::Standard.into();
+        assert_eq!(s, "standard");
     }
 
     #[test]

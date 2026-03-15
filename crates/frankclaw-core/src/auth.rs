@@ -2,10 +2,11 @@ use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 
 /// How the gateway authenticates incoming connections.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(tag = "mode", rename_all = "snake_case")]
 pub enum AuthMode {
     /// No authentication. Only safe when bound to loopback.
+    #[default]
     None,
 
     /// Bearer token (constant-time comparison).
@@ -32,12 +33,6 @@ pub enum AuthMode {
 
     /// Tailscale-verified identity (via whois API).
     Tailscale,
-}
-
-impl Default for AuthMode {
-    fn default() -> Self {
-        Self::None
-    }
 }
 
 impl AuthMode {
