@@ -3,7 +3,6 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use frankclaw_core::error::Result;
 use tracing::debug;
 
 use crate::manifest::{PluginManifest, load_plugin_manifest};

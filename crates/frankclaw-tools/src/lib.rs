@@ -59,6 +59,15 @@ pub struct ToolContext {
     pub workspace: Option<std::path::PathBuf>,
 }
 
+impl ToolContext {
+    /// Returns the workspace path, or an error if no workspace is configured.
+    pub fn require_workspace(&self) -> Result<&std::path::Path> {
+        self.workspace.as_deref().ok_or_else(|| FrankClawError::AgentRuntime {
+            msg: "tool requires a workspace directory but none is configured".into(),
+        })
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ToolOutput {
     pub name: String,

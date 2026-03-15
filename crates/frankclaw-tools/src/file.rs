@@ -82,11 +82,6 @@ pub(crate) fn validate_workspace_path(workspace: &Path, requested: &str) -> Resu
     }
 }
 
-fn get_workspace(ctx: &ToolContext) -> Result<&Path> {
-    ctx.workspace.as_deref().ok_or_else(|| FrankClawError::AgentRuntime {
-        msg: "file tools are not available: no workspace directory configured".into(),
-    })
-}
 
 // --------------------------------------------------------------------------
 // file.read
@@ -128,7 +123,7 @@ impl Tool for FileReadTool {
     }
 
     async fn invoke(&self, args: serde_json::Value, ctx: ToolContext) -> Result<serde_json::Value> {
-        let workspace = get_workspace(&ctx)?;
+        let workspace = ctx.require_workspace()?;
         let path_str = args
             .get("path")
             .and_then(|v| v.as_str())
@@ -213,7 +208,7 @@ impl Tool for FileWriteTool {
     }
 
     async fn invoke(&self, args: serde_json::Value, ctx: ToolContext) -> Result<serde_json::Value> {
-        let workspace = get_workspace(&ctx)?;
+        let workspace = ctx.require_workspace()?;
         let path_str = args
             .get("path")
             .and_then(|v| v.as_str())
@@ -305,7 +300,7 @@ impl Tool for FileEditTool {
     }
 
     async fn invoke(&self, args: serde_json::Value, ctx: ToolContext) -> Result<serde_json::Value> {
-        let workspace = get_workspace(&ctx)?;
+        let workspace = ctx.require_workspace()?;
         let path_str = args
             .get("path")
             .and_then(|v| v.as_str())

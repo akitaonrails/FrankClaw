@@ -1,7 +1,5 @@
 //! PDF text extraction tool.
 
-use std::path::Path;
-
 use async_trait::async_trait;
 
 use frankclaw_core::error::{FrankClawError, Result};
@@ -19,11 +17,6 @@ const DEFAULT_MAX_PAGES: usize = 20;
 /// Maximum output characters.
 const MAX_OUTPUT_CHARS: usize = 200_000;
 
-fn get_workspace(ctx: &ToolContext) -> Result<&Path> {
-    ctx.workspace.as_deref().ok_or_else(|| FrankClawError::AgentRuntime {
-        msg: "pdf.read is not available: no workspace directory configured".into(),
-    })
-}
 
 // --------------------------------------------------------------------------
 // pdf.read
@@ -58,7 +51,7 @@ impl Tool for PdfReadTool {
     }
 
     async fn invoke(&self, args: serde_json::Value, ctx: ToolContext) -> Result<serde_json::Value> {
-        let workspace = get_workspace(&ctx)?;
+        let workspace = ctx.require_workspace()?;
         let path_str = args
             .get("path")
             .and_then(|v| v.as_str())

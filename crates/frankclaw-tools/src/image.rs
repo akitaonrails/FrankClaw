@@ -28,11 +28,6 @@ const SUPPORTED_EXTENSIONS: &[(&str, &str)] = &[
     ("svg", "image/svg+xml"),
 ];
 
-fn get_workspace(ctx: &ToolContext) -> Result<&Path> {
-    ctx.workspace.as_deref().ok_or_else(|| FrankClawError::AgentRuntime {
-        msg: "image.describe is not available: no workspace directory configured".into(),
-    })
-}
 
 fn mime_from_extension(path: &Path) -> Result<&'static str> {
     let ext = path
@@ -92,7 +87,7 @@ impl Tool for ImageDescribeTool {
     }
 
     async fn invoke(&self, args: serde_json::Value, ctx: ToolContext) -> Result<serde_json::Value> {
-        let workspace = get_workspace(&ctx)?;
+        let workspace = ctx.require_workspace()?;
 
         // Parse paths array.
         let paths: Vec<String> = match args.get("paths") {

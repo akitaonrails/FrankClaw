@@ -847,6 +847,268 @@ mod tests {
         let _ = std::fs::remove_dir_all(temp_dir);
     }
 
+    /// Helper to create a temp store for tests.
+    fn temp_store(suffix: &str) -> (std::path::PathBuf, SqliteSessionStore) {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "frankclaw-sessions-{suffix}-{}",
+            Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        std::fs::create_dir_all(&temp_dir).expect("temp dir");
+        let path = temp_dir.join("sessions.db");
+        let store = SqliteSessionStore::open(&path, None).expect("store should open");
+        (temp_dir, store)
+    }
+
+    fn test_session(key: &str) -> SessionEntry {
+        SessionEntry {
+            key: SessionKey::from_raw(key),
+            agent_id: AgentId::default_agent(),
+            channel: ChannelId::new("web"),
+            account_id: "default".into(),
+            scoping: SessionScoping::PerChannelPeer,
+            created_at: Utc::now(),
+            last_message_at: Some(Utc::now()),
+            thread_id: None,
+            metadata: serde_json::json!({}),
+        }
+    }
+
+    #[tokio::test]
+    async fn get_returns_none_for_missing_session() {
+        let (dir, store) = temp_store("get-none");
+        let result = store
+            .get(&SessionKey::from_raw("nonexistent"))
+            .await
+            .expect("get should succeed");
+        assert!(result.is_none());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn upsert_then_get_roundtrip() {
+        let (dir, store) = temp_store("upsert-get");
+        let entry = test_session("agent:main:roundtrip");
+        store.upsert(&entry).await.expect("upsert");
+        let loaded = store
+            .get(&entry.key)
+            .await
+            .expect("get")
+            .expect("should exist");
+        assert_eq!(loaded.key.as_str(), entry.key.as_str());
+        assert_eq!(loaded.agent_id.as_str(), entry.agent_id.as_str());
+        assert_eq!(loaded.channel.as_str(), "web");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn upsert_updates_existing_session() {
+        let (dir, store) = temp_store("upsert-update");
+        let mut entry = test_session("agent:main:update");
+        store.upsert(&entry).await.expect("initial upsert");
+
+        entry.thread_id = Some("thread-1".into());
+        entry.metadata = serde_json::json!({"updated": true});
+        store.upsert(&entry).await.expect("update upsert");
+
+        let loaded = store.get(&entry.key).await.expect("get").expect("exists");
+        assert_eq!(loaded.thread_id.as_deref(), Some("thread-1"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn delete_removes_session_and_transcript() {
+        let (dir, store) = temp_store("delete");
+        let key = SessionKey::from_raw("agent:main:delete");
+        store.upsert(&test_session("agent:main:delete")).await.expect("upsert");
+        store
+            .append_transcript(
+                &key,
+                &TranscriptEntry {
+                    seq: 1,
+                    role: Role::User,
+                    content: "hello".into(),
+                    timestamp: Utc::now(),
+                    metadata: None,
+                },
+            )
+            .await
+            .expect("append");
+
+        store.delete(&key).await.expect("delete");
+
+        assert!(store.get(&key).await.expect("get").is_none());
+        let transcript = store.get_transcript(&key, 100, None).await.expect("transcript");
+        assert!(transcript.is_empty());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn list_returns_sessions_for_agent() {
+        let (dir, store) = temp_store("list");
+        store.upsert(&test_session("agent:main:a")).await.expect("upsert a");
+        store.upsert(&test_session("agent:main:b")).await.expect("upsert b");
+        store.upsert(&test_session("agent:main:c")).await.expect("upsert c");
+
+        let all = store
+            .list(&AgentId::default_agent(), 10, 0)
+            .await
+            .expect("list");
+        assert_eq!(all.len(), 3);
+
+        // Test pagination
+        let page = store
+            .list(&AgentId::default_agent(), 2, 0)
+            .await
+            .expect("page 1");
+        assert_eq!(page.len(), 2);
+
+        let page2 = store
+            .list(&AgentId::default_agent(), 2, 2)
+            .await
+            .expect("page 2");
+        assert_eq!(page2.len(), 1);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn clear_transcript_removes_entries() {
+        let (dir, store) = temp_store("clear");
+        let key = SessionKey::from_raw("agent:main:clear");
+        store.upsert(&test_session("agent:main:clear")).await.expect("upsert");
+        for i in 1..=5 {
+            store
+                .append_transcript(
+                    &key,
+                    &TranscriptEntry {
+                        seq: i,
+                        role: Role::User,
+                        content: format!("msg-{i}"),
+                        timestamp: Utc::now(),
+                        metadata: None,
+                    },
+                )
+                .await
+                .expect("append");
+        }
+
+        store.clear_transcript(&key).await.expect("clear");
+        let transcript = store.get_transcript(&key, 100, None).await.expect("get");
+        assert!(transcript.is_empty());
+
+        // Session itself should still exist
+        assert!(store.get(&key).await.expect("get").is_some());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn get_transcript_pagination_with_before_seq() {
+        let (dir, store) = temp_store("pagination");
+        let key = SessionKey::from_raw("agent:main:paginate");
+        store.upsert(&test_session("agent:main:paginate")).await.expect("upsert");
+        for i in 1..=10 {
+            store
+                .append_transcript(
+                    &key,
+                    &TranscriptEntry {
+                        seq: i,
+                        role: if i % 2 == 1 { Role::User } else { Role::Assistant },
+                        content: format!("msg-{i}"),
+                        timestamp: Utc::now(),
+                        metadata: None,
+                    },
+                )
+                .await
+                .expect("append");
+        }
+
+        // Get entries before seq 6 (should return 1-5)
+        let page = store.get_transcript(&key, 100, Some(6)).await.expect("page");
+        assert_eq!(page.len(), 5);
+        assert_eq!(page[0].seq, 1);
+        assert_eq!(page[4].seq, 5);
+
+        // Get last 3 entries before seq 6
+        let page = store.get_transcript(&key, 3, Some(6)).await.expect("page");
+        assert_eq!(page.len(), 3);
+        assert_eq!(page[0].seq, 3);
+        assert_eq!(page[2].seq, 5);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn encrypted_roundtrip_with_same_key() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "frankclaw-sessions-enc-roundtrip-{}",
+            Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        std::fs::create_dir_all(&temp_dir).expect("temp dir");
+        let path = temp_dir.join("sessions.db");
+        let master = MasterKey::from_bytes([42u8; 32]);
+        let store = SqliteSessionStore::open(&path, Some(&master)).expect("open");
+        let key = SessionKey::from_raw("agent:main:encrypted");
+
+        store.upsert(&test_session("agent:main:encrypted")).await.expect("upsert");
+        store
+            .append_transcript(
+                &key,
+                &TranscriptEntry {
+                    seq: 1,
+                    role: Role::User,
+                    content: "encrypted content 🔐".into(),
+                    timestamp: Utc::now(),
+                    metadata: Some(serde_json::json!({"tool": "bash"})),
+                },
+            )
+            .await
+            .expect("append");
+
+        let transcript = store.get_transcript(&key, 10, None).await.expect("get");
+        assert_eq!(transcript.len(), 1);
+        assert_eq!(transcript[0].content, "encrypted content 🔐");
+        assert_eq!(transcript[0].metadata.as_ref().unwrap()["tool"], "bash");
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[tokio::test]
+    async fn maintenance_prunes_old_sessions() {
+        let (dir, store) = temp_store("maintenance");
+        let old_time = Utc::now() - chrono::Duration::days(60);
+        let mut old_entry = test_session("agent:main:old");
+        old_entry.created_at = old_time;
+        old_entry.last_message_at = Some(old_time);
+        store.upsert(&old_entry).await.expect("upsert old");
+
+        let new_entry = test_session("agent:main:new");
+        store.upsert(&new_entry).await.expect("upsert new");
+
+        let pruned = store
+            .maintenance(&PruningConfig {
+                max_age_days: 30,
+                max_sessions_per_agent: 1000,
+                disk_budget_bytes: 100_000_000,
+            })
+            .await
+            .expect("maintenance");
+
+        assert!(pruned >= 1, "should prune at least the old session");
+
+        // Old session should be gone, new should remain
+        assert!(store.get(&old_entry.key).await.expect("get old").is_none());
+        assert!(store.get(&new_entry.key).await.expect("get new").is_some());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn empty_transcript_retrieval() {
+        let (dir, store) = temp_store("empty-transcript");
+        let key = SessionKey::from_raw("agent:main:empty");
+        store.upsert(&test_session("agent:main:empty")).await.expect("upsert");
+
+        let transcript = store.get_transcript(&key, 100, None).await.expect("get");
+        assert!(transcript.is_empty());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     #[tokio::test]
     async fn migration_is_idempotent() {
         let temp_dir = std::env::temp_dir().join(format!(
