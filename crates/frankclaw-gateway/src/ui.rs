@@ -908,22 +908,40 @@ pub async fn index() -> Html<&'static str> {
         } catch (_) {}
 
         if (FC.socket) FC.socket.close();
+        if (FC._pingInterval) { clearInterval(FC._pingInterval); FC._pingInterval = null; }
 
         const socket = new WebSocket(FC.buildWsUrl());
         FC.socket = socket;
+        FC._reconnectAttempts = 0;
 
         socket.addEventListener("open", async () => {
           tabs.setStatus("Connected", true);
           tabs.show("chat");
+          FC._reconnectAttempts = 0;
           // Reset lazy-load flags
           FC.usageLoaded = false;
           FC.agentsLoaded = false;
           FC.cronLoaded = false;
+          // Keepalive ping every 25s to survive proxy idle timeouts.
+          if (FC._pingInterval) clearInterval(FC._pingInterval);
+          FC._pingInterval = setInterval(() => {
+            if (FC.connected) FC.rpc("ping").catch(() => {});
+          }, 25000);
           try { await refreshAll(); } catch (e) { appendSystemBubble("error", e.message); }
         });
 
         socket.addEventListener("message", handleWsMessage);
-        socket.addEventListener("close", () => tabs.setStatus("Disconnected", false));
+        socket.addEventListener("close", () => {
+          tabs.setStatus("Disconnected", false);
+          if (FC._pingInterval) { clearInterval(FC._pingInterval); FC._pingInterval = null; }
+          // Auto-reconnect with backoff (max 5 attempts).
+          if (FC._reconnectAttempts < 5) {
+            const delay = Math.min(1000 * Math.pow(2, FC._reconnectAttempts), 15000);
+            FC._reconnectAttempts++;
+            tabs.setStatus("Reconnecting in " + Math.round(delay/1000) + "s\u2026", false);
+            setTimeout(() => this.doConnect(), delay);
+          }
+        });
         socket.addEventListener("error", () => tabs.setStatus("Connection error", false));
       }
     });

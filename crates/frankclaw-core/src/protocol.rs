@@ -108,6 +108,9 @@ pub enum Method {
 
     // Health
     HealthProbe,
+
+    // Keepalive
+    Ping,
 }
 
 impl Method {

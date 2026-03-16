@@ -149,7 +149,7 @@ async fn dispatch_method(
 
     // Route to handler.
     match request.method {
-        Method::HealthProbe => {
+        Method::Ping | Method::HealthProbe => {
             ResponseFrame::ok(request.id, serde_json::json!({ "status": "ok" }))
         }
         Method::ConfigGet => {
