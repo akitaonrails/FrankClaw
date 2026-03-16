@@ -3,8 +3,8 @@
 This file tracks the remaining distance between FrankClaw and the broader OpenClaw feature surface.
 It should stay current as features land, are deferred, or are explicitly dropped.
 
-**Last verified**: 2026-03-14 — systematic directory-by-directory audit of OpenClaw `src/` (~192k LOC
-across ~2,864 non-test TypeScript files) against FrankClaw (~35k LOC across 13 Rust crates).
+**Last verified**: 2026-03-16 — systematic directory-by-directory audit of OpenClaw `src/` (~192k LOC
+across ~2,864 non-test TypeScript files) against FrankClaw (~37k LOC across 13 Rust crates).
 IronClaw feature adoption complete (12 features across 4 phases).
 OpenClaw parity phase complete (14 features: web UI enrichment + backend features).
 
@@ -59,6 +59,7 @@ voice — not architecture, runtime intelligence, or the transport layer.
 - [x] Provider SSE streaming for OpenAI/Anthropic/Ollama
 - [x] Rich web console with 8 tabs (Connect, Chat, Canvas, System, Usage, Agents, Cron, Logs)
 - [x] Dark/light mode toggle with system preference detection and FOUC prevention
+- [x] WebSocket auto-reconnect with ping keepalive (survives proxy/tunnel idle timeouts)
 - [x] Tool approval inline UI with Allow Once/Always/Deny controls
 - [x] Image paste upload in chat
 - [x] Usage analytics with CSV export
@@ -71,6 +72,10 @@ voice — not architecture, runtime intelligence, or the transport layer.
 - [x] Memory/RAG with SQLite FTS5, embedding providers, file sync
 - [x] Hook lifecycle wiring in runtime (message.received/sent, tool.before/after)
 - [x] Multi-provider media understanding with fallback chain (OpenAI, Anthropic, Ollama vision + Whisper)
+- [x] OpenAI-compatible API (`/v1/chat/completions`, `/v1/models`) for drop-in client support
+- [x] Model-aware failover routing (skips providers that don't serve the requested model)
+- [x] Canvas SVG/HTML/Markdown rendering in web console
+- [x] GitHub Copilot model provider
 
 ## Implemented Channels
 
@@ -218,9 +223,10 @@ These are the core "brain" features that make OpenClaw's agent loop sophisticate
 - [x] Safer action model for clicks/forms/navigation
 - [x] Tool approvals for higher-risk tool families
 - [x] More first-party tools beyond session inspection
-- [x] LLM tool suite: web.fetch, web.search, sessions.list, sessions.history,
-  file.read, file.write, file.edit, message.send, cron.list, cron.add,
-  cron.remove, config.get, agents.list, memory.get (16 new tools)
+- [x] LLM tool suite: web_fetch, web_search, sessions_list, sessions_history,
+  file_read, file_write, file_edit, message_send, cron_list, cron_add,
+  cron_remove, config_get, agents_list, memory_get, memory_search,
+  image_describe, audio_transcribe, pdf_read (18 tools)
 - [x] Better tool tracing and operator visibility
 
 ### Test Coverage

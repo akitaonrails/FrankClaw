@@ -6,7 +6,7 @@ FrankClaw is a ground-up Rust rewrite of [OpenClaw](https://github.com/openclaw/
 
 What's at parity:
 - 7 messaging channels: Web, Telegram, Discord, Slack, Signal, WhatsApp, Email (IMAP/SMTP)
-- Multi-provider AI with failover, circuit breaker, retry with exponential backoff
+- Multi-provider AI with model-aware failover routing, circuit breaker, retry with exponential backoff
 - Full agent runtime: context compaction, subagent orchestration, command system, skills, hooks
 - Smart model routing: 13-dimension complexity scorer routes simple queries to cheaper models
 - MCP (Model Context Protocol) client: stdio and HTTP transports for tool ecosystem integration
@@ -18,8 +18,9 @@ What's at parity:
 - Memory/RAG: SQLite FTS5 + vector search with embedding providers, file sync
 - Rich 8-tab web console: dark mode, tool approval UI, usage analytics, agent management, cron jobs, logs viewer, focus mode
 - Webhook transforms: JSON path extraction, templates, per-mapping rate limiting and concurrency control
-- Canvas host with revision conflict detection
-- Browser automation (CDP-based, 9 tools)
+- Canvas host with revision conflict detection, SVG/HTML/Markdown rendering in web console
+- OpenAI-compatible API (`/v1/chat/completions`, `/v1/models`) for drop-in client support
+- Browser automation (CDP-based, 11 tools including screenshot and ARIA snapshot)
 - Bash tool with allowlist + sandbox (ai-jail)
 - 3-tier tool risk levels (ReadOnly → Mutating → Destructive) with per-tool approval overrides and inline approval UI
 - Tunnel support: Cloudflare Tunnel, ngrok, and custom commands for webhook exposure
@@ -44,7 +45,7 @@ For channel setup, see [CHANNEL_SETUP.md](docs/CHANNEL_SETUP.md), `examples/chan
 ## Features
 
 - **Multi-channel messaging** — Web, Telegram, Discord, Slack, Signal, WhatsApp, Email (IMAP/SMTP)
-- **Multi-provider AI** — OpenAI, Anthropic, Ollama with automatic failover, circuit breaker, and retry with exponential backoff + jitter
+- **Multi-provider AI** — OpenAI, Anthropic, Ollama, GitHub Copilot, Google Gemini, OpenRouter, Groq, Together, DeepSeek with model-aware failover routing, circuit breaker, and retry with exponential backoff + jitter
 - **Smart model routing** — 13-dimension complexity scorer routes simple queries to cheaper/faster models, saving cost without sacrificing quality
 - **MCP integration** — Model Context Protocol client (stdio + HTTP transports) connects any MCP server as a tool source
 - **Response caching** — SHA-256 keyed LRU cache with configurable TTL avoids redundant API calls
@@ -65,7 +66,7 @@ For channel setup, see [CHANNEL_SETUP.md](docs/CHANNEL_SETUP.md), `examples/chan
 - **Prompt templates** — All LLM-facing text lives in editable markdown files, embedded at compile time
 - **Media understanding** — Multi-provider vision (OpenAI, Anthropic, Ollama) and audio transcription (Whisper) with ordered fallback chain, configurable via `understanding` config section
 - **Memory/RAG** — SQLite FTS5 full-text search + cosine vector similarity with hybrid scoring, embedding providers (OpenAI, Ollama, Gemini, Voyage AI) with SHA-256 caching, paragraph-based chunking, automatic file sync
-- **Rich web console** — 8-tab interface (Connect, Chat, Canvas, System, Usage, Agents, Cron, Logs) with dark/light mode, tool approval cards, image paste, usage analytics with CSV export, focus mode, resizable markdown sidebar
+- **Rich web console** — 8-tab interface (Connect, Chat, Canvas, System, Usage, Agents, Cron, Logs) with dark/light mode, tool approval cards, image paste, usage analytics with CSV export, focus mode, resizable markdown sidebar, WebSocket auto-reconnect with keepalive
 - **Webhook transforms** — JSON path extraction from nested payloads, message templates, per-mapping concurrency limits and fixed-window rate limiting
 - **Media pipeline** — File handling with SSRF protection, filename sanitization, and optional VirusTotal malware scanning
 - **Internationalized CLI** — 9 locales (en, pt-BR, pt-PT, es, fr, de, it, ja, ko) via `FRANKCLAW_LANG`
@@ -109,7 +110,7 @@ For channel setup, see [CHANNEL_SETUP.md](docs/CHANNEL_SETUP.md), `examples/chan
 | `frankclaw-crypto` | ChaCha20-Poly1305 encryption, Argon2id hashing, HMAC-SHA256 key derivation |
 | `frankclaw-gateway` | Axum WebSocket + HTTP server, auth, rate limiting, config hot-reload, tunnel support, 8-tab web console, webhook limiter |
 | `frankclaw-sessions` | SQLite session store with optional encrypted transcripts |
-| `frankclaw-models` | AI provider adapters (OpenAI, Anthropic, Ollama) with failover, circuit breaker, caching, cost tracking, smart routing |
+| `frankclaw-models` | AI provider adapters (OpenAI, Anthropic, Ollama, Copilot, Gemini, OpenRouter, Groq, Together, DeepSeek) with model-aware failover, circuit breaker, caching, cost tracking, smart routing |
 | `frankclaw-channels` | Messaging channel adapters (Web, Telegram, Discord, Slack, Signal, WhatsApp, Email) |
 | `frankclaw-runtime` | Agent runtime, prompt templates, subagent orchestration, context compaction, hooks wiring |
 | `frankclaw-tools` | Tool registry, bash execution (with optional ai-jail sandbox), browser tools, MCP client, audio transcription |
@@ -284,21 +285,21 @@ tools = [
 Example use:
 
 ```bash
-frankclaw tools invoke --tool browser.open --session default:web:control --args '{"url":"https://example.com"}'
-frankclaw tools invoke --tool browser.extract --session default:web:control
-frankclaw tools invoke --tool browser.snapshot --session default:web:control
+frankclaw tools invoke --tool browser_open --session default:web:control --args '{"url":"https://example.com"}'
+frankclaw tools invoke --tool browser_extract --session default:web:control
+frankclaw tools invoke --tool browser_snapshot --session default:web:control
 FRANKCLAW_TOOL_APPROVAL=mutating \
-frankclaw tools invoke --tool browser.type --session default:web:control --args '{"selector":"input[name=q]","text":"frankclaw"}'
+frankclaw tools invoke --tool browser_type --session default:web:control --args '{"selector":"input[name=q]","text":"frankclaw"}'
 FRANKCLAW_TOOL_APPROVAL=mutating \
-frankclaw tools invoke --tool browser.click --session default:web:control --args '{"selector":"button[type=submit]"}'
-frankclaw tools invoke --tool browser.wait --session default:web:control --args '{"selector":"#results","timeout_ms":2000}'
+frankclaw tools invoke --tool browser_click --session default:web:control --args '{"selector":"button[type=submit]"}'
+frankclaw tools invoke --tool browser_wait --session default:web:control --args '{"selector":"#results","timeout_ms":2000}'
 FRANKCLAW_TOOL_APPROVAL=mutating \
-frankclaw tools invoke --tool browser.press --session default:web:control --args '{"selector":"input[name=q]","key":"Enter"}'
-frankclaw tools invoke --tool browser.sessions --session default:web:control
-frankclaw tools invoke --tool browser.close --session default:web:control
+frankclaw tools invoke --tool browser_press --session default:web:control --args '{"selector":"input[name=q]","key":"Enter"}'
+frankclaw tools invoke --tool browser_sessions --session default:web:control
+frankclaw tools invoke --tool browser_close --session default:web:control
 ```
 
-`browser_click`, `browser_type`, `browser_press`, and `browser.select_option` are classified as **Mutating** tools and require `FRANKCLAW_TOOL_APPROVAL=mutating` (or the legacy `FRANKCLAW_ALLOW_BROWSER_MUTATIONS=1`).
+`browser_click`, `browser_type`, `browser_press`, and `browser_select_option` are classified as **Mutating** tools and require `FRANKCLAW_TOOL_APPROVAL=mutating` (or the legacy `FRANKCLAW_ALLOW_BROWSER_MUTATIONS=1`).
 
 Live regression check against a real local Chromium instance:
 

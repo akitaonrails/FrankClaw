@@ -24,9 +24,9 @@ The binary is at `target/debug/frankclaw` (or `target/release/frankclaw`).
 |-------|---------|
 | `frankclaw-core` | Shared types, traits, error hierarchy, SSRF IP blocklist |
 | `frankclaw-crypto` | ChaCha20-Poly1305 encryption, Argon2id hashing, HMAC-SHA256 KDF |
-| `frankclaw-gateway` | Axum WS+HTTP server, auth middleware, rate limiter, broadcast, tunnel support, 8-tab web console, webhook limiter, ACP protocol |
+| `frankclaw-gateway` | Axum WS+HTTP server, auth middleware, rate limiter, broadcast, tunnel support, 8-tab web console, webhook limiter, ACP protocol, OpenAI-compatible API |
 | `frankclaw-sessions` | SQLite session store with encrypted-at-rest transcripts |
-| `frankclaw-models` | OpenAI, Anthropic, Ollama providers with failover, circuit breaker, caching, cost tracking, smart routing, leak detection |
+| `frankclaw-models` | OpenAI, Anthropic, Ollama, Copilot, Gemini, OpenRouter, Groq, Together, DeepSeek providers with model-aware failover, circuit breaker, caching, cost tracking, smart routing, leak detection |
 | `frankclaw-channels` | Channel adapters (Telegram, Web, Discord, Slack, Signal, WhatsApp) |
 | `frankclaw-runtime` | Agent runtime, prompt templates (markdown), subagent orchestration, context compaction, hooks wiring, markdown IR rendering |
 | `frankclaw-tools` | Tool registry, bash execution (with optional ai-jail sandbox), browser tools (CDP) with profiles, MCP client, audio transcription |
