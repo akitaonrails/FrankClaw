@@ -102,6 +102,7 @@ derive_more = { version = "1", features = ["display"] }
 
 # Config
 dirs = "6"
+figment = { version = "0.10.19", features = ["toml", "env"] }
 
 # UUID
 uuid = { version = "1", features = ["v4", "serde"] }

@@ -1,3 +1,8 @@
+use figment::Figment;
+use figment::providers::Env;
+use figment::providers::Format as _;
+use figment::providers::Serialized;
+use figment::providers::Toml;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
@@ -7,6 +12,8 @@ use crate::auth::{AuthMode, RateLimitConfig};
 use crate::error::{ConfigIo, ConfigValidation, Result};
 use crate::session::{PruningConfig, SessionResetPolicy, SessionScoping};
 use crate::types::{AgentId, ChannelId, SessionKey};
+
+pub const ENV_PREFIX: &str = "FRANKCLAW__";
 
 /// Top-level FrankClaw configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -30,6 +37,22 @@ pub struct FrankClawConfig {
 }
 
 impl FrankClawConfig {
+    #[must_use]
+    pub fn base_figment() -> Figment {
+        Figment::new().merge(Serialized::defaults(Self::default()))
+    }
+
+    #[must_use]
+    pub fn figment_with_path(path: Option<&Path>) -> Figment {
+        let base = Self::base_figment();
+        let figment = match path {
+            Some(config_path) if config_path.exists() => base.merge(Toml::file(config_path)),
+            Some(_) | None => base,
+        };
+
+        figment.merge(Env::prefixed(ENV_PREFIX).split("__"))
+    }
+
     pub fn load_from_path(path: &Path) -> Result<Self> {
         let content = std::fs::read_to_string(path).map_err(|err| {
             ConfigIo {
@@ -56,10 +79,14 @@ impl FrankClawConfig {
     }
 
     pub fn load_or_default(path: &Path) -> Result<Self> {
-        if !path.exists() {
-            return Ok(Self::default());
-        }
-        Self::load_from_path(path)
+        Self::figment_with_path(Some(path))
+            .extract()
+            .map_err(|err| {
+                ConfigIo {
+                    msg: format!("failed to load resolved config '{}': {err}", path.display()),
+                }
+                .build()
+            })
     }
 
     pub fn validate(&self) -> Result<()> {
@@ -892,7 +919,25 @@ pub struct BrowserProfileConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use figment::Jail;
     use rstest::rstest;
+
+    type JailResult<T> = std::result::Result<T, Box<figment::Error>>;
+
+    #[expect(
+        clippy::result_large_err,
+        reason = "figment::Jail requires figment::Error to preserve env isolation failures"
+    )]
+    fn with_clean_jail<F>(f: F)
+    where
+        F: FnOnce(&mut Jail) -> JailResult<()>,
+    {
+        Jail::try_with(|jail| {
+            jail.clear_env();
+            f(jail).map_err(|error| *error)
+        })
+        .expect("figment jail should execute successfully");
+    }
 
     #[test]
     fn duplicate_provider_ids_fail_validation() {
@@ -1123,10 +1168,13 @@ mod tests {
             uuid::Uuid::new_v4()
         ));
 
-        let loaded =
-            FrankClawConfig::load_or_default(&path).expect("missing config should default");
+        with_clean_jail(|_jail| {
+            let loaded =
+                FrankClawConfig::load_or_default(&path).expect("missing config should default");
 
-        assert_eq!(loaded.gateway.port, FrankClawConfig::default().gateway.port);
+            assert_eq!(loaded.gateway.port, FrankClawConfig::default().gateway.port);
+            Ok(())
+        });
     }
 
     #[test]
@@ -1140,6 +1188,45 @@ mod tests {
         let loaded = FrankClawConfig::load_from_path(&path).expect("config should load");
 
         assert_eq!(loaded.gateway.port, 19999);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn load_or_default_reads_existing_toml_config() {
+        let path = std::env::temp_dir().join(format!(
+            "frankclaw-resolved-config-load-{}.toml",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::write(&path, "[gateway]\nport = 18888\n").expect("config should write");
+
+        with_clean_jail(|_jail| {
+            let loaded =
+                FrankClawConfig::load_or_default(&path).expect("resolved config should load");
+
+            assert_eq!(loaded.gateway.port, 18888);
+            Ok(())
+        });
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn load_or_default_applies_env_overrides_on_top_of_file_values() {
+        let path = std::env::temp_dir().join(format!(
+            "frankclaw-resolved-config-env-{}.toml",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::write(&path, "[gateway]\nport = 18888\n").expect("config should write");
+
+        with_clean_jail(|jail| {
+            jail.set_env(format!("{ENV_PREFIX}GATEWAY__PORT"), "19999");
+
+            let loaded =
+                FrankClawConfig::load_or_default(&path).expect("env overrides should load");
+
+            assert_eq!(loaded.gateway.port, 19999);
+            Ok(())
+        });
+
         let _ = std::fs::remove_file(path);
     }
 

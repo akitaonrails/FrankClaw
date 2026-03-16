@@ -1253,16 +1253,14 @@ fn load_config(
     state_dir: &std::path::Path,
 ) -> anyhow::Result<frankclaw_core::config::FrankClawConfig> {
     let config_path = path.map_or_else(|| state_dir.join("frankclaw.toml"), PathBuf::from);
-
-    if !config_path.exists() {
-        info!(
-            "no config found at {}, using defaults",
-            config_path.display()
-        );
-        return frankclaw_core::config::FrankClawConfig::load_or_default(&config_path)
-            .map_err(anyhow::Error::from);
-    }
-    frankclaw_core::config::FrankClawConfig::load_from_path(&config_path)
+    let exists = config_path.exists();
+    info!(
+        path = %config_path.display(),
+        exists,
+        env_prefix = frankclaw_core::config::ENV_PREFIX,
+        "loading config via figment"
+    );
+    frankclaw_core::config::FrankClawConfig::load_or_default(&config_path)
         .map_err(anyhow::Error::from)
 }
 

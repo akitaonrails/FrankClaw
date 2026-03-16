@@ -472,7 +472,13 @@ The config file and `.env` may contain API keys and tokens. **Mitigation:** `060
 
 ## Configuration Reference
 
-FrankClaw uses a single TOML config file. All fields have secure defaults.
+FrankClaw uses layered configuration with secure defaults:
+
+1. Built-in Rust defaults
+2. The selected TOML config file
+3. Nested environment overrides via `FRANKCLAW__...`
+
+The default config path remains `frankclaw.toml` under the configured state directory unless `--config` or `FRANKCLAW_CONFIG` is set.
 
 ```toml
 # Gateway server settings
@@ -560,6 +566,14 @@ redact_secrets = true           # Replace secrets with [REDACTED] in logs
 ```
 
 ## Environment Variables
+
+Nested config overrides use Figment's `__` path syntax. For example:
+
+```bash
+FRANKCLAW__GATEWAY__PORT=19999
+FRANKCLAW__LOGGING__LEVEL=debug
+FRANKCLAW__SECURITY__ENCRYPT_SESSIONS=true
+```
 
 | Variable | Description |
 |----------|-------------|
