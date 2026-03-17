@@ -1702,7 +1702,7 @@ fn group_allowed(
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
-    use std::path::PathBuf;
+    use std::path::Path;
     use super::*;
     use std::sync::Arc;
 
@@ -1724,24 +1724,7 @@ mod tests {
     use frankclaw_media::MediaStore;
     use secrecy::{ExposeSecret, SecretString};
     use tower::ServiceExt;
-
-    struct TempTestDir {
-        path: PathBuf,
-    }
-
-    impl TempTestDir {
-        fn new(label: &str) -> Self {
-            let path = std::env::temp_dir().join(format!("{}-{}", label, uuid::Uuid::new_v4()));
-            std::fs::create_dir_all(&path).expect("temp dir should create");
-            Self { path }
-        }
-    }
-
-    impl Drop for TempTestDir {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.path);
-        }
-    }
+    use crate::test_fixtures::TestTempDir;
 
     #[test]
     fn merge_reloadable_config_updates_gateway_and_preserves_models() {
@@ -1949,7 +1932,7 @@ mod tests {
     }
 
     async fn build_test_state(
-        temp_dir: &PathBuf,
+        temp_dir: &Path,
         mut config: FrankClawConfig,
         channels: Arc<ChannelSet>,
     ) -> (Arc<GatewayState>, Arc<SqliteSessionStore>) {
@@ -2054,7 +2037,7 @@ mod tests {
 
     #[tokio::test]
     async fn web_inbound_roundtrip_persists_reply_and_metadata() {
-        let temp = TempTestDir::new("frankclaw-gateway-test");
+        let temp = TestTempDir::new("frankclaw-gateway-test");
         let mut config = FrankClawConfig::default();
         config.channels.insert(
             frankclaw_core::types::ChannelId::new("web"),
@@ -2069,7 +2052,7 @@ mod tests {
         let channels = Arc::new(
             frankclaw_channels::load_from_config(&config).expect("channels should load"),
         );
-        let (state, sessions) = build_test_state(&temp.path, config, channels).await;
+        let (state, sessions) = build_test_state(temp.path(), config, channels).await;
 
         let inbound = InboundMessage {
             channel: frankclaw_core::types::ChannelId::new("web"),
@@ -2129,7 +2112,7 @@ mod tests {
 
     #[tokio::test]
     async fn media_upload_and_download_roundtrip_requires_auth_and_uses_store() {
-        let temp = TempTestDir::new("frankclaw-gateway-media-test");
+        let temp = TestTempDir::new("frankclaw-gateway-media-test");
         let mut config = FrankClawConfig::default();
         config.gateway.auth = frankclaw_core::auth::AuthMode::Token {
             token: Some(SecretString::from("super-secret".to_string())),
@@ -2147,7 +2130,7 @@ mod tests {
         let channels = Arc::new(
             frankclaw_channels::load_from_config(&config).expect("channels should load"),
         );
-        let (state, _sessions) = build_test_state(&temp.path, config, channels).await;
+        let (state, _sessions) = build_test_state(temp.path(), config, channels).await;
         let app = build_router(state.clone(), Arc::new(AuthRateLimiter::new(
             state.current_config().gateway.rate_limit.clone(),
         )));
@@ -2206,7 +2189,7 @@ mod tests {
 
     #[tokio::test]
     async fn web_inbound_accepts_attachment_only_messages() {
-        let temp = TempTestDir::new("frankclaw-gateway-web-attachment-test");
+        let temp = TestTempDir::new("frankclaw-gateway-web-attachment-test");
         let mut config = FrankClawConfig::default();
         config.channels.insert(
             frankclaw_core::types::ChannelId::new("web"),
@@ -2221,7 +2204,7 @@ mod tests {
         let channels = Arc::new(
             frankclaw_channels::load_from_config(&config).expect("channels should load"),
         );
-        let (state, sessions) = build_test_state(&temp.path, config, channels).await;
+        let (state, sessions) = build_test_state(temp.path(), config, channels).await;
 
         let inbound = InboundMessage {
             channel: frankclaw_core::types::ChannelId::new("web"),
@@ -2257,7 +2240,7 @@ mod tests {
 
     #[tokio::test]
     async fn web_inbound_http_honors_explicit_session_and_returns_it() {
-        let temp = TempTestDir::new("frankclaw-gateway-web-inbound-http-test");
+        let temp = TestTempDir::new("frankclaw-gateway-web-inbound-http-test");
         let mut config = FrankClawConfig::default();
         config.gateway.auth = frankclaw_core::auth::AuthMode::Token {
             token: Some(SecretString::from("super-secret".to_string())),
@@ -2275,7 +2258,7 @@ mod tests {
         let channels = Arc::new(
             frankclaw_channels::load_from_config(&config).expect("channels should load"),
         );
-        let (state, sessions) = build_test_state(&temp.path, config, channels).await;
+        let (state, sessions) = build_test_state(temp.path(), config, channels).await;
         let app = build_router(state.clone(), Arc::new(AuthRateLimiter::new(
             state.current_config().gateway.rate_limit.clone(),
         )));
@@ -2361,7 +2344,7 @@ mod tests {
 
     #[tokio::test]
     async fn web_outbound_route_only_drains_messages_for_requested_recipient() {
-        let temp = TempTestDir::new("frankclaw-gateway-web-outbound-test");
+        let temp = TestTempDir::new("frankclaw-gateway-web-outbound-test");
         let mut config = FrankClawConfig::default();
         config.gateway.auth = frankclaw_core::auth::AuthMode::Token {
             token: Some(SecretString::from("super-secret".to_string())),
@@ -2379,7 +2362,7 @@ mod tests {
         let channels = Arc::new(
             frankclaw_channels::load_from_config(&config).expect("channels should load"),
         );
-        let (state, _sessions) = build_test_state(&temp.path, config, channels).await;
+        let (state, _sessions) = build_test_state(temp.path(), config, channels).await;
         let web = state.web_channel().expect("web channel should exist");
         web.send(OutboundMessage {
             channel: frankclaw_core::types::ChannelId::new("web"),
@@ -2462,7 +2445,7 @@ mod tests {
 
     #[tokio::test]
     async fn discord_inbound_roundtrip_targets_thread_and_persists_metadata() {
-        let temp = TempTestDir::new("frankclaw-gateway-discord-test");
+        let temp = TestTempDir::new("frankclaw-gateway-discord-test");
         let mut config = FrankClawConfig::default();
         config.channels.insert(
             frankclaw_core::types::ChannelId::new("discord"),
@@ -2488,7 +2471,7 @@ mod tests {
             capture.clone() as Arc<dyn frankclaw_core::channel::ChannelPlugin>,
         );
         let channels = Arc::new(ChannelSet::from_parts(map, None, None));
-        let (state, sessions) = build_test_state(&temp.path, config, channels).await;
+        let (state, sessions) = build_test_state(temp.path(), config, channels).await;
 
         let inbound = InboundMessage {
             channel: frankclaw_core::types::ChannelId::new("discord"),
@@ -2539,7 +2522,7 @@ mod tests {
 
     #[tokio::test]
     async fn telegram_inbound_roundtrip_targets_topic_and_persists_metadata() {
-        let temp = TempTestDir::new("frankclaw-gateway-telegram-test");
+        let temp = TestTempDir::new("frankclaw-gateway-telegram-test");
         let mut config = FrankClawConfig::default();
         config.channels.insert(
             frankclaw_core::types::ChannelId::new("telegram"),
@@ -2565,7 +2548,7 @@ mod tests {
             capture.clone() as Arc<dyn frankclaw_core::channel::ChannelPlugin>,
         );
         let channels = Arc::new(ChannelSet::from_parts(map, None, None));
-        let (state, sessions) = build_test_state(&temp.path, config, channels).await;
+        let (state, sessions) = build_test_state(temp.path(), config, channels).await;
 
         let inbound = InboundMessage {
             channel: frankclaw_core::types::ChannelId::new("telegram"),
@@ -2617,7 +2600,7 @@ mod tests {
 
     #[tokio::test]
     async fn discord_inbound_roundtrip_ignores_unlisted_group_thread() {
-        let temp = TempTestDir::new("frankclaw-gateway-discord-group-filter-test");
+        let temp = TestTempDir::new("frankclaw-gateway-discord-group-filter-test");
         let mut config = FrankClawConfig::default();
         config.channels.insert(
             frankclaw_core::types::ChannelId::new("discord"),
@@ -2644,7 +2627,7 @@ mod tests {
             capture.clone() as Arc<dyn frankclaw_core::channel::ChannelPlugin>,
         );
         let channels = Arc::new(ChannelSet::from_parts(map, None, None));
-        let (state, sessions) = build_test_state(&temp.path, config, channels).await;
+        let (state, sessions) = build_test_state(temp.path(), config, channels).await;
 
         let inbound = InboundMessage {
             channel: frankclaw_core::types::ChannelId::new("discord"),
@@ -2677,7 +2660,7 @@ mod tests {
 
     #[tokio::test]
     async fn slack_inbound_roundtrip_targets_thread_and_persists_metadata() {
-        let temp = TempTestDir::new("frankclaw-gateway-slack-test");
+        let temp = TestTempDir::new("frankclaw-gateway-slack-test");
         let mut config = FrankClawConfig::default();
         config.channels.insert(
             frankclaw_core::types::ChannelId::new("slack"),
@@ -2704,7 +2687,7 @@ mod tests {
             capture.clone() as Arc<dyn frankclaw_core::channel::ChannelPlugin>,
         );
         let channels = Arc::new(ChannelSet::from_parts(map, None, None));
-        let (state, sessions) = build_test_state(&temp.path, config, channels).await;
+        let (state, sessions) = build_test_state(temp.path(), config, channels).await;
 
         let inbound = InboundMessage {
             channel: frankclaw_core::types::ChannelId::new("slack"),
@@ -2758,7 +2741,7 @@ mod tests {
 
     #[tokio::test]
     async fn signal_inbound_roundtrip_targets_group_and_persists_metadata() {
-        let temp = TempTestDir::new("frankclaw-gateway-signal-test");
+        let temp = TestTempDir::new("frankclaw-gateway-signal-test");
         let mut config = FrankClawConfig::default();
         config.channels.insert(
             frankclaw_core::types::ChannelId::new("signal"),
@@ -2785,7 +2768,7 @@ mod tests {
             capture.clone() as Arc<dyn frankclaw_core::channel::ChannelPlugin>,
         );
         let channels = Arc::new(ChannelSet::from_parts(map, None, None));
-        let (state, sessions) = build_test_state(&temp.path, config, channels).await;
+        let (state, sessions) = build_test_state(temp.path(), config, channels).await;
 
         let inbound = InboundMessage {
             channel: frankclaw_core::types::ChannelId::new("signal"),
@@ -2836,7 +2819,7 @@ mod tests {
 
     #[tokio::test]
     async fn webhook_http_route_verifies_signature_and_executes_runtime() {
-        let temp = TempTestDir::new("frankclaw-gateway-webhook-http");
+        let temp = TestTempDir::new("frankclaw-gateway-webhook-http");
         let mut config = FrankClawConfig::default();
         config.hooks.enabled = true;
         config.hooks.token = Some("secret".into());
@@ -2845,7 +2828,7 @@ mod tests {
             "session_key": "default:web:hook-control",
         })];
         let channels = Arc::new(ChannelSet::from_parts(HashMap::new(), None, None));
-        let (state, sessions) = build_test_state(&temp.path, config.clone(), channels).await;
+        let (state, sessions) = build_test_state(temp.path(), config.clone(), channels).await;
         let app = build_router(
             state.clone(),
             Arc::new(AuthRateLimiter::new(config.gateway.rate_limit.clone())),
@@ -2884,7 +2867,7 @@ mod tests {
 
     #[tokio::test]
     async fn whatsapp_webhook_route_verifies_and_processes_inbound_messages() {
-        let temp = TempTestDir::new("frankclaw-gateway-whatsapp-webhook");
+        let temp = TestTempDir::new("frankclaw-gateway-whatsapp-webhook");
         let mut config = FrankClawConfig::default();
         config.channels.insert(
             frankclaw_core::types::ChannelId::new("whatsapp"),
@@ -2917,7 +2900,7 @@ mod tests {
             capture.clone() as Arc<dyn frankclaw_core::channel::ChannelPlugin>,
         );
         let channels = Arc::new(ChannelSet::from_parts(map, None, Some(whatsapp)));
-        let (state, sessions) = build_test_state(&temp.path, config.clone(), channels).await;
+        let (state, sessions) = build_test_state(temp.path(), config.clone(), channels).await;
         let app = build_router(
             state.clone(),
             Arc::new(AuthRateLimiter::new(config.gateway.rate_limit.clone())),
@@ -2993,7 +2976,7 @@ mod tests {
 
     #[tokio::test]
     async fn whatsapp_webhook_route_rejects_unsigned_payloads_when_app_secret_is_configured() {
-        let temp = TempTestDir::new("frankclaw-gateway-whatsapp-webhook-auth");
+        let temp = TestTempDir::new("frankclaw-gateway-whatsapp-webhook-auth");
         let mut config = FrankClawConfig::default();
         config.channels.insert(
             frankclaw_core::types::ChannelId::new("whatsapp"),
@@ -3027,7 +3010,7 @@ mod tests {
             capture.clone() as Arc<dyn frankclaw_core::channel::ChannelPlugin>,
         );
         let channels = Arc::new(ChannelSet::from_parts(map, None, Some(whatsapp)));
-        let (state, sessions) = build_test_state(&temp.path, config.clone(), channels).await;
+        let (state, sessions) = build_test_state(temp.path(), config.clone(), channels).await;
         let app = build_router(
             state.clone(),
             Arc::new(AuthRateLimiter::new(config.gateway.rate_limit.clone())),
@@ -3116,7 +3099,7 @@ mod tests {
     }
 
     async fn build_failing_state(
-        temp_dir: &PathBuf,
+        temp_dir: &Path,
         mut config: FrankClawConfig,
         channels: Arc<ChannelSet>,
     ) -> (Arc<GatewayState>, Arc<SqliteSessionStore>) {
@@ -3159,7 +3142,7 @@ mod tests {
 
     #[tokio::test]
     async fn process_inbound_sends_error_reply_on_model_failure() {
-        let temp = TempTestDir::new("frankclaw-gateway-test-errreply");
+        let temp = TestTempDir::new("frankclaw-gateway-test-errreply");
         let mut config = FrankClawConfig::default();
         config.channels.insert(
             frankclaw_core::types::ChannelId::new("web"),
@@ -3181,7 +3164,7 @@ mod tests {
             capture.clone() as Arc<dyn frankclaw_core::channel::ChannelPlugin>,
         );
         let channels = Arc::new(ChannelSet::from_parts(map, None, None));
-        let (state, _sessions) = build_failing_state(&temp.path, config, channels).await;
+        let (state, _sessions) = build_failing_state(temp.path(), config, channels).await;
 
         let inbound = InboundMessage {
             channel: frankclaw_core::types::ChannelId::new("web"),

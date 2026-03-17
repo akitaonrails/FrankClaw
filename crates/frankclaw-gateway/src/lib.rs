@@ -19,3 +19,6 @@ pub mod tunnel;
 pub mod webhook_limiter;
 pub mod webhooks;
 pub mod ws;
+
+#[cfg(test)]
+pub(crate) mod test_fixtures;

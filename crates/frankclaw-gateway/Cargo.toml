@@ -35,3 +35,6 @@ rand = { workspace = true }
 async-trait = { workspace = true }
 hmac = { workspace = true }
 sha2 = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
