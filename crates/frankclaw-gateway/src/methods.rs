@@ -911,6 +911,7 @@ mod tests {
     use frankclaw_core::types::{AgentId, ChannelId, ConnId, RequestId, Role};
     use frankclaw_media::MediaStore;
     use frankclaw_sessions::SqliteSessionStore;
+    use rstest::{fixture, rstest};
     use tokio::time::{Duration, timeout};
 
     use crate::delivery::{StoredReplyMetadata, set_last_reply_in_metadata};
@@ -941,6 +942,11 @@ mod tests {
             thread_id: None,
             metadata: serde_json::json!({}),
         }
+    }
+
+    #[fixture]
+    fn temp_dir() -> TestTempDir {
+        TestTempDir::new("frankclaw-gateway-methods")
     }
 
     async fn setup_canvas(state: &Arc<GatewayState>) {
@@ -1451,13 +1457,10 @@ mod tests {
         assert!(state.canvas.get("ops").await.is_none());
     }
 
+    #[rstest]
     #[tokio::test]
-    async fn chat_cancel_stops_active_run() {
-        let temp_dir = std::env::temp_dir().join(format!(
-            "frankclaw-gateway-methods-cancel-{}",
-            uuid::Uuid::new_v4()
-        ));
-        let (state, _sessions) = build_test_state(&temp_dir).await;
+    async fn chat_cancel_stops_active_run(temp_dir: TestTempDir) {
+        let (state, _sessions) = build_test_state(temp_dir.path()).await;
 
         // Insert a fake active run token.
         let token = tokio_util::sync::CancellationToken::new();
@@ -1482,69 +1485,37 @@ mod tests {
         );
         assert!(token.is_cancelled());
         assert!(state.active_runs.is_empty());
-
-        let _ = std::fs::remove_file(temp_dir.join("sessions.db"));
-        let _ = std::fs::remove_file(temp_dir.join("pairings.json"));
-        let _ = std::fs::remove_dir_all(temp_dir);
     }
 
+    #[rstest]
+    #[case(serde_json::json!({ "request_id": "nonexistent" }), 404, "cancel-2")]
+    #[case(serde_json::json!({}), 400, "cancel-3")]
     #[tokio::test]
-    async fn chat_cancel_returns_404_for_unknown_run() {
-        let temp_dir = std::env::temp_dir().join(format!(
-            "frankclaw-gateway-methods-cancel-404-{}",
-            uuid::Uuid::new_v4()
-        ));
-        let (state, _sessions) = build_test_state(&temp_dir).await;
+    async fn chat_cancel_returns_expected_error(
+        temp_dir: TestTempDir,
+        #[case] params: serde_json::Value,
+        #[case] expected_code: u16,
+        #[case] request_id: &str,
+    ) {
+        let (state, _sessions) = build_test_state(temp_dir.path()).await;
 
         let response = chat_cancel(
             &state,
             RequestFrame {
-                id: RequestId::Text("cancel-2".into()),
+                id: RequestId::Text(request_id.into()),
                 method: Method::ChatCancel,
-                params: serde_json::json!({ "request_id": "nonexistent" }),
+                params,
             },
         )
         .await;
 
-        assert_eq!(response.error.as_ref().map(|e| e.code), Some(404));
-
-        let _ = std::fs::remove_file(temp_dir.join("sessions.db"));
-        let _ = std::fs::remove_file(temp_dir.join("pairings.json"));
-        let _ = std::fs::remove_dir_all(temp_dir);
+        assert_eq!(response.error.as_ref().map(|e| e.code), Some(expected_code));
     }
 
+    #[rstest]
     #[tokio::test]
-    async fn chat_cancel_requires_request_id() {
-        let temp_dir = std::env::temp_dir().join(format!(
-            "frankclaw-gateway-methods-cancel-400-{}",
-            uuid::Uuid::new_v4()
-        ));
-        let (state, _sessions) = build_test_state(&temp_dir).await;
-
-        let response = chat_cancel(
-            &state,
-            RequestFrame {
-                id: RequestId::Text("cancel-3".into()),
-                method: Method::ChatCancel,
-                params: serde_json::json!({}),
-            },
-        )
-        .await;
-
-        assert_eq!(response.error.as_ref().map(|e| e.code), Some(400));
-
-        let _ = std::fs::remove_file(temp_dir.join("sessions.db"));
-        let _ = std::fs::remove_file(temp_dir.join("pairings.json"));
-        let _ = std::fs::remove_dir_all(temp_dir);
-    }
-
-    #[tokio::test]
-    async fn sessions_delete_removes_session() {
-        let temp_dir = std::env::temp_dir().join(format!(
-            "frankclaw-gateway-methods-delete-{}",
-            uuid::Uuid::new_v4()
-        ));
-        let (state, sessions) = build_test_state(&temp_dir).await;
+    async fn sessions_delete_removes_session(temp_dir: TestTempDir) {
+        let (state, sessions) = build_test_state(temp_dir.path()).await;
         let session_key = SessionKey::from_raw("agent:main:web:default:user-del");
 
         let entry = SessionEntry {
@@ -1576,17 +1547,12 @@ mod tests {
         // Verify it's gone.
         let got = sessions.get(&session_key).await.expect("get should work");
         assert!(got.is_none(), "session should be deleted");
-
-        let _ = std::fs::remove_dir_all(temp_dir);
     }
 
+    #[rstest]
     #[tokio::test]
-    async fn sessions_delete_requires_session_key() {
-        let temp_dir = std::env::temp_dir().join(format!(
-            "frankclaw-gateway-methods-delete-nokey-{}",
-            uuid::Uuid::new_v4()
-        ));
-        let (state, _sessions) = build_test_state(&temp_dir).await;
+    async fn sessions_delete_requires_session_key(temp_dir: TestTempDir) {
+        let (state, _sessions) = build_test_state(temp_dir.path()).await;
 
         let response = sessions_delete(
             &state,
@@ -1598,17 +1564,12 @@ mod tests {
         )
         .await;
         assert_eq!(response.error.as_ref().map(|e| e.code), Some(400));
-
-        let _ = std::fs::remove_dir_all(temp_dir);
     }
 
+    #[rstest]
     #[tokio::test]
-    async fn sessions_patch_updates_metadata() {
-        let temp_dir = std::env::temp_dir().join(format!(
-            "frankclaw-gateway-methods-patch-{}",
-            uuid::Uuid::new_v4()
-        ));
-        let (state, sessions) = build_test_state(&temp_dir).await;
+    async fn sessions_patch_updates_metadata(temp_dir: TestTempDir) {
+        let (state, sessions) = build_test_state(temp_dir.path()).await;
         let session_key = SessionKey::from_raw("agent:main:web:default:user-patch");
 
         let entry = SessionEntry {
@@ -1642,17 +1603,12 @@ mod tests {
         let updated = sessions.get(&session_key).await.unwrap().unwrap();
         assert_eq!(updated.metadata["label"], "new");
         assert_eq!(updated.metadata["extra"], 42);
-
-        let _ = std::fs::remove_dir_all(temp_dir);
     }
 
+    #[rstest]
     #[tokio::test]
-    async fn sessions_patch_returns_404_for_missing_session() {
-        let temp_dir = std::env::temp_dir().join(format!(
-            "frankclaw-gateway-methods-patch-404-{}",
-            uuid::Uuid::new_v4()
-        ));
-        let (state, _sessions) = build_test_state(&temp_dir).await;
+    async fn sessions_patch_returns_404_for_missing_session(temp_dir: TestTempDir) {
+        let (state, _sessions) = build_test_state(temp_dir.path()).await;
 
         let response = sessions_patch(
             &state,
@@ -1667,17 +1623,12 @@ mod tests {
         )
         .await;
         assert_eq!(response.error.as_ref().map(|e| e.code), Some(404));
-
-        let _ = std::fs::remove_dir_all(temp_dir);
     }
 
+    #[rstest]
     #[tokio::test]
-    async fn usage_get_returns_session_usage() {
-        let temp_dir = std::env::temp_dir().join(format!(
-            "frankclaw-gateway-methods-usage-{}",
-            uuid::Uuid::new_v4()
-        ));
-        let (state, sessions) = build_test_state(&temp_dir).await;
+    async fn usage_get_returns_session_usage(temp_dir: TestTempDir) {
+        let (state, sessions) = build_test_state(temp_dir.path()).await;
         let session_key = SessionKey::from_raw("agent:main:web:default:user-usage");
 
         let entry = SessionEntry {
@@ -1714,8 +1665,6 @@ mod tests {
         assert_eq!(result["totals"]["output_tokens"], 50);
         assert_eq!(result["totals"]["turns"], 3);
         assert_eq!(result["count"], 1);
-
-        let _ = std::fs::remove_dir_all(temp_dir);
     }
 }
 
