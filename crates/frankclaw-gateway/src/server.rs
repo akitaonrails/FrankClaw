@@ -1722,6 +1722,7 @@ mod tests {
     use frankclaw_core::types::Role;
     use frankclaw_sessions::SqliteSessionStore;
     use frankclaw_media::MediaStore;
+    use rstest::rstest;
     use secrecy::{ExposeSecret, SecretString};
     use tower::ServiceExt;
     use crate::test_fixtures::TestTempDir;
@@ -1841,6 +1842,173 @@ mod tests {
         async fn drain(&self) -> Vec<OutboundMessage> {
             let mut sent = self.sent.lock().await;
             std::mem::take(&mut *sent)
+        }
+    }
+
+    #[derive(Debug)]
+    struct ChannelRoundtripCase {
+        channel_id: &'static str,
+        label: &'static str,
+        account: serde_json::Value,
+        sender_id: &'static str,
+        thread_id: &'static str,
+        text: &'static str,
+        platform_message_id: &'static str,
+        expected_reply_to: Option<&'static str>,
+    }
+
+    impl ChannelRoundtripCase {
+        fn config(&self) -> FrankClawConfig {
+            let mut config = FrankClawConfig::default();
+            config.channels.insert(
+                frankclaw_core::types::ChannelId::new(self.channel_id),
+                ChannelConfig {
+                    enabled: true,
+                    accounts: vec![self.account.clone()],
+                    extra: serde_json::json!({
+                        "dm_policy": "open",
+                        "require_mention_for_groups": true
+                    }),
+                },
+            );
+            config
+        }
+
+        fn inbound(&self) -> InboundMessage {
+            InboundMessage {
+                channel: frankclaw_core::types::ChannelId::new(self.channel_id),
+                account_id: "default".into(),
+                sender_id: self.sender_id.into(),
+                sender_name: Some("User".into()),
+                thread_id: Some(self.thread_id.into()),
+                is_group: true,
+                is_mention: true,
+                text: Some(self.text.into()),
+                attachments: Vec::new(),
+                platform_message_id: Some(self.platform_message_id.into()),
+                timestamp: chrono::Utc::now(),
+            }
+        }
+    }
+
+    fn capture_channel_set(
+        channel_id: &'static str,
+        capture: Arc<CaptureChannel>,
+    ) -> Arc<ChannelSet> {
+        let mut map: HashMap<
+            frankclaw_core::types::ChannelId,
+            Arc<dyn frankclaw_core::channel::ChannelPlugin>,
+        > = HashMap::new();
+        map.insert(
+            frankclaw_core::types::ChannelId::new(channel_id),
+            capture as Arc<dyn frankclaw_core::channel::ChannelPlugin>,
+        );
+        Arc::new(ChannelSet::from_parts(map, None, None))
+    }
+
+    fn discord_roundtrip_case() -> ChannelRoundtripCase {
+        ChannelRoundtripCase {
+            channel_id: "discord",
+            label: "Discord",
+            account: serde_json::json!({ "bot_token": "test-token" }),
+            sender_id: "user-1",
+            thread_id: "channel-42",
+            text: "<@bot> hello",
+            platform_message_id: "discord-msg-1",
+            expected_reply_to: Some("discord-msg-1"),
+        }
+    }
+
+    fn telegram_roundtrip_case() -> ChannelRoundtripCase {
+        ChannelRoundtripCase {
+            channel_id: "telegram",
+            label: "Telegram",
+            account: serde_json::json!({ "bot_token": "test-token" }),
+            sender_id: "user-1",
+            thread_id: "-100123:topic:7",
+            text: "@bot hello",
+            platform_message_id: "99",
+            expected_reply_to: Some("99"),
+        }
+    }
+
+    fn slack_roundtrip_case() -> ChannelRoundtripCase {
+        ChannelRoundtripCase {
+            channel_id: "slack",
+            label: "Slack",
+            account: serde_json::json!({
+                "app_token": "xapp-test",
+                "bot_token": "xoxb-test"
+            }),
+            sender_id: "user-1",
+            thread_id: "C123:thread:1710000000.000001",
+            text: "<@bot> hello",
+            platform_message_id: "1710000000.123456",
+            expected_reply_to: Some("1710000000.123456"),
+        }
+    }
+
+    fn signal_roundtrip_case() -> ChannelRoundtripCase {
+        ChannelRoundtripCase {
+            channel_id: "signal",
+            label: "Signal",
+            account: serde_json::json!({
+                "base_url": "http://127.0.0.1:8080",
+                "account": "+15551234567"
+            }),
+            sender_id: "+15550001111",
+            thread_id: "group:group-42",
+            text: "hello",
+            platform_message_id: "1710000000123",
+            expected_reply_to: Some("1710000000123"),
+        }
+    }
+
+    async fn assert_channel_roundtrip(case: ChannelRoundtripCase) {
+        let temp = TestTempDir::new("frankclaw-gateway-channel-roundtrip");
+        let capture = Arc::new(CaptureChannel::new(case.channel_id, case.label));
+        let channels = capture_channel_set(case.channel_id, capture.clone());
+        let (state, sessions) = build_test_state(temp.path(), case.config(), channels).await;
+
+        let inbound = case.inbound();
+        let session_key = state.runtime.session_key_for_inbound(&inbound);
+
+        process_inbound_message(state.clone(), inbound)
+            .await
+            .expect("inbound processing should succeed");
+
+        let outbound = capture.drain().await;
+        assert_eq!(outbound.len(), 1);
+        assert_eq!(outbound[0].thread_id.as_deref(), Some(case.thread_id));
+        assert_eq!(outbound[0].reply_to.as_deref(), case.expected_reply_to);
+        assert_eq!(outbound[0].text, "mock reply");
+
+        let transcript = sessions
+            .get_transcript(&session_key, 10, None)
+            .await
+            .expect("transcript should load");
+        assert_eq!(transcript.len(), 2);
+        assert_eq!(transcript[0].role, Role::User);
+        assert_eq!(transcript[1].role, Role::Assistant);
+
+        let session = sessions
+            .get(&session_key)
+            .await
+            .expect("session lookup should work")
+            .expect("session should exist");
+        assert_eq!(
+            session.metadata["delivery"]["last_reply"]["thread_id"],
+            serde_json::json!(case.thread_id)
+        );
+        assert_eq!(
+            session.metadata["delivery"]["last_reply"]["content"],
+            serde_json::json!("mock reply")
+        );
+        if let Some(reply_to) = case.expected_reply_to {
+            assert_eq!(
+                session.metadata["delivery"]["last_reply"]["reply_to"],
+                serde_json::json!(reply_to)
+            );
         }
     }
 
@@ -2443,159 +2611,16 @@ mod tests {
         );
     }
 
+    #[rstest]
+    #[case::discord(discord_roundtrip_case())]
+    #[case::telegram(telegram_roundtrip_case())]
+    #[case::slack(slack_roundtrip_case())]
+    #[case::signal(signal_roundtrip_case())]
     #[tokio::test]
-    async fn discord_inbound_roundtrip_targets_thread_and_persists_metadata() {
-        let temp = TestTempDir::new("frankclaw-gateway-discord-test");
-        let mut config = FrankClawConfig::default();
-        config.channels.insert(
-            frankclaw_core::types::ChannelId::new("discord"),
-            ChannelConfig {
-                enabled: true,
-                accounts: vec![serde_json::json!({
-                    "bot_token": "test-token"
-                })],
-                extra: serde_json::json!({
-                    "dm_policy": "open",
-                    "require_mention_for_groups": true
-                }),
-            },
-        );
-
-        let capture = Arc::new(CaptureChannel::new("discord", "Discord"));
-        let mut map: HashMap<
-            frankclaw_core::types::ChannelId,
-            Arc<dyn frankclaw_core::channel::ChannelPlugin>,
-        > = HashMap::new();
-        map.insert(
-            frankclaw_core::types::ChannelId::new("discord"),
-            capture.clone() as Arc<dyn frankclaw_core::channel::ChannelPlugin>,
-        );
-        let channels = Arc::new(ChannelSet::from_parts(map, None, None));
-        let (state, sessions) = build_test_state(temp.path(), config, channels).await;
-
-        let inbound = InboundMessage {
-            channel: frankclaw_core::types::ChannelId::new("discord"),
-            account_id: "default".into(),
-            sender_id: "user-1".into(),
-            sender_name: Some("User".into()),
-            thread_id: Some("channel-42".into()),
-            is_group: true,
-            is_mention: true,
-            text: Some("<@bot> hello".into()),
-            attachments: Vec::new(),
-            platform_message_id: Some("discord-msg-1".into()),
-            timestamp: chrono::Utc::now(),
-        };
-        let session_key = state.runtime.session_key_for_inbound(&inbound);
-
-        process_inbound_message(state.clone(), inbound)
-            .await
-            .expect("inbound processing should succeed");
-
-        let outbound = capture.drain().await;
-        assert_eq!(outbound.len(), 1);
-        assert_eq!(outbound[0].thread_id.as_deref(), Some("channel-42"));
-        assert_eq!(outbound[0].text, "mock reply");
-
-        let transcript = sessions
-            .get_transcript(&session_key, 10, None)
-            .await
-            .expect("transcript should load");
-        assert_eq!(transcript.len(), 2);
-        assert_eq!(transcript[0].role, Role::User);
-        assert_eq!(transcript[1].role, Role::Assistant);
-
-        let session = sessions
-            .get(&session_key)
-            .await
-            .expect("session lookup should work")
-            .expect("session should exist");
-        assert_eq!(
-            session.metadata["delivery"]["last_reply"]["thread_id"],
-            serde_json::json!("channel-42")
-        );
-        assert_eq!(
-            session.metadata["delivery"]["last_reply"]["content"],
-            serde_json::json!("mock reply")
-        );
-    }
-
-    #[tokio::test]
-    async fn telegram_inbound_roundtrip_targets_topic_and_persists_metadata() {
-        let temp = TestTempDir::new("frankclaw-gateway-telegram-test");
-        let mut config = FrankClawConfig::default();
-        config.channels.insert(
-            frankclaw_core::types::ChannelId::new("telegram"),
-            ChannelConfig {
-                enabled: true,
-                accounts: vec![serde_json::json!({
-                    "bot_token": "test-token"
-                })],
-                extra: serde_json::json!({
-                    "dm_policy": "open",
-                    "require_mention_for_groups": true
-                }),
-            },
-        );
-
-        let capture = Arc::new(CaptureChannel::new("telegram", "Telegram"));
-        let mut map: HashMap<
-            frankclaw_core::types::ChannelId,
-            Arc<dyn frankclaw_core::channel::ChannelPlugin>,
-        > = HashMap::new();
-        map.insert(
-            frankclaw_core::types::ChannelId::new("telegram"),
-            capture.clone() as Arc<dyn frankclaw_core::channel::ChannelPlugin>,
-        );
-        let channels = Arc::new(ChannelSet::from_parts(map, None, None));
-        let (state, sessions) = build_test_state(temp.path(), config, channels).await;
-
-        let inbound = InboundMessage {
-            channel: frankclaw_core::types::ChannelId::new("telegram"),
-            account_id: "default".into(),
-            sender_id: "user-1".into(),
-            sender_name: Some("User".into()),
-            thread_id: Some("-100123:topic:7".into()),
-            is_group: true,
-            is_mention: true,
-            text: Some("@bot hello".into()),
-            attachments: Vec::new(),
-            platform_message_id: Some("99".into()),
-            timestamp: chrono::Utc::now(),
-        };
-        let session_key = state.runtime.session_key_for_inbound(&inbound);
-
-        process_inbound_message(state.clone(), inbound)
-            .await
-            .expect("inbound processing should succeed");
-
-        let outbound = capture.drain().await;
-        assert_eq!(outbound.len(), 1);
-        assert_eq!(outbound[0].thread_id.as_deref(), Some("-100123:topic:7"));
-        assert_eq!(outbound[0].reply_to.as_deref(), Some("99"));
-        assert_eq!(outbound[0].text, "mock reply");
-
-        let transcript = sessions
-            .get_transcript(&session_key, 10, None)
-            .await
-            .expect("transcript should load");
-        assert_eq!(transcript.len(), 2);
-        assert_eq!(transcript[0].role, Role::User);
-        assert_eq!(transcript[1].role, Role::Assistant);
-
-        let session = sessions
-            .get(&session_key)
-            .await
-            .expect("session lookup should work")
-            .expect("session should exist");
-        assert_eq!(
-            session.metadata["delivery"]["last_reply"]["thread_id"],
-            serde_json::json!("-100123:topic:7")
-        );
-        assert_eq!(
-            session.metadata["delivery"]["last_reply"]["reply_to"],
-            serde_json::json!("99")
-        );
+    async fn inbound_roundtrip_targets_thread_and_persists_metadata(
+        #[case] case: ChannelRoundtripCase,
+    ) {
+        assert_channel_roundtrip(case).await;
     }
 
     #[tokio::test]
@@ -2658,164 +2683,6 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn slack_inbound_roundtrip_targets_thread_and_persists_metadata() {
-        let temp = TestTempDir::new("frankclaw-gateway-slack-test");
-        let mut config = FrankClawConfig::default();
-        config.channels.insert(
-            frankclaw_core::types::ChannelId::new("slack"),
-            ChannelConfig {
-                enabled: true,
-                accounts: vec![serde_json::json!({
-                    "app_token": "xapp-test",
-                    "bot_token": "xoxb-test"
-                })],
-                extra: serde_json::json!({
-                    "dm_policy": "open",
-                    "require_mention_for_groups": true
-                }),
-            },
-        );
-
-        let capture = Arc::new(CaptureChannel::new("slack", "Slack"));
-        let mut map: HashMap<
-            frankclaw_core::types::ChannelId,
-            Arc<dyn frankclaw_core::channel::ChannelPlugin>,
-        > = HashMap::new();
-        map.insert(
-            frankclaw_core::types::ChannelId::new("slack"),
-            capture.clone() as Arc<dyn frankclaw_core::channel::ChannelPlugin>,
-        );
-        let channels = Arc::new(ChannelSet::from_parts(map, None, None));
-        let (state, sessions) = build_test_state(temp.path(), config, channels).await;
-
-        let inbound = InboundMessage {
-            channel: frankclaw_core::types::ChannelId::new("slack"),
-            account_id: "default".into(),
-            sender_id: "user-1".into(),
-            sender_name: Some("User".into()),
-            thread_id: Some("C123:thread:1710000000.000001".into()),
-            is_group: true,
-            is_mention: true,
-            text: Some("<@bot> hello".into()),
-            attachments: Vec::new(),
-            platform_message_id: Some("1710000000.123456".into()),
-            timestamp: chrono::Utc::now(),
-        };
-        let session_key = state.runtime.session_key_for_inbound(&inbound);
-
-        process_inbound_message(state.clone(), inbound)
-            .await
-            .expect("inbound processing should succeed");
-
-        let outbound = capture.drain().await;
-        assert_eq!(outbound.len(), 1);
-        assert_eq!(
-            outbound[0].thread_id.as_deref(),
-            Some("C123:thread:1710000000.000001")
-        );
-        assert_eq!(outbound[0].text, "mock reply");
-
-        let transcript = sessions
-            .get_transcript(&session_key, 10, None)
-            .await
-            .expect("transcript should load");
-        assert_eq!(transcript.len(), 2);
-        assert_eq!(transcript[0].role, Role::User);
-        assert_eq!(transcript[1].role, Role::Assistant);
-
-        let session = sessions
-            .get(&session_key)
-            .await
-            .expect("session lookup should work")
-            .expect("session should exist");
-        assert_eq!(
-            session.metadata["delivery"]["last_reply"]["thread_id"],
-            serde_json::json!("C123:thread:1710000000.000001")
-        );
-        assert_eq!(
-            session.metadata["delivery"]["last_reply"]["reply_to"],
-            serde_json::json!("1710000000.123456")
-        );
-    }
-
-    #[tokio::test]
-    async fn signal_inbound_roundtrip_targets_group_and_persists_metadata() {
-        let temp = TestTempDir::new("frankclaw-gateway-signal-test");
-        let mut config = FrankClawConfig::default();
-        config.channels.insert(
-            frankclaw_core::types::ChannelId::new("signal"),
-            ChannelConfig {
-                enabled: true,
-                accounts: vec![serde_json::json!({
-                    "base_url": "http://127.0.0.1:8080",
-                    "account": "+15551234567"
-                })],
-                extra: serde_json::json!({
-                    "dm_policy": "open",
-                    "require_mention_for_groups": true
-                }),
-            },
-        );
-
-        let capture = Arc::new(CaptureChannel::new("signal", "Signal"));
-        let mut map: HashMap<
-            frankclaw_core::types::ChannelId,
-            Arc<dyn frankclaw_core::channel::ChannelPlugin>,
-        > = HashMap::new();
-        map.insert(
-            frankclaw_core::types::ChannelId::new("signal"),
-            capture.clone() as Arc<dyn frankclaw_core::channel::ChannelPlugin>,
-        );
-        let channels = Arc::new(ChannelSet::from_parts(map, None, None));
-        let (state, sessions) = build_test_state(temp.path(), config, channels).await;
-
-        let inbound = InboundMessage {
-            channel: frankclaw_core::types::ChannelId::new("signal"),
-            account_id: "default".into(),
-            sender_id: "+15550001111".into(),
-            sender_name: Some("User".into()),
-            thread_id: Some("group:group-42".into()),
-            is_group: true,
-            is_mention: true,
-            text: Some("hello".into()),
-            attachments: Vec::new(),
-            platform_message_id: Some("1710000000123".into()),
-            timestamp: chrono::Utc::now(),
-        };
-        let session_key = state.runtime.session_key_for_inbound(&inbound);
-
-        process_inbound_message(state.clone(), inbound)
-            .await
-            .expect("inbound processing should succeed");
-
-        let outbound = capture.drain().await;
-        assert_eq!(outbound.len(), 1);
-        assert_eq!(outbound[0].thread_id.as_deref(), Some("group:group-42"));
-        assert_eq!(outbound[0].text, "mock reply");
-
-        let transcript = sessions
-            .get_transcript(&session_key, 10, None)
-            .await
-            .expect("transcript should load");
-        assert_eq!(transcript.len(), 2);
-        assert_eq!(transcript[0].role, Role::User);
-        assert_eq!(transcript[1].role, Role::Assistant);
-
-        let session = sessions
-            .get(&session_key)
-            .await
-            .expect("session lookup should work")
-            .expect("session should exist");
-        assert_eq!(
-            session.metadata["delivery"]["last_reply"]["thread_id"],
-            serde_json::json!("group:group-42")
-        );
-        assert_eq!(
-            session.metadata["delivery"]["last_reply"]["reply_to"],
-            serde_json::json!("1710000000123")
-        );
-    }
 
     #[tokio::test]
     async fn webhook_http_route_verifies_signature_and_executes_runtime() {

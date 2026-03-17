@@ -155,11 +155,10 @@ frankclaw-cron = { path = "crates/frankclaw-cron" }
 frankclaw-media = { path = "crates/frankclaw-media" }
 frankclaw-tools = { path = "crates/frankclaw-tools" }
 frankclaw-plugin-sdk = { path = "crates/frankclaw-plugin-sdk" }
+rstest = "0.25"
 tempfile = "3"
 
 # Testing
-rstest = "0.25"
-tempfile = "3"
 
 [profile.release]
 lto = true
