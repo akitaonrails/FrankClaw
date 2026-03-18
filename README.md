@@ -131,8 +131,8 @@ For channel setup, see [CHANNEL_SETUP.md](docs/CHANNEL_SETUP.md), `examples/chan
 ### 1. Build
 
 ```bash
-git clone https://github.com/frankclaw/frankclaw.git
-cd frankclaw
+git clone https://github.com/akitaonrails/FrankClaw.git
+cd FrankClaw
 cargo build --release
 ```
 
