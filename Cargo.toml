@@ -75,6 +75,7 @@ rustyline = "15"
 
 # Regex
 regex = "1"
+llm-prices = "1.8.0"
 
 # Logging
 tracing = "0.1"

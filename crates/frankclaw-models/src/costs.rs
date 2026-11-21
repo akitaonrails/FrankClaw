@@ -14,6 +14,13 @@ pub fn model_cost(model_id: &str) -> Option<(f64, f64)> {
         return Some((0.0, 0.0));
     }
 
+    // Dated list prices from llm-prices (USD per 1M tokens); the table below covers retired ids.
+    if let Some(p) = llm_prices::lookup(model_id) {
+        if let (Some(input), Some(output)) = (p.input, p.output) {
+            return Some((input / 1e6, output / 1e6));
+        }
+    }
+
     // Normalize: strip provider prefixes (e.g., "openai/gpt-4o" -> "gpt-4o")
     let id = model_id
         .rsplit_once('/')
@@ -38,10 +45,7 @@ pub fn model_cost(model_id: &str) -> Option<(f64, f64)> {
         "o1-mini" | "o1-mini-2024-09-12" => Some((0.000003, 0.000012)),
 
         // Anthropic
-        "claude-opus-4-6"
-        | "claude-opus-4-5"
-        | "claude-opus-4-5-20251101"
-        | "claude-opus-4-1"
+        "claude-opus-4-1"
         | "claude-opus-4-1-20250805"
         | "claude-opus-4-0"
         | "claude-opus-4-20250514"
@@ -56,10 +60,7 @@ pub fn model_cost(model_id: &str) -> Option<(f64, f64)> {
         | "claude-3-7-sonnet-latest"
         | "claude-3-5-sonnet-20241022"
         | "claude-3-5-sonnet-latest" => Some((0.000003, 0.000015)),
-        "claude-haiku-4-5"
-        | "claude-haiku-4-5-20251001"
-        | "claude-3-5-haiku-20241022"
-        | "claude-3-5-haiku-latest" => Some((0.0000008, 0.000004)),
+        "claude-3-5-haiku-20241022" | "claude-3-5-haiku-latest" => Some((0.0000008, 0.000004)),
         "claude-3-haiku-20240307" => Some((0.00000025, 0.00000125)),
 
         // Ollama / local models -- free
@@ -104,6 +105,18 @@ mod tests {
         let (input, output) = model_cost(model).expect("expected cost for known model");
         assert!(input > 0.0, "expected positive input cost for {model}");
         assert!(output > input, "expected output cost > input cost for {model}");
+    }
+
+    #[rstest]
+    #[case("claude-opus-4-6", 5.0, 25.0)]
+    #[case("claude-opus-4-5-20251101", 5.0, 25.0)]
+    #[case("claude-haiku-4-5-20251001", 1.0, 5.0)]
+    #[case("gpt-5", 1.25, 10.0)]
+    #[case("gemini-2.5-pro", 1.25, 10.0)]
+    fn current_models_use_list_price(#[case] model: &str, #[case] input: f64, #[case] output: f64) {
+        let (i, o) = model_cost(model).expect("expected cost for current model");
+        assert!((i * 1e6 - input).abs() < 1e-9, "{model} input {i}");
+        assert!((o * 1e6 - output).abs() < 1e-9, "{model} output {o}");
     }
 
     #[test]
